@@ -1,0 +1,6 @@
+node_modules/
+.env
+aula-ai.db
+aula-ai.db-journal
+aula-ai.db-wal
+aula-ai.db-shm

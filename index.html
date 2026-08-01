@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>jonIAs — Assistente de Aulas</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="banner-erro" class="banner-erro oculto"></div>
+
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo" id="nome-aula">carregando…</span>
+    </div>
+    <div class="topo-status">
+      <div class="stat">
+        <span class="stat-valor" id="tempo-aula">00:00</span>
+        <span class="stat-rotulo">duração</span>
+      </div>
+      <div class="stat">
+        <span class="stat-valor" id="total-palavras">0</span>
+        <span class="stat-rotulo">palavras</span>
+      </div>
+      <div class="stat">
+        <span class="stat-valor" id="total-blocos">0</span>
+        <span class="stat-rotulo">blocos</span>
+      </div>
+    </div>
+    <div class="topo-acoes">
+      <a href="/aulas" class="btn-topo">📚 Minhas aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Coluna do robô + controles -->
+    <aside class="painel painel-robo">
+      <div class="robo-palco" id="robo" data-estado="idle">
+        <div class="robo">
+          <div class="antena"><div class="antena-tip"></div></div>
+          <div class="cabeca">
+            <div class="olhos">
+              <div class="olho"></div>
+              <div class="olho"></div>
+            </div>
+            <div class="boca"></div>
+          </div>
+          <div class="corpo">
+            <div class="corpo-luz"></div>
+          </div>
+        </div>
+        <div class="ondas" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="pensando" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <p class="robo-nome">jon<span class="grad">IA</span>s</p>
+      <p class="robo-status" id="robo-status">jonIAs pronto para começar</p>
+
+      <div class="controles">
+        <button id="btn-iniciar" class="btn btn-primario">
+          <span class="btn-icone">▶</span> Iniciar aula
+        </button>
+        <button id="btn-pausar" class="btn btn-secundario" disabled>
+          <span class="btn-icone">⏸</span> Pausar
+        </button>
+        <button id="btn-encerrar" class="btn btn-perigo" disabled>
+          <span class="btn-icone">■</span> Encerrar aula
+        </button>
+      </div>
+
+      <div class="progresso-bloco">
+        <div class="progresso-info">
+          <span>Próximo bloco de anotações</span>
+          <span id="progresso-texto">0 / 400</span>
+        </div>
+        <div class="progresso-barra">
+          <div class="progresso-preenchido" id="progresso-preenchido"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Painel central: anotações -->
+    <section class="painel painel-anotacoes">
+      <h2>📝 Anotações da aula</h2>
+      <div class="anotacoes-lista" id="anotacoes-lista">
+        <div class="estado-vazio" id="anotacoes-vazio">
+          <p>As anotações do jonIAs aparecerão aqui,<br />organizadas em cards a cada bloco de fala.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Painel lateral: transcrição -->
+    <aside class="painel painel-transcricao">
+      <h2>🎙️ Transcrição ao vivo</h2>
+      <div class="transcricao-scroll" id="transcricao-scroll">
+        <div id="transcricao-final"></div>
+        <span id="transcricao-interina" class="interina"></span>
+        <div class="estado-vazio" id="transcricao-vazio">
+          <p>A fala transcrita aparecerá aqui em tempo real.</p>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Aviso discreto (toast) para falhas de API -->
+  <div id="aviso" class="aviso" role="status"></div>
+
+  <!-- Modal do resumo final da aula -->
+  <div id="modal-resumo" class="modal oculto">
+    <div class="modal-caixa">
+      <div class="modal-cabecalho">
+        <h2>📋 Resumo da aula</h2>
+        <button id="btn-fechar-resumo" class="btn-fechar" title="Fechar">✕</button>
+      </div>
+      <div id="resumo-conteudo" class="modal-conteudo"></div>
+      <div class="modal-rodape modal-rodape-multi">
+        <a id="btn-ver-aula" class="btn btn-secundario">📚 Ir para Minhas Aulas</a>
+        <div class="modal-rodape-grupo">
+          <button id="btn-baixar-resumo" class="btn btn-secundario">
+            <span class="btn-icone">⬇</span> .md
+          </button>
+          <a id="btn-baixar-docx" class="btn btn-secundario" download>
+            <span class="btn-icone">⬇</span> Word
+          </a>
+          <a id="btn-baixar-pdf" class="btn btn-primario" download>
+            <span class="btn-icone">⬇</span> PDF
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/markdown.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

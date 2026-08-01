@@ -1,0 +1,19 @@
+{
+  "name": "aula-ai",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Anotações de aula em tempo real com transcrição e API do Claude",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "better-sqlite3": "^13.0.2",
+    "docx": "^9.7.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "puppeteer-core": "^25.4.0"
+  }
+}

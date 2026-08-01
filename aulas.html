@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Minhas Aulas — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">minhas aulas</span>
+    </div>
+    <div class="topo-acoes">
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista">
+    <div class="lista-controles">
+      <input
+        type="search"
+        id="campo-busca"
+        class="campo-busca"
+        placeholder="🔍 Buscar aula pelo nome…"
+      />
+      <button id="btn-nova-aula" class="btn btn-primario">
+        <span class="btn-icone">＋</span> Nova Aula
+      </button>
+    </div>
+
+    <div id="lista-aulas" class="lista-aulas"></div>
+    <div id="lista-vazia" class="estado-vazio oculto">
+      <p>Nenhuma aula por aqui ainda.<br />Clique em <strong>Nova Aula</strong> para começar.</p>
+    </div>
+  </main>
+
+  <!-- Modal: nome da aula (criar / renomear) -->
+  <div id="modal-nome" class="modal oculto">
+    <div class="modal-caixa modal-pequena">
+      <div class="modal-cabecalho">
+        <h2 id="modal-nome-titulo">Nova Aula</h2>
+        <button class="btn-fechar" data-fechar="modal-nome" title="Fechar">✕</button>
+      </div>
+      <div class="modal-conteudo">
+        <label class="campo">
+          <span>Nome da aula</span>
+          <input type="text" id="campo-nome-aula" placeholder="Ex.: Biologia — Fotossíntese" maxlength="120" />
+        </label>
+        <p id="modal-nome-erro" class="login-erro oculto"></p>
+      </div>
+      <div class="modal-rodape">
+        <button id="btn-confirmar-nome" class="btn btn-primario">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: confirmação de exclusão -->
+  <div id="modal-excluir" class="modal oculto">
+    <div class="modal-caixa modal-pequena">
+      <div class="modal-cabecalho">
+        <h2>Excluir aula</h2>
+        <button class="btn-fechar" data-fechar="modal-excluir" title="Fechar">✕</button>
+      </div>
+      <div class="modal-conteudo">
+        <p id="texto-excluir">Tem certeza?</p>
+        <p class="texto-suave">As anotações, a transcrição e o resumo desta aula serão apagados definitivamente.</p>
+      </div>
+      <div class="modal-rodape">
+        <button id="btn-cancelar-excluir" class="btn btn-secundario">Cancelar</button>
+        <button id="btn-confirmar-excluir" class="btn btn-perigo">Excluir</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/aulas.js"></script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aula — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo" id="nome-aula">carregando…</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/aulas" class="btn-topo">📚 Minhas aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-visualizacao">
+    <div class="visualizacao-cabecalho">
+      <div>
+        <h2 id="titulo-aula">…</h2>
+        <div class="aula-meta" id="meta-aula"></div>
+      </div>
+      <div class="visualizacao-acoes">
+        <a id="btn-pdf" class="btn btn-primario" download>
+          <span class="btn-icone">⬇</span> Baixar PDF
+        </a>
+        <a id="btn-docx" class="btn btn-secundario" download>
+          <span class="btn-icone">⬇</span> Baixar Word
+        </a>
+      </div>
+    </div>
+
+    <div class="visualizacao-grade">
+      <section class="painel">
+        <h2>📋 Resumo da aula</h2>
+        <div id="resumo" class="modal-conteudo sem-padding"></div>
+        <p id="resumo-vazio" class="estado-vazio oculto">Nenhum resumo foi gerado para esta aula.</p>
+      </section>
+
+      <section class="painel">
+        <h2>📝 Anotações (<span id="total-anotacoes">0</span>)</h2>
+        <div id="lista-anotacoes" class="anotacoes-cronologicas"></div>
+        <p id="anotacoes-vazio" class="estado-vazio oculto">Nenhuma anotação registrada.</p>
+      </section>
+    </div>
+
+    <details class="transcricao-detalhes">
+      <summary>🎙️ Ver transcrição completa</summary>
+      <p id="transcricao-completa"></p>
+    </details>
+  </main>
+
+  <script src="/js/markdown.js"></script>
+  <script src="/js/aula-view.js"></script>
+</body>
+</html>

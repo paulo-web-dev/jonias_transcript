@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Entrar — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="pagina-login">
+  <main class="login-caixa">
+    <div class="login-robo" aria-hidden="true">
+      <div class="robo">
+        <div class="antena"><div class="antena-tip"></div></div>
+        <div class="cabeca">
+          <div class="olhos"><div class="olho"></div><div class="olho"></div></div>
+          <div class="boca"></div>
+        </div>
+        <div class="corpo"><div class="corpo-luz"></div></div>
+      </div>
+    </div>
+
+    <h1>jon<span class="grad">IA</span>s</h1>
+    <p class="login-subtitulo">Assistente de Aulas</p>
+
+    <form id="form-login" autocomplete="off">
+      <label class="campo">
+        <span>Usuário</span>
+        <input type="text" id="usuario" required autofocus />
+      </label>
+      <label class="campo">
+        <span>Senha</span>
+        <input type="password" id="senha" required />
+      </label>
+      <p id="login-erro" class="login-erro oculto"></p>
+      <button type="submit" class="btn btn-primario btn-largo">Entrar</button>
+    </form>
+  </main>
+
+  <script src="/js/login.js"></script>
+</body>
+</html>

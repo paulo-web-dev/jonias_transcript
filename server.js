@@ -1,0 +1,385 @@
+"use strict";
+
+require("dotenv").config();
+
+const path = require("path");
+const express = require("express");
+const session = require("express-session");
+const Anthropic = require("@anthropic-ai/sdk");
+
+const db = require("./db.js");
+const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
+
+const app = express();
+const PORT = process.env.PORT || 8000;
+const MODELO = "claude-haiku-4-5";
+
+app.use(express.json({ limit: "2mb" }));
+
+if (!process.env.ANTHROPIC_API_KEY) {
+  console.warn(
+    "\n⚠  ANTHROPIC_API_KEY não encontrada. Copie .env.example para .env e adicione sua chave.\n"
+  );
+}
+if (!process.env.ADMIN_USER || !process.env.ADMIN_PASS) {
+  console.warn("⚠  ADMIN_USER/ADMIN_PASS não configurados no .env — o login não funcionará.\n");
+}
+if (!process.env.SESSION_SECRET) {
+  console.warn("⚠  SESSION_SECRET não configurado no .env — usando valor de desenvolvimento.\n");
+}
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "aula-ai-dev-secret-trocar-em-producao",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 1000 * 60 * 60 * 12, // 12 horas
+    },
+  })
+);
+
+const anthropic = new Anthropic(); // lê ANTHROPIC_API_KEY do ambiente
+
+// ---------- Arquivos estáticos (somente css/js — páginas passam pelo login) ----------
+app.use("/css", express.static(path.join(__dirname, "css")));
+app.use("/js", express.static(path.join(__dirname, "js")));
+
+// ---------- Autenticação ----------
+
+function exigirLoginPagina(req, res, next) {
+  if (req.session.logado) return next();
+  res.redirect("/login");
+}
+
+function exigirLoginApi(req, res, next) {
+  if (req.session.logado) return next();
+  res.status(401).json({ error: "Não autenticado. Faça login novamente." });
+}
+
+app.get("/login", (req, res) => {
+  if (req.session.logado) return res.redirect("/aulas");
+  res.sendFile(path.join(__dirname, "login.html"));
+});
+
+app.post("/api/login", (req, res) => {
+  const { usuario, senha } = req.body || {};
+  if (
+    process.env.ADMIN_USER &&
+    process.env.ADMIN_PASS &&
+    usuario === process.env.ADMIN_USER &&
+    senha === process.env.ADMIN_PASS
+  ) {
+    req.session.logado = true;
+    return res.json({ ok: true });
+  }
+  res.status(401).json({ error: "Usuário ou senha incorretos." });
+});
+
+app.post("/api/logout", (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+// Todas as demais rotas /api/* exigem login
+app.use("/api", exigirLoginApi);
+
+// ---------- Páginas internas ----------
+
+app.get("/", exigirLoginPagina, (req, res) => res.redirect("/aulas"));
+app.get("/aulas", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "aulas.html"))
+);
+app.get("/aula-ao-vivo", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "index.html"))
+);
+app.get("/aula", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "aula-view.html"))
+);
+
+// ---------- CRUD de aulas ----------
+
+function buscarAula(id, res) {
+  const aula = db.prepare("SELECT * FROM aulas WHERE id = ?").get(id);
+  if (!aula) {
+    res.status(404).json({ error: "Aula não encontrada." });
+    return null;
+  }
+  return aula;
+}
+
+app.get("/api/aulas", (req, res) => {
+  const busca = `%${String(req.query.busca || "").trim()}%`;
+  const aulas = db
+    .prepare(
+      `SELECT a.id, a.nome, a.data_criacao, a.status, a.duracao,
+              (SELECT COUNT(*) FROM anotacoes n WHERE n.aula_id = a.id) AS total_anotacoes
+       FROM aulas a
+       WHERE a.nome LIKE ?
+       ORDER BY a.data_criacao DESC`
+    )
+    .all(busca);
+  res.json({ aulas });
+});
+
+app.post("/api/aulas", (req, res) => {
+  const nome = String(req.body?.nome || "").trim();
+  if (!nome) return res.status(400).json({ error: "Informe o nome da aula." });
+  const info = db
+    .prepare("INSERT INTO aulas (nome, data_criacao) VALUES (?, ?)")
+    .run(nome, new Date().toISOString());
+  res.status(201).json({ id: info.lastInsertRowid, nome });
+});
+
+app.get("/api/aulas/:id", (req, res) => {
+  const aula = buscarAula(req.params.id, res);
+  if (!aula) return;
+  const anotacoes = db
+    .prepare("SELECT id, texto, timestamp FROM anotacoes WHERE aula_id = ? ORDER BY id")
+    .all(aula.id);
+  res.json({ ...aula, anotacoes });
+});
+
+app.patch("/api/aulas/:id", (req, res) => {
+  const aula = buscarAula(req.params.id, res);
+  if (!aula) return;
+  const nome = String(req.body?.nome || "").trim();
+  if (!nome) return res.status(400).json({ error: "Informe o novo nome." });
+  db.prepare("UPDATE aulas SET nome = ? WHERE id = ?").run(nome, aula.id);
+  res.json({ ok: true });
+});
+
+app.delete("/api/aulas/:id", (req, res) => {
+  const aula = buscarAula(req.params.id, res);
+  if (!aula) return;
+  db.prepare("DELETE FROM aulas WHERE id = ?").run(aula.id);
+  res.json({ ok: true });
+});
+
+// ---------- Prompts ----------
+
+const SYSTEM_ANOTACOES =
+  'Você é um assistente que gera anotações de aula em tempo real para alunos. ' +
+  'Receba o trecho transcrito e as anotações já existentes. Retorne APENAS um JSON ' +
+  'no formato {"topicos": ["...", "..."]} com 2 a 5 tópicos NOVOS (não repita os ' +
+  'anteriores). Ignore ruídos de transcrição e conversas irrelevantes.';
+
+const SYSTEM_RESUMO =
+  "Você é um assistente que gera resumos de aula para alunos. Receba a transcrição " +
+  "completa de uma aula e retorne um resumo estruturado em Markdown, em português do Brasil, com: " +
+  "um título descritivo (# ), uma seção '## Tópicos principais' em lista, uma seção " +
+  "'## Conceitos-chave' com cada termo em negrito seguido de definição curta, e uma seção " +
+  "'## Pontos de revisão' com itens que merecem estudo adicional ou podem cair em prova. " +
+  "Retorne APENAS o Markdown, sem comentários adicionais. Ignore ruídos de transcrição.";
+
+async function gerarResumoMarkdown(transcricao) {
+  const response = await anthropic.messages.create({
+    model: MODELO,
+    max_tokens: 2048,
+    system: SYSTEM_RESUMO,
+    messages: [
+      { role: "user", content: `Transcrição completa da aula:\n\n${transcricao}` },
+    ],
+  });
+  return response.content.find((b) => b.type === "text")?.text ?? "";
+}
+
+function verificarChave(res) {
+  if (process.env.ANTHROPIC_API_KEY) return true;
+  res.status(500).json({
+    error:
+      "ANTHROPIC_API_KEY não configurada no servidor. Copie .env.example para .env, adicione sua chave e reinicie (npm start).",
+  });
+  return false;
+}
+
+// ---------- Anotações em tempo real ----------
+// { textoNovo, anotacoesAnteriores, aulaId } -> { topicos }
+// Se aulaId for informado, cada tópico é gravado no banco imediatamente.
+app.post("/api/anotacoes", async (req, res) => {
+  if (!verificarChave(res)) return;
+  const { textoNovo, anotacoesAnteriores, aulaId } = req.body || {};
+  if (!textoNovo || !String(textoNovo).trim()) {
+    return res.status(400).json({ error: "textoNovo é obrigatório" });
+  }
+
+  const anteriores = Array.isArray(anotacoesAnteriores) ? anotacoesAnteriores : [];
+  const listaAnteriores = anteriores.length
+    ? anteriores.map((t) => `- ${t}`).join("\n")
+    : "(nenhuma ainda)";
+
+  try {
+    const response = await anthropic.messages.create({
+      model: MODELO,
+      max_tokens: 1024,
+      system: SYSTEM_ANOTACOES,
+      // Garante que a resposta é um JSON válido no formato esperado
+      output_config: {
+        format: {
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: {
+              topicos: { type: "array", items: { type: "string" } },
+            },
+            required: ["topicos"],
+            additionalProperties: false,
+          },
+        },
+      },
+      messages: [
+        {
+          role: "user",
+          content:
+            `Anotações já existentes:\n${listaAnteriores}\n\n` +
+            `Trecho transcrito da aula:\n${textoNovo}`,
+        },
+      ],
+    });
+
+    const texto = response.content.find((b) => b.type === "text")?.text ?? "{}";
+    const dados = JSON.parse(texto);
+    const topicos = Array.isArray(dados.topicos) ? dados.topicos : [];
+
+    // Persistência em tempo real: se o navegador cair, nada se perde
+    if (aulaId && db.prepare("SELECT id FROM aulas WHERE id = ?").get(aulaId)) {
+      const inserir = db.prepare(
+        "INSERT INTO anotacoes (aula_id, texto, timestamp) VALUES (?, ?, ?)"
+      );
+      const agora = new Date().toISOString();
+      const tx = db.transaction(() => {
+        for (const t of topicos) inserir.run(aulaId, t, agora);
+      });
+      tx();
+      // Mantém a transcrição parcial salva também
+      const { transcricaoParcial } = req.body;
+      if (typeof transcricaoParcial === "string" && transcricaoParcial.trim()) {
+        db.prepare("UPDATE aulas SET transcricao_completa = ? WHERE id = ?").run(
+          transcricaoParcial,
+          aulaId
+        );
+      }
+    }
+
+    res.json({ topicos });
+  } catch (err) {
+    tratarErro("anotacoes", err, res);
+  }
+});
+
+// ---------- Encerramento da aula ----------
+// { transcricao, duracao } -> salva tudo e gera o resumo.
+// A transcrição/duração são salvas mesmo se o resumo falhar.
+app.post("/api/aulas/:id/encerrar", async (req, res) => {
+  const aula = buscarAula(req.params.id, res);
+  if (!aula) return;
+
+  const transcricao = String(req.body?.transcricao || "").trim();
+  const duracao = Math.max(0, Math.round(Number(req.body?.duracao) || 0));
+
+  db.prepare(
+    "UPDATE aulas SET status = 'encerrada', duracao = ?, transcricao_completa = ? WHERE id = ?"
+  ).run(duracao, transcricao, aula.id);
+
+  const palavras = transcricao.split(/\s+/).filter(Boolean).length;
+  if (!process.env.ANTHROPIC_API_KEY || palavras < 20) {
+    return res.json({ resumo: "", erroResumo: palavras < 20 ? null : "Chave da API não configurada." });
+  }
+
+  try {
+    const resumo = await gerarResumoMarkdown(transcricao);
+    db.prepare("UPDATE aulas SET resumo_md = ? WHERE id = ?").run(resumo, aula.id);
+    res.json({ resumo });
+  } catch (err) {
+    console.error("[/api/aulas/:id/encerrar]", err.message || err);
+    res.json({
+      resumo: "",
+      erroResumo: "A aula foi salva, mas o resumo não pôde ser gerado.",
+    });
+  }
+});
+
+// Rota da Etapa 2 mantida por compatibilidade
+app.post("/api/resumo", async (req, res) => {
+  if (!verificarChave(res)) return;
+  const { transcricao } = req.body || {};
+  if (!transcricao || !String(transcricao).trim()) {
+    return res.status(400).json({ error: "transcricao é obrigatória" });
+  }
+  try {
+    res.json({ resumo: await gerarResumoMarkdown(transcricao) });
+  } catch (err) {
+    tratarErro("resumo", err, res);
+  }
+});
+
+// ---------- Exportação ----------
+
+app.get("/api/aulas/:id/pdf", async (req, res) => {
+  const aula = buscarAula(req.params.id, res);
+  if (!aula) return;
+  const anotacoes = db
+    .prepare("SELECT texto, timestamp FROM anotacoes WHERE aula_id = ? ORDER BY id")
+    .all(aula.id);
+  try {
+    const pdf = await gerarPdf(aula, anotacoes);
+    res
+      .set({
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${nomeDeArquivo(aula.nome, "pdf")}"`,
+      })
+      .send(Buffer.from(pdf));
+  } catch (err) {
+    console.error("[/api/aulas/:id/pdf]", err.message || err);
+    res.status(500).json({ error: "Falha ao gerar o PDF. Verifique se o Google Chrome está instalado." });
+  }
+});
+
+app.get("/api/aulas/:id/docx", async (req, res) => {
+  const aula = buscarAula(req.params.id, res);
+  if (!aula) return;
+  const anotacoes = db
+    .prepare("SELECT texto, timestamp FROM anotacoes WHERE aula_id = ? ORDER BY id")
+    .all(aula.id);
+  try {
+    const docx = await gerarDocx(aula, anotacoes);
+    res
+      .set({
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Content-Disposition": `attachment; filename="${nomeDeArquivo(aula.nome, "docx")}"`,
+      })
+      .send(docx);
+  } catch (err) {
+    console.error("[/api/aulas/:id/docx]", err.message || err);
+    res.status(500).json({ error: "Falha ao gerar o documento Word." });
+  }
+});
+
+// ---------- Erros ----------
+
+function tratarErro(rota, err, res) {
+  console.error(`[/api/${rota}]`, err.message || err);
+  if (err instanceof Anthropic.AuthenticationError) {
+    return res.status(500).json({
+      error: "Chave da API inválida ou ausente. Verifique o arquivo .env (ANTHROPIC_API_KEY).",
+    });
+  }
+  if (err instanceof Anthropic.RateLimitError) {
+    return res.status(429).json({
+      error: "Limite de requisições atingido. Aguarde alguns instantes.",
+    });
+  }
+  if (err instanceof Anthropic.APIConnectionError) {
+    return res.status(502).json({ error: "Falha de conexão com a API da Anthropic." });
+  }
+  if (err instanceof Anthropic.APIError) {
+    return res.status(502).json({ error: `Erro da API da Anthropic (${err.status}).` });
+  }
+  return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+}
+
+app.listen(PORT, () => {
+  console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
+});
