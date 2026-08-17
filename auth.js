@@ -26,6 +26,53 @@ async function verificarSenhaFantasma(senha) {
   return false;
 }
 
+// ---------- Rate limit progressivo do login ----------
+// Persistido em SQLite (tabela login_bloqueios) para sobreviver a restart.
+// Duas chaves por tentativa: por IP e por login. A partir da 5ª falha em
+// qualquer chave, bloqueia por 30 s, dobrando a cada falha até 15 min.
+// Sucesso limpa as duas chaves.
+
+const MAX_FALHAS_LIVRES = 4;
+const BLOQUEIO_BASE_MS = 30 * 1000;
+const BLOQUEIO_TETO_MS = 15 * 60 * 1000;
+
+function chavesDeLogin(ip, login) {
+  const chaves = [`ip:${ip}`];
+  if (login) chaves.push(`login:${login.toLowerCase()}`);
+  return chaves;
+}
+
+function bloqueioAtivo(chaves) {
+  const consultar = db.prepare("SELECT bloqueado_ate FROM login_bloqueios WHERE chave = ?");
+  const agora = Date.now();
+  return chaves.some((chave) => {
+    const registro = consultar.get(chave);
+    return registro?.bloqueado_ate && Date.parse(registro.bloqueado_ate) > agora;
+  });
+}
+
+function registrarFalha(chaves) {
+  const incrementar = db.prepare(
+    `INSERT INTO login_bloqueios (chave, falhas) VALUES (?, 1)
+     ON CONFLICT(chave) DO UPDATE SET falhas = falhas + 1
+     RETURNING falhas`
+  );
+  const bloquear = db.prepare("UPDATE login_bloqueios SET bloqueado_ate = ? WHERE chave = ?");
+  for (const chave of chaves) {
+    const { falhas } = incrementar.get(chave);
+    const excesso = falhas - MAX_FALHAS_LIVRES;
+    if (excesso > 0) {
+      const ms = Math.min(BLOQUEIO_TETO_MS, BLOQUEIO_BASE_MS * 2 ** (excesso - 1));
+      bloquear.run(new Date(Date.now() + ms).toISOString(), chave);
+    }
+  }
+}
+
+function limparFalhas(chaves) {
+  const apagar = db.prepare("DELETE FROM login_bloqueios WHERE chave = ?");
+  for (const chave of chaves) apagar.run(chave);
+}
+
 // ---------- Seed do primeiro admin ----------
 // Idempotente, roda a cada startup: se não há usuários, cria o admin a partir
 // de ADMIN_USER/ADMIN_PASS do .env; depois adota as aulas sem dono (criadas
@@ -65,4 +112,13 @@ async function semearAdmin() {
   }
 }
 
-module.exports = { hashSenha, verificarSenha, verificarSenhaFantasma, semearAdmin };
+module.exports = {
+  hashSenha,
+  verificarSenha,
+  verificarSenhaFantasma,
+  semearAdmin,
+  chavesDeLogin,
+  bloqueioAtivo,
+  registrarFalha,
+  limparFalhas,
+};

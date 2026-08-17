@@ -8,7 +8,15 @@ const session = require("express-session");
 const Anthropic = require("@anthropic-ai/sdk");
 
 const db = require("./db.js");
-const { verificarSenha, verificarSenhaFantasma, semearAdmin } = require("./auth.js");
+const {
+  verificarSenha,
+  verificarSenhaFantasma,
+  semearAdmin,
+  chavesDeLogin,
+  bloqueioAtivo,
+  registrarFalha,
+  limparFalhas,
+} = require("./auth.js");
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
 
 const app = express();
@@ -96,6 +104,11 @@ app.post("/api/login", async (req, res) => {
   const usuario = String(req.body?.usuario || "").trim();
   const senha = String(req.body?.senha || "");
 
+  const chaves = chavesDeLogin(req.ip, usuario);
+  if (bloqueioAtivo(chaves)) {
+    return res.status(429).json({ error: "Muitas tentativas. Aguarde alguns minutos." });
+  }
+
   const conta = usuario
     ? db.prepare("SELECT * FROM usuarios WHERE login = ?").get(usuario)
     : undefined;
@@ -106,9 +119,11 @@ app.post("/api/login", async (req, res) => {
     : await verificarSenhaFantasma(senha);
 
   if (!conta || !senhaOk || !conta.ativo) {
+    registrarFalha(chaves);
     return res.status(401).json({ error: "Usuário ou senha incorretos." });
   }
 
+  limparFalhas(chaves);
   req.session.usuarioId = conta.id;
   req.session.papel = conta.papel;
   res.json({ ok: true });
