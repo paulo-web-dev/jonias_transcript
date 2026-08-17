@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Central de Dados — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">central de dados</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista">
+    <h2 class="secao-titulo">Fontes de dados</h2>
+    <div class="grade-fontes">
+      <!-- CDR do PABX -->
+      <div class="fonte-card">
+        <div class="fonte-cabecalho">
+          <h3>📞 CDR do PABX</h3>
+          <span class="texto-suave">CSV exportado da telefonia (eventos por ligação)</span>
+        </div>
+        <p id="cdr-status" class="fonte-status texto-suave">Envie o CSV semanal para atualizar as ligações.</p>
+        <label class="btn btn-primario fonte-upload">
+          <span class="btn-icone">⬆</span> Enviar CSV do CDR
+          <input type="file" id="arquivo-cdr" accept=".csv,text/csv" hidden />
+        </label>
+      </div>
+
+      <!-- Oportunidades Ramper -->
+      <div class="fonte-card">
+        <div class="fonte-cabecalho">
+          <h3>🎯 Oportunidades (Ramper)</h3>
+          <span class="texto-suave">Exportação "LS_exportacao_oportunidades_&lt;data&gt;"</span>
+        </div>
+        <p id="oportunidades-status" class="fonte-status texto-suave">Reimportar a exportação semanal atualiza as etapas do funil.</p>
+        <label class="btn btn-primario fonte-upload">
+          <span class="btn-icone">⬆</span> Enviar CSV do Ramper
+          <input type="file" id="arquivo-oportunidades" accept=".csv,text/csv" hidden />
+        </label>
+      </div>
+
+      <!-- MySQL Unyflex -->
+      <div class="fonte-card">
+        <div class="fonte-cabecalho">
+          <h3>🗄 Matrículas e turmas (Unyflex)</h3>
+          <span class="texto-suave">Cópia local do MySQL — somente leitura na origem</span>
+        </div>
+        <p id="mysql-status" class="fonte-status texto-suave">Carregando estado…</p>
+        <button id="btn-sincronizar" class="btn btn-primario" disabled>
+          <span class="btn-icone">⟳</span> Sincronizar agora
+        </button>
+      </div>
+    </div>
+
+    <div id="relatorio" class="relatorio oculto">
+      <div class="relatorio-cabecalho">
+        <h3 id="relatorio-titulo">Relatório da importação</h3>
+        <button id="btn-fechar-relatorio" class="btn-fechar" title="Fechar">✕</button>
+      </div>
+      <div id="relatorio-conteudo"></div>
+    </div>
+
+    <h2 class="secao-titulo">Histórico de ingestões</h2>
+    <div id="lista-importacoes" class="lista-aulas"></div>
+    <div id="importacoes-vazio" class="estado-vazio oculto">
+      <p>Nenhuma ingestão registrada ainda.<br />Envie um arquivo ou sincronize o MySQL para começar.</p>
+    </div>
+  </main>
+
+  <div id="aviso" class="aviso" role="status"></div>
+
+  <script src="/js/central.js"></script>
+</body>
+</html>

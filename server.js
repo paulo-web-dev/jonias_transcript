@@ -157,6 +157,9 @@ app.get("/aula-ao-vivo", exigirLoginPagina, (req, res) =>
 app.get("/aula", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "aula-view.html"))
 );
+app.get("/central", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "central.html"))
+);
 
 // ---------- CRUD de aulas ----------
 

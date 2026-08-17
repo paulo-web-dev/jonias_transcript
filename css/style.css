@@ -777,3 +777,64 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+/* ============ Central de Dados ============ */
+.secao-titulo {
+  font-size: 1.05rem;
+  color: var(--texto-suave);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin: 1.6rem 0 0.9rem;
+}
+.grade-fontes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.9rem;
+}
+.fonte-card {
+  background: var(--fundo-painel);
+  border: 1px solid var(--borda-painel);
+  border-radius: var(--raio);
+  padding: 1.1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.fonte-cabecalho h3 { font-size: 1rem; margin-bottom: 0.2rem; }
+.fonte-cabecalho .texto-suave { font-size: 0.82rem; }
+.fonte-status { font-size: 0.85rem; min-height: 2.2em; }
+.fonte-upload { cursor: pointer; text-align: center; }
+.texto-suave { color: var(--texto-suave); }
+
+.relatorio {
+  margin-top: 1.2rem;
+  background: var(--fundo-painel);
+  border: 1px solid rgba(108, 123, 255, 0.35);
+  border-radius: var(--raio);
+  padding: 1rem 1.2rem;
+}
+.relatorio-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+.relatorio-cabecalho h3 { font-size: 1rem; }
+.relatorio h4 {
+  font-size: 0.82rem;
+  color: var(--texto-suave);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0.9rem 0 0.35rem;
+}
+.relatorio ul { padding-left: 1.2rem; }
+.relatorio li { margin-bottom: 0.3rem; font-size: 0.9rem; }
+.relatorio-amostras { margin-top: 0.25rem; }
+.relatorio-amostras code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+.relatorio-erro { color: var(--vermelho); }
