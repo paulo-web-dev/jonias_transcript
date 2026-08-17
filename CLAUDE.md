@@ -9,6 +9,11 @@ avança. Ao encerrar, gera um resumo estruturado. As aulas ficam salvas em SQLit
 protegidas por login, e podem ser revisitadas e exportadas em PDF ou Word.
 Dark mode, pensado para projeção em sala.
 
+O jonIAs também é a **central de dados e IA** da operação comercial: ingere o CDR
+do PABX e as oportunidades do CRM Ramper (uploads de CSV), sincroniza matrículas e
+turmas do MySQL da Unyflex como cópia local, e unifica tudo no modelo canônico
+(tabela `pessoas`) — base para as métricas e relatórios da Etapa 2.
+
 ## Identidade: o assistente jonIAs
 
 - O robozinho assistente chama-se **jonIAs** — homenagem ao fundador da empresa,
@@ -39,6 +44,8 @@ Dark mode, pensado para projeção em sala.
 - IA: `@anthropic-ai/sdk`, modelo **`claude-haiku-4-5`**.
 - Exportação: **puppeteer-core** (usa o Chrome já instalado, `channel: "chrome"` —
   sem download de Chromium) para PDF; biblioteca **docx** para Word.
+- Ingestão: **csv-parse** (CDR e Ramper, upload como text/plain via `file.text()`);
+  **mysql2** para a sincronização somente-leitura da Unyflex.
 
 ## Estrutura
 
@@ -47,17 +54,21 @@ aula-ai/
 ├── server.js        # Express: login/sessão, páginas, CRUD de aulas, IA, exportação
 ├── db.js            # conexão better-sqlite3 + migrações (PRAGMA user_version)
 ├── auth.js          # hash argon2id, rate limit progressivo do login, seed do admin
+├── importacao.js    # ingestão de CSV: CDR do PABX e oportunidades do Ramper
+├── sincronizacao.js # sync snapshot do MySQL Unyflex → SQLite local
 ├── exportacao.js    # geração de PDF (puppeteer) e DOCX (docx) + template HTML
 ├── login.html       # tela de login              (rota /login)
 ├── aulas.html       # lista "Minhas Aulas"       (rota /aulas)
 ├── index.html       # sessão ao vivo             (rota /aula-ao-vivo?id=N)
 ├── aula-view.html   # visualização de encerrada  (rota /aula?id=N)
-├── css/style.css    # tema dark completo (robô, listas, modais, login, view)
+├── central.html     # central de dados           (rota /central)
+├── css/style.css    # tema dark completo (robô, listas, modais, login, view, central)
 ├── js/
 │   ├── markdown.js  # conversor MD→HTML compartilhado (navegador + servidor/PDF)
 │   ├── app.js       # sessão ao vivo (SpeechRecognition, blocos, encerramento)
 │   ├── aulas.js     # lista, busca, criar/renomear/excluir
 │   ├── aula-view.js # visualização + links de exportação
+│   ├── central.js   # uploads, sincronização e histórico de ingestões
 │   └── login.js
 ├── aula-ai.db       # SQLite (gerado em runtime, ignorado no git)
 └── .env             # ANTHROPIC_API_KEY, ADMIN_USER, ADMIN_PASS, SESSION_SECRET
@@ -85,7 +96,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **3**.
+pelo mesmo caminho). Versão atual: **4**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -96,6 +107,23 @@ pelo mesmo caminho). Versão atual: **3**.
 - `login_bloqueios(chave PK, falhas, bloqueado_ate)` — chaves `ip:<ip>` e `login:<login>`
   do rate limit do login.
 - `sessions` — criada/gerida pelo `better-sqlite3-session-store`.
+
+Central de dados (migração 4; datas/horas operacionais em **horário local**, sem Z):
+
+- `pessoas(id, nome, ramal UNIQUE, crm_user_id UNIQUE, wallet_nome UNIQUE, ativo, entra_feedback)`
+  — unifica os três identificadores dos consultores; seed com os 6 atuais
+  (Renato com `entra_feedback = 0`; `crm_user_id` do Frederico pendente).
+- `importacoes(id, tipo cdr|oportunidades|mysql, arquivo_nome, hash_sha256, linhas_*, registros_*, detalhes_json, status, erro, usuario_id, iniciado/concluido_em)`
+  — auditoria de toda ingestão: cada número tem origem explicável.
+- `ligacoes(id, cdr_id UNIQUE, data_hora, ramal, pessoa_id, numero_a/b, sentido, fila, duracao_seg, atendida, eventos, gravacao, importacao_id)`
+  — 1 linha = 1 ligação real (eventos do CDR agrupados por ID, `max()` da duração).
+- `oportunidades(id, crm_id UNIQUE, titulo, organizacao, receita_centavos, etapa, funil, motivo_perda, origem, formulario, oferta, linha_produto, produtos, responsavel, pessoa_id, criado/alterado_em, tempo_etapas_json, importacao_id)`.
+- `turmas(id = classes.id, nome, start_date, sincronizado_em)` e
+  `matriculas(id = enrollments.id, turma_id, student_id, aluno_*, wallet, pessoa_id, criada_em, sincronizado_em)`
+  — **cópia snapshot** do MySQL, substituída inteira a cada sync.
+- `metas(id, pessoa_id NULL=todos, indicador, valor, vigente_desde/ate)` — seed:
+  45 ligações/dia, 14 leads/dia, 1.3 matrículas/dia.
+- `periodos(id, nome, data_inicio, data_fim)` — períodos de relatório (Etapa 2).
 
 ## Rotas
 
@@ -108,6 +136,10 @@ pelo mesmo caminho). Versão atual: **3**.
 | `POST /api/aulas/:id/encerrar` | salva transcrição/duração/status **antes** de gerar o resumo; falha do resumo não perde dados (`erroResumo` no corpo, HTTP 200) |
 | `GET /api/aulas/:id/pdf` e `/docx` | exportação com `Content-Disposition: attachment` |
 | `POST /api/resumo` | mantida da Etapa 2 por compatibilidade |
+| `POST /api/importacoes/cdr?arquivo=` e `/oportunidades?arquivo=` | upload do CSV como corpo text/plain (25 MB); resposta traz o relatório completo (ignoradas com motivo, ressalvas, avisos); erro estrutural → 422 |
+| `GET /api/importacoes` e `/:id` | auditoria das ingestões (últimas 50 / detalhes) |
+| `POST /api/sincronizacoes/mysql` | copia o snapshot da Unyflex; 503 sem MYSQL_* no .env |
+| `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
 sessão com usuário **ativo** (sessão órfã/inativa é destruída); sem login: API
@@ -141,6 +173,17 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - **DOCX**: mesmo conteúdo com `Paragraph`/`TextRun` (títulos, bullets, negrito).
 - **Markdown compartilhado**: `js/markdown.js` funciona no navegador
   (`window.MarkdownAula`) e no Node (usado pelo template do PDF).
+- **Ingestão idempotente com auditoria**: dedupe por upsert na chave natural
+  (`ligacoes.cdr_id`, `oportunidades.crm_id`) — reimportar nunca duplica e a
+  reexportação semanal do Ramper atualiza etapas; hash repetido gera aviso.
+  Linha ruim nunca aborta a importação: vira motivo/ressalva no relatório
+  (`detalhes_json`). Armadilhas do CDR tratadas: eventos agrupados por ID com
+  `max()` da duração, linhas sem ID descartadas, rodapé "DURAÇÃO: HH:MM:SS"
+  ignorado, regex tolerante `/(\d{1,2}):(\d{2}):(\d{2})/`, BOM utf-8-sig,
+  atendida = duração > 0.
+- **MySQL nunca ao vivo**: relatórios leem só a cópia local (`turmas`/`matriculas`),
+  substituída por snapshot transacional a cada sync — mesmos números para o mesmo
+  período e zero carga na produção. Usuário exclusivo somente-SELECT no .env.
 - **Segurança**: HTML sempre escapado antes de renderizar; senhas só como hash
   argon2id no banco; `SESSION_SECRET` obrigatório (fail-fast, sem fallback);
   cookie `httpOnly` + `sameSite: lax` + `secure` quando `NODE_ENV=production`,
@@ -167,6 +210,18 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - Posse de recursos por usuário (fim do IDOR em `/api/anotacoes`)
 - Bugs corrigidos: corrida no encerramento (transcrição sobrescrita) e microfone
   negado que encerrava a aula permanentemente
+
+### ✅ Etapa 1 (central de dados) — Ingestão e modelo canônico (concluída)
+- Migração 4: `pessoas` (ramal + crm_user_id + wallet unificados), `ligacoes`,
+  `oportunidades`, `turmas`, `matriculas`, `metas`, `periodos`, `importacoes`
+- Importadores idempotentes de CDR e Ramper com relatório e auditoria
+- Sincronização snapshot do MySQL Unyflex (somente leitura, cópia local)
+- Tela `/central` (uploads, sync, histórico de ingestões)
+
+### Etapa 2 (central de dados) — Métricas, relatórios e IA (próxima)
+- Métricas por consultor × metas (ligações/dia, leads/dia, matrículas/dia)
+- Relatórios por período (semana fecha os mesmos números sempre)
+- Relatório de feedback individual (respeitando `entra_feedback`)
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)
