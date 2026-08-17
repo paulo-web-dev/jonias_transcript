@@ -158,8 +158,12 @@ app.get("/aula", exigirLoginPagina, (req, res) =>
 
 // ---------- CRUD de aulas ----------
 
-function buscarAula(id, res) {
-  const aula = db.prepare("SELECT * FROM aulas WHERE id = ?").get(id);
+// Aula de outro usuário responde o mesmo 404 de aula inexistente — não
+// revelamos que o recurso existe.
+function buscarAula(id, usuarioId, res) {
+  const aula = db
+    .prepare("SELECT * FROM aulas WHERE id = ? AND usuario_id = ?")
+    .get(id, usuarioId);
   if (!aula) {
     res.status(404).json({ error: "Aula não encontrada." });
     return null;
@@ -174,10 +178,10 @@ app.get("/api/aulas", (req, res) => {
       `SELECT a.id, a.nome, a.data_criacao, a.status, a.duracao,
               (SELECT COUNT(*) FROM anotacoes n WHERE n.aula_id = a.id) AS total_anotacoes
        FROM aulas a
-       WHERE a.nome LIKE ?
+       WHERE a.usuario_id = ? AND a.nome LIKE ?
        ORDER BY a.data_criacao DESC`
     )
-    .all(busca);
+    .all(req.usuario.id, busca);
   res.json({ aulas });
 });
 
@@ -185,13 +189,13 @@ app.post("/api/aulas", (req, res) => {
   const nome = String(req.body?.nome || "").trim();
   if (!nome) return res.status(400).json({ error: "Informe o nome da aula." });
   const info = db
-    .prepare("INSERT INTO aulas (nome, data_criacao) VALUES (?, ?)")
-    .run(nome, new Date().toISOString());
+    .prepare("INSERT INTO aulas (nome, data_criacao, usuario_id) VALUES (?, ?, ?)")
+    .run(nome, new Date().toISOString(), req.usuario.id);
   res.status(201).json({ id: info.lastInsertRowid, nome });
 });
 
 app.get("/api/aulas/:id", (req, res) => {
-  const aula = buscarAula(req.params.id, res);
+  const aula = buscarAula(req.params.id, req.usuario.id, res);
   if (!aula) return;
   const anotacoes = db
     .prepare("SELECT id, texto, timestamp FROM anotacoes WHERE aula_id = ? ORDER BY id")
@@ -200,7 +204,7 @@ app.get("/api/aulas/:id", (req, res) => {
 });
 
 app.patch("/api/aulas/:id", (req, res) => {
-  const aula = buscarAula(req.params.id, res);
+  const aula = buscarAula(req.params.id, req.usuario.id, res);
   if (!aula) return;
   const nome = String(req.body?.nome || "").trim();
   if (!nome) return res.status(400).json({ error: "Informe o novo nome." });
@@ -209,7 +213,7 @@ app.patch("/api/aulas/:id", (req, res) => {
 });
 
 app.delete("/api/aulas/:id", (req, res) => {
-  const aula = buscarAula(req.params.id, res);
+  const aula = buscarAula(req.params.id, req.usuario.id, res);
   if (!aula) return;
   db.prepare("DELETE FROM aulas WHERE id = ?").run(aula.id);
   res.json({ ok: true });
@@ -253,13 +257,26 @@ function verificarChave(res) {
 }
 
 // ---------- Anotações em tempo real ----------
-// { textoNovo, anotacoesAnteriores, aulaId } -> { topicos }
-// Se aulaId for informado, cada tópico é gravado no banco imediatamente.
+// { textoNovo, anotacoesAnteriores, aulaId, transcricaoParcial } -> { topicos }
+// Cada tópico é gravado no banco imediatamente. aulaId é obrigatório e precisa
+// ser uma aula do usuário logado, ainda em andamento.
 app.post("/api/anotacoes", async (req, res) => {
   if (!verificarChave(res)) return;
   const { textoNovo, anotacoesAnteriores, aulaId } = req.body || {};
   if (!textoNovo || !String(textoNovo).trim()) {
     return res.status(400).json({ error: "textoNovo é obrigatório" });
+  }
+  const idAula = Number(aulaId);
+  if (!Number.isInteger(idAula) || idAula <= 0) {
+    return res.status(400).json({ error: "aulaId é obrigatório" });
+  }
+  // Valida posse e status antes de gastar tokens com a API
+  const aula = db
+    .prepare("SELECT id, status FROM aulas WHERE id = ? AND usuario_id = ?")
+    .get(idAula, req.usuario.id);
+  if (!aula) return res.status(404).json({ error: "Aula não encontrada." });
+  if (aula.status === "encerrada") {
+    return res.status(409).json({ error: "A aula já foi encerrada." });
   }
 
   const anteriores = Array.isArray(anotacoesAnteriores) ? anotacoesAnteriores : [];
@@ -300,25 +317,33 @@ app.post("/api/anotacoes", async (req, res) => {
     const dados = JSON.parse(texto);
     const topicos = Array.isArray(dados.topicos) ? dados.topicos : [];
 
-    // Persistência em tempo real: se o navegador cair, nada se perde
-    if (aulaId && db.prepare("SELECT id FROM aulas WHERE id = ?").get(aulaId)) {
-      const inserir = db.prepare(
-        "INSERT INTO anotacoes (aula_id, texto, timestamp) VALUES (?, ?, ?)"
-      );
-      const agora = new Date().toISOString();
-      const tx = db.transaction(() => {
-        for (const t of topicos) inserir.run(aulaId, t, agora);
-      });
-      tx();
-      // Mantém a transcrição parcial salva também
-      const { transcricaoParcial } = req.body;
+    // Recheca o status na hora de gravar: a aula pode ter sido encerrada
+    // enquanto a chamada à API estava em voo — gravar aqui sobrescreveria a
+    // transcrição completa com uma parcial mais antiga.
+    const statusAtual = db
+      .prepare("SELECT status FROM aulas WHERE id = ? AND usuario_id = ?")
+      .get(idAula, req.usuario.id)?.status;
+    if (statusAtual !== "em_andamento") {
+      return res.status(409).json({ error: "A aula já foi encerrada." });
+    }
+
+    // Persistência em tempo real: anotações e transcrição parcial vão para o
+    // banco a cada bloco — se o navegador cair, perde-se no máximo o texto
+    // pendente desde o último bloco.
+    const { transcricaoParcial } = req.body;
+    const inserir = db.prepare(
+      "INSERT INTO anotacoes (aula_id, texto, timestamp) VALUES (?, ?, ?)"
+    );
+    const agora = new Date().toISOString();
+    db.transaction(() => {
+      for (const t of topicos) inserir.run(idAula, t, agora);
       if (typeof transcricaoParcial === "string" && transcricaoParcial.trim()) {
         db.prepare("UPDATE aulas SET transcricao_completa = ? WHERE id = ?").run(
           transcricaoParcial,
-          aulaId
+          idAula
         );
       }
-    }
+    })();
 
     res.json({ topicos });
   } catch (err) {
@@ -330,7 +355,7 @@ app.post("/api/anotacoes", async (req, res) => {
 // { transcricao, duracao } -> salva tudo e gera o resumo.
 // A transcrição/duração são salvas mesmo se o resumo falhar.
 app.post("/api/aulas/:id/encerrar", async (req, res) => {
-  const aula = buscarAula(req.params.id, res);
+  const aula = buscarAula(req.params.id, req.usuario.id, res);
   if (!aula) return;
 
   const transcricao = String(req.body?.transcricao || "").trim();
@@ -375,7 +400,7 @@ app.post("/api/resumo", async (req, res) => {
 // ---------- Exportação ----------
 
 app.get("/api/aulas/:id/pdf", async (req, res) => {
-  const aula = buscarAula(req.params.id, res);
+  const aula = buscarAula(req.params.id, req.usuario.id, res);
   if (!aula) return;
   const anotacoes = db
     .prepare("SELECT texto, timestamp FROM anotacoes WHERE aula_id = ? ORDER BY id")
@@ -395,7 +420,7 @@ app.get("/api/aulas/:id/pdf", async (req, res) => {
 });
 
 app.get("/api/aulas/:id/docx", async (req, res) => {
-  const aula = buscarAula(req.params.id, res);
+  const aula = buscarAula(req.params.id, req.usuario.id, res);
   if (!aula) return;
   const anotacoes = db
     .prepare("SELECT texto, timestamp FROM anotacoes WHERE aula_id = ? ORDER BY id")
