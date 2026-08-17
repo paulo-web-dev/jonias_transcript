@@ -8,6 +8,7 @@ const session = require("express-session");
 const Anthropic = require("@anthropic-ai/sdk");
 
 const db = require("./db.js");
+const { verificarSenha, verificarSenhaFantasma, semearAdmin } = require("./auth.js");
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
 
 const app = express();
@@ -20,9 +21,6 @@ if (!process.env.ANTHROPIC_API_KEY) {
   console.warn(
     "\n⚠  ANTHROPIC_API_KEY não encontrada. Copie .env.example para .env e adicione sua chave.\n"
   );
-}
-if (!process.env.ADMIN_USER || !process.env.ADMIN_PASS) {
-  console.warn("⚠  ADMIN_USER/ADMIN_PASS não configurados no .env — o login não funcionará.\n");
 }
 if (!process.env.SESSION_SECRET) {
   console.error(
@@ -59,33 +57,61 @@ app.use("/js", express.static(path.join(__dirname, "js")));
 
 // ---------- Autenticação ----------
 
+// Carrega o usuário da sessão; sessão órfã (usuário removido/inativo) não vale.
+function usuarioDaSessao(req) {
+  if (!req.session.usuarioId) return null;
+  return (
+    db
+      .prepare("SELECT id, login, nome, papel FROM usuarios WHERE id = ? AND ativo = 1")
+      .get(req.session.usuarioId) || null
+  );
+}
+
 function exigirLoginPagina(req, res, next) {
-  if (req.session.logado) return next();
-  res.redirect("/login");
+  const usuario = usuarioDaSessao(req);
+  if (usuario) {
+    req.usuario = usuario;
+    return next();
+  }
+  req.session.destroy(() => res.redirect("/login"));
 }
 
 function exigirLoginApi(req, res, next) {
-  if (req.session.logado) return next();
-  res.status(401).json({ error: "Não autenticado. Faça login novamente." });
+  const usuario = usuarioDaSessao(req);
+  if (usuario) {
+    req.usuario = usuario;
+    return next();
+  }
+  req.session.destroy(() =>
+    res.status(401).json({ error: "Não autenticado. Faça login novamente." })
+  );
 }
 
 app.get("/login", (req, res) => {
-  if (req.session.logado) return res.redirect("/aulas");
+  if (usuarioDaSessao(req)) return res.redirect("/aulas");
   res.sendFile(path.join(__dirname, "login.html"));
 });
 
-app.post("/api/login", (req, res) => {
-  const { usuario, senha } = req.body || {};
-  if (
-    process.env.ADMIN_USER &&
-    process.env.ADMIN_PASS &&
-    usuario === process.env.ADMIN_USER &&
-    senha === process.env.ADMIN_PASS
-  ) {
-    req.session.logado = true;
-    return res.json({ ok: true });
+app.post("/api/login", async (req, res) => {
+  const usuario = String(req.body?.usuario || "").trim();
+  const senha = String(req.body?.senha || "");
+
+  const conta = usuario
+    ? db.prepare("SELECT * FROM usuarios WHERE login = ?").get(usuario)
+    : undefined;
+  // Login inexistente verifica um hash de sacrifício para o tempo de resposta
+  // não revelar se o usuário existe.
+  const senhaOk = conta
+    ? await verificarSenha(conta.senha_hash, senha)
+    : await verificarSenhaFantasma(senha);
+
+  if (!conta || !senhaOk || !conta.ativo) {
+    return res.status(401).json({ error: "Usuário ou senha incorretos." });
   }
-  res.status(401).json({ error: "Usuário ou senha incorretos." });
+
+  req.session.usuarioId = conta.id;
+  req.session.papel = conta.papel;
+  res.json({ ok: true });
 });
 
 app.post("/api/logout", (req, res) => {
@@ -390,6 +416,12 @@ function tratarErro(rota, err, res) {
   return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
 }
 
-app.listen(PORT, () => {
-  console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
+(async () => {
+  await semearAdmin(); // garante o primeiro admin e adota aulas sem dono
+  app.listen(PORT, () => {
+    console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
+  });
+})().catch((err) => {
+  console.error("✖  Falha ao iniciar o servidor:", err.message || err);
+  process.exit(1);
 });
