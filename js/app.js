@@ -102,11 +102,10 @@ function criarReconhecimento() {
 
   rec.onerror = (evento) => {
     // "no-speech" e "aborted" são esperados no modo contínuo; onend reinicia.
+    // Microfone negado apenas interrompe a captura — a aula continua
+    // em_andamento e pode ser retomada depois de liberar a permissão.
     if (evento.error === "not-allowed" || evento.error === "service-not-allowed") {
-      mostrarErro(
-        "Acesso ao microfone negado. Permita o microfone nas configurações do site e recarregue a página."
-      );
-      encerrarAula();
+      interromperPorMicrofone();
     }
   };
 
@@ -433,6 +432,35 @@ async function encerrarAula() {
     "idle",
     `Aula encerrada — ${sessao.totalPalavras} palavras em ${sessao.numeroBloco} bloco(s)`
   );
+}
+
+// Microfone negado: para a captura sem encerrar a aula no servidor — ela
+// segue em_andamento e o botão Iniciar volta a valer para retomar na mesma
+// tela depois de liberar a permissão.
+function interromperPorMicrofone() {
+  if (!sessao.ativa) return;
+
+  sessao.ativa = false;
+  sessao.pausada = false;
+  try {
+    recognition.stop();
+  } catch (_) {}
+  el.transcricaoInterina.textContent = "";
+
+  if (sessao.timerId) {
+    sessao.msAcumulados += Date.now() - sessao.inicioMs;
+    pararTimer();
+  }
+
+  mostrarErro(
+    "Acesso ao microfone negado. Permita o microfone nas configurações do site e clique em Iniciar para retomar."
+  );
+  setRobo("idle", "jonIAs pronto para começar");
+
+  el.btnIniciar.disabled = false;
+  el.btnPausar.disabled = true;
+  el.btnEncerrar.disabled = true;
+  el.btnPausar.innerHTML = '<span class="btn-icone">⏸</span> Pausar';
 }
 
 // ---------- Erros e avisos ----------
