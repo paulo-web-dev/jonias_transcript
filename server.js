@@ -20,6 +20,7 @@ const {
 } = require("./auth.js");
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
 const { importarCdr, importarOportunidades } = require("./importacao.js");
+const { sincronizarMysql, credenciaisMysql } = require("./sincronizacao.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -470,6 +471,32 @@ app.post("/api/importacoes/oportunidades", corpoCsv, (req, res) => {
   const arquivo = String(req.query.arquivo || "oportunidades.csv").slice(0, 200);
   const resultado = importarOportunidades(req.body, arquivo, req.usuario.id);
   res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
+});
+
+app.post("/api/sincronizacoes/mysql", async (req, res) => {
+  try {
+    res.json(await sincronizarMysql(req.usuario.id));
+  } catch (err) {
+    if (err.semCredenciais) return res.status(503).json({ error: err.message });
+    console.error("[/api/sincronizacoes/mysql]", err.message || err);
+    res.status(502).json({ error: `Falha na sincronização: ${err.message}` });
+  }
+});
+
+// Estado da central: última sincronização e se o MySQL está configurado
+app.get("/api/sincronizacoes/status", (req, res) => {
+  const ultima = db
+    .prepare(
+      `SELECT id, status, erro, iniciado_em, concluido_em
+       FROM importacoes WHERE tipo = 'mysql' ORDER BY id DESC LIMIT 1`
+    )
+    .get();
+  res.json({
+    mysqlConfigurado: Boolean(credenciaisMysql()),
+    ultimaSincronizacao: ultima || null,
+    turmas: db.prepare("SELECT COUNT(*) n FROM turmas").get().n,
+    matriculas: db.prepare("SELECT COUNT(*) n FROM matriculas").get().n,
+  });
 });
 
 app.get("/api/importacoes", (req, res) => {
