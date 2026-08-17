@@ -25,17 +25,27 @@ if (!process.env.ADMIN_USER || !process.env.ADMIN_PASS) {
   console.warn("⚠  ADMIN_USER/ADMIN_PASS não configurados no .env — o login não funcionará.\n");
 }
 if (!process.env.SESSION_SECRET) {
-  console.warn("⚠  SESSION_SECRET não configurado no .env — usando valor de desenvolvimento.\n");
+  console.error(
+    "✖  SESSION_SECRET é obrigatório no .env — o servidor não sobe sem ele.\n" +
+      "   Gere um valor aleatório com:\n" +
+      "   node -e \"console.log(require('crypto').randomBytes(48).toString('hex'))\"\n"
+  );
+  process.exit(1);
 }
+
+// Atrás de proxy reverso (nginx/caddy): respeita X-Forwarded-* para req.ip
+// e para o cookie `secure` funcionar.
+app.set("trust proxy", 1);
 
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "aula-ai-dev-secret-trocar-em-producao",
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
       sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
       maxAge: 1000 * 60 * 60 * 12, // 12 horas
     },
   })
