@@ -19,7 +19,7 @@ const {
   limparFalhas,
 } = require("./auth.js");
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
-const { importarCdr } = require("./importacao.js");
+const { importarCdr, importarOportunidades } = require("./importacao.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -458,6 +458,17 @@ app.post("/api/importacoes/cdr", corpoCsv, (req, res) => {
   }
   const arquivo = String(req.query.arquivo || "cdr.csv").slice(0, 200);
   const resultado = importarCdr(req.body, arquivo, req.usuario.id);
+  res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
+});
+
+app.post("/api/importacoes/oportunidades", corpoCsv, (req, res) => {
+  if (typeof req.body !== "string" || !req.body.trim()) {
+    return res
+      .status(400)
+      .json({ error: "Corpo vazio — envie o conteúdo do CSV como text/plain." });
+  }
+  const arquivo = String(req.query.arquivo || "oportunidades.csv").slice(0, 200);
+  const resultado = importarOportunidades(req.body, arquivo, req.usuario.id);
   res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
 });
 

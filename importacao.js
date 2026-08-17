@@ -324,8 +324,211 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
   }
 }
 
+// ---------- Oportunidades do CRM Ramper ----------
+// Exportação "LS_exportacao_oportunidades_<data>". Não traz telefone/e-mail.
+// Reimportação semanal atualiza etapa/receita/motivo (upsert por crm_id).
+
+const COLUNAS_OPORTUNIDADES = {
+  id: ["id"],
+  titulo: ["titulo"],
+  organizacao: ["organizacao/pessoa", "organizacao", "pessoa"],
+  receita: ["receita"],
+  etapa: ["etapa"],
+  funil: ["funil"],
+  motivo_perda: ["motivo de perda", "motivo da perda"],
+  origem: ["origem"],
+  formulario: ["formulario"],
+  oferta: ["oferta"],
+  linha_produto: ["linha de produto", "linha do produto"],
+  produtos: ["produto(s)", "produtos", "produto"],
+  responsavel: ["responsavel"],
+  criado_em: ["data de criacao", "criado em", "criacao"],
+  alterado_em: ["data de alteracao", "alterado em", "ultima alteracao"],
+};
+
+const ETAPAS_CONHECIDAS = new Set([
+  "prospeccao",
+  "qualificacao",
+  "negociacao",
+  "ganha",
+  "perdida",
+]);
+
+// Data "DD/MM/YYYY[ HH:MM[:SS]]" ou ISO, com ou sem hora → ISO local
+function dataFlexivelIso(texto) {
+  const t = String(texto ?? "").trim();
+  if (!t) return null;
+  const comHora = dataHoraLocalIso(t);
+  if (comHora) return comHora;
+  let m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+  if (m) return t;
+  return null;
+}
+
+function importarOportunidades(textoBruto, arquivoNome, usuarioId) {
+  const iniciadoEm = new Date().toISOString();
+  const texto = removerBom(textoBruto);
+  const hash = hashSha256(texto);
+  const relatorio = novoRelatorio();
+
+  let linhas;
+  try {
+    linhas = lerCsv(texto);
+  } catch (err) {
+    return registrarImportacaoErro("oportunidades", arquivoNome, hash, usuarioId,
+      iniciadoEm, `Arquivo ilegível como CSV: ${err.message}`);
+  }
+  if (linhas.length === 0) {
+    return registrarImportacaoErro("oportunidades", arquivoNome, hash, usuarioId,
+      iniciadoEm, "Arquivo vazio (nenhuma linha de dados).");
+  }
+
+  avisarSeReimportacao(relatorio, hash);
+  const col = resolverColunas(linhas[0], COLUNAS_OPORTUNIDADES, relatorio);
+  // Colunas de "tempo por etapa" são preservadas como vieram, em JSON
+  const colunasTempo = Object.keys(linhas[0]).filter((c) => c.includes("tempo"));
+
+  const pessoas = db
+    .prepare("SELECT id, nome, crm_user_id FROM pessoas")
+    .all();
+  const pessoaPorCrmId = new Map(
+    pessoas.filter((p) => p.crm_user_id !== null).map((p) => [String(p.crm_user_id), p.id])
+  );
+  const pessoaPorNome = new Map(pessoas.map((p) => [normalizarNome(p.nome), p.id]));
+
+  function resolverPessoa(responsavel) {
+    if (!responsavel) return null;
+    if (/^\d+$/.test(responsavel)) return pessoaPorCrmId.get(responsavel) ?? null;
+    // "Nome Sobrenome" também casa pelo primeiro nome cadastrado em pessoas
+    const norm = normalizarNome(responsavel);
+    return (
+      pessoaPorNome.get(norm) ??
+      pessoaPorNome.get(norm.split(" ")[0]) ??
+      null
+    );
+  }
+
+  const upsert = db.prepare(
+    `INSERT INTO oportunidades (crm_id, titulo, organizacao, receita_centavos, etapa,
+       funil, motivo_perda, origem, formulario, oferta, linha_produto, produtos,
+       responsavel, pessoa_id, criado_em, alterado_em, tempo_etapas_json, importacao_id)
+     VALUES (@crm_id, @titulo, @organizacao, @receita_centavos, @etapa, @funil,
+       @motivo_perda, @origem, @formulario, @oferta, @linha_produto, @produtos,
+       @responsavel, @pessoa_id, @criado_em, @alterado_em, @tempo_etapas_json, @importacao_id)
+     ON CONFLICT(crm_id) DO UPDATE SET
+       titulo = excluded.titulo, organizacao = excluded.organizacao,
+       receita_centavos = excluded.receita_centavos, etapa = excluded.etapa,
+       funil = excluded.funil, motivo_perda = excluded.motivo_perda,
+       origem = excluded.origem, formulario = excluded.formulario,
+       oferta = excluded.oferta, linha_produto = excluded.linha_produto,
+       produtos = excluded.produtos, responsavel = excluded.responsavel,
+       pessoa_id = excluded.pessoa_id, criado_em = excluded.criado_em,
+       alterado_em = excluded.alterado_em, tempo_etapas_json = excluded.tempo_etapas_json,
+       importacao_id = excluded.importacao_id`
+  );
+  const existe = db.prepare("SELECT 1 FROM oportunidades WHERE crm_id = ?");
+
+  let lidas = 0;
+  let ignoradas = 0;
+
+  try {
+    const resultado = db.transaction(() => {
+      const info = db
+        .prepare(
+          `INSERT INTO importacoes (tipo, arquivo_nome, hash_sha256, usuario_id, iniciado_em)
+           VALUES ('oportunidades', ?, ?, ?, ?)`
+        )
+        .run(arquivoNome, hash, usuarioId, iniciadoEm);
+      const importacaoId = info.lastInsertRowid;
+
+      let novos = 0;
+      let atualizados = 0;
+      for (const linha of linhas) {
+        lidas++;
+        const crmId = valor(linha, col.id);
+        if (!crmId) {
+          ignoradas++;
+          registrarOcorrencia(relatorio.motivos, "sem_id", JSON.stringify(linha).slice(0, 200));
+          continue;
+        }
+
+        const receitaBruta = valor(linha, col.receita);
+        const receita = dinheiroParaCentavos(receitaBruta);
+        if (receita === null && receitaBruta) {
+          registrarOcorrencia(relatorio.problemas, "receita_invalida", `${crmId}: "${receitaBruta}"`);
+        }
+
+        const etapa = valor(linha, col.etapa);
+        if (etapa && !ETAPAS_CONHECIDAS.has(normalizarNome(etapa))) {
+          registrarOcorrencia(relatorio.problemas, "etapa_desconhecida", `${crmId}: "${etapa}"`);
+        }
+
+        const responsavel = valor(linha, col.responsavel);
+        const pessoaId = resolverPessoa(responsavel);
+        if (responsavel && pessoaId === null) {
+          registrarOcorrencia(relatorio.problemas, "responsavel_sem_match", `${crmId}: "${responsavel}"`);
+        }
+
+        const tempoEtapas = {};
+        for (const c of colunasTempo) tempoEtapas[c] = linha[c] ?? "";
+
+        if (existe.get(crmId)) atualizados++;
+        else novos++;
+        upsert.run({
+          crm_id: crmId,
+          titulo: valor(linha, col.titulo) || null,
+          organizacao: valor(linha, col.organizacao) || null,
+          receita_centavos: receita,
+          etapa: etapa || null,
+          funil: valor(linha, col.funil) || null,
+          motivo_perda: valor(linha, col.motivo_perda) || null,
+          origem: valor(linha, col.origem) || null,
+          formulario: valor(linha, col.formulario) || null,
+          oferta: valor(linha, col.oferta) || null,
+          linha_produto: valor(linha, col.linha_produto) || null,
+          produtos: valor(linha, col.produtos) || null,
+          responsavel: responsavel || null,
+          pessoa_id: pessoaId,
+          criado_em: dataFlexivelIso(valor(linha, col.criado_em)),
+          alterado_em: dataFlexivelIso(valor(linha, col.alterado_em)),
+          tempo_etapas_json: colunasTempo.length ? JSON.stringify(tempoEtapas) : null,
+          importacao_id: importacaoId,
+        });
+      }
+
+      db.prepare(
+        `UPDATE importacoes SET linhas_lidas = ?, linhas_validas = ?, linhas_ignoradas = ?,
+           registros_novos = ?, registros_atualizados = ?, detalhes_json = ?, concluido_em = ?
+         WHERE id = ?`
+      ).run(lidas, lidas - ignoradas, ignoradas, novos, atualizados,
+        JSON.stringify(relatorio), new Date().toISOString(), importacaoId);
+
+      return { importacaoId, novos, atualizados };
+    })();
+
+    return {
+      status: "concluida",
+      importacaoId: resultado.importacaoId,
+      tipo: "oportunidades",
+      arquivo: arquivoNome,
+      linhasLidas: lidas,
+      linhasValidas: lidas - ignoradas,
+      linhasIgnoradas: ignoradas,
+      registrosNovos: resultado.novos,
+      registrosAtualizados: resultado.atualizados,
+      detalhes: relatorio,
+    };
+  } catch (err) {
+    return registrarImportacaoErro("oportunidades", arquivoNome, hash, usuarioId,
+      iniciadoEm, `Falha ao gravar no banco: ${err.message}`);
+  }
+}
+
 module.exports = {
   importarCdr,
+  importarOportunidades,
   // utilitários exportados para os demais importadores/testes
   removerBom,
   hashSha256,
