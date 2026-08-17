@@ -5,6 +5,7 @@ require("dotenv").config();
 const path = require("path");
 const express = require("express");
 const session = require("express-session");
+const SqliteStore = require("better-sqlite3-session-store")(session);
 const Anthropic = require("@anthropic-ai/sdk");
 
 const db = require("./db.js");
@@ -45,6 +46,12 @@ app.set("trust proxy", 1);
 
 app.use(
   session({
+    // Sessões persistidas no mesmo SQLite (tabela sessions): sobrevivem a
+    // restart e substituem o MemoryStore, que não serve para produção.
+    store: new SqliteStore({
+      client: db,
+      expired: { clear: true, intervalMs: 15 * 60 * 1000 },
+    }),
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
