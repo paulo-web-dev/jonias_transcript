@@ -19,6 +19,7 @@ const {
   limparFalhas,
 } = require("./auth.js");
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
+const { importarCdr } = require("./importacao.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -438,6 +439,55 @@ app.get("/api/aulas/:id/docx", async (req, res) => {
     console.error("[/api/aulas/:id/docx]", err.message || err);
     res.status(500).json({ error: "Falha ao gerar o documento Word." });
   }
+});
+
+// ---------- Central de dados: importações ----------
+
+// Uploads chegam como o conteúdo do arquivo em text/plain (o navegador lê com
+// file.text()); nome do arquivo vai na query string.
+const corpoCsv = express.text({
+  type: ["text/plain", "text/csv", "application/octet-stream"],
+  limit: "25mb",
+});
+
+app.post("/api/importacoes/cdr", corpoCsv, (req, res) => {
+  if (typeof req.body !== "string" || !req.body.trim()) {
+    return res
+      .status(400)
+      .json({ error: "Corpo vazio — envie o conteúdo do CSV como text/plain." });
+  }
+  const arquivo = String(req.query.arquivo || "cdr.csv").slice(0, 200);
+  const resultado = importarCdr(req.body, arquivo, req.usuario.id);
+  res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
+});
+
+app.get("/api/importacoes", (req, res) => {
+  const importacoes = db
+    .prepare(
+      `SELECT i.id, i.tipo, i.arquivo_nome, i.linhas_lidas, i.linhas_validas,
+              i.linhas_ignoradas, i.registros_novos, i.registros_atualizados,
+              i.status, i.erro, i.iniciado_em, i.concluido_em, u.login AS usuario
+       FROM importacoes i JOIN usuarios u ON u.id = i.usuario_id
+       ORDER BY i.id DESC LIMIT 50`
+    )
+    .all();
+  res.json({ importacoes });
+});
+
+app.get("/api/importacoes/:id", (req, res) => {
+  const importacao = db
+    .prepare(
+      `SELECT i.*, u.login AS usuario
+       FROM importacoes i JOIN usuarios u ON u.id = i.usuario_id
+       WHERE i.id = ?`
+    )
+    .get(req.params.id);
+  if (!importacao) return res.status(404).json({ error: "Importação não encontrada." });
+  let detalhes = {};
+  try {
+    detalhes = JSON.parse(importacao.detalhes_json || "{}");
+  } catch (_) {}
+  res.json({ ...importacao, detalhes });
 });
 
 // ---------- Erros ----------
