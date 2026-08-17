@@ -53,6 +53,7 @@ const sessao = {
   transcricaoCompleta: "",
   numeroBloco: 0,
   timerId: null,
+  despachoAtual: null, // promise do bloco em voo — o encerramento espera por ela
 };
 
 // Todos os tópicos já gerados — enviados à API para evitar repetição
@@ -153,7 +154,7 @@ function adicionarTextoFinal(texto) {
 
   const pendentes = contarPalavras(sessao.textoPendente);
   if (pendentes >= PALAVRAS_POR_BLOCO && !sessao.processando) {
-    despacharBloco();
+    sessao.despachoAtual = despacharBloco();
   }
 }
 
@@ -172,6 +173,7 @@ function atualizarContadores() {
 
 // ---------- Geração de anotações (API do Claude via backend) ----------
 async function despacharBloco(ehFinal = false) {
+  if (sessao.processando) return; // nunca dois blocos em voo ao mesmo tempo
   const texto = sessao.textoPendente.trim();
   if (!texto) return;
 
@@ -189,11 +191,16 @@ async function despacharBloco(ehFinal = false) {
     if (anotacoes.topicos.length > 0) criarCard(anotacoes, ehFinal);
     atualizarContadores();
   } catch (erro) {
-    // Devolve o bloco para a fila: será reenviado junto com o próximo
-    sessao.textoPendente =
-      texto + (sessao.textoPendente ? " " + sessao.textoPendente : "");
-    atualizarContadores();
-    mostrarAviso(`Falha ao gerar anotações — o bloco será reenviado. (${erro.message})`);
+    if (erro.aulaEncerrada) {
+      // A aula já foi encerrada no servidor (409): a transcrição completa já
+      // está salva — descarta o bloco sem reenfileirar nem avisar em loop.
+    } else {
+      // Devolve o bloco para a fila: será reenviado junto com o próximo
+      sessao.textoPendente =
+        texto + (sessao.textoPendente ? " " + sessao.textoPendente : "");
+      atualizarContadores();
+      mostrarAviso(`Falha ao gerar anotações — o bloco será reenviado. (${erro.message})`);
+    }
   } finally {
     sessao.processando = false;
     if (sessao.ativa) {
@@ -207,7 +214,7 @@ async function despacharBloco(ehFinal = false) {
       sessao.ativa &&
       contarPalavras(sessao.textoPendente) >= PALAVRAS_POR_BLOCO
     ) {
-      despacharBloco();
+      sessao.despachoAtual = despacharBloco();
     }
   }
 }
@@ -232,6 +239,13 @@ async function gerarAnotacoes(textoDoBloco, numeroBloco, ehFinal) {
   if (resposta.status === 401) {
     location.href = "/login";
     throw new Error("sessão expirada");
+  }
+
+  if (resposta.status === 409) {
+    // Aula encerrada no servidor enquanto o bloco estava em voo
+    const erro = new Error("aula já encerrada");
+    erro.aulaEncerrada = true;
+    throw erro;
   }
 
   if (!resposta.ok) {
@@ -398,6 +412,14 @@ async function encerrarAula() {
   el.btnPausar.disabled = true;
   el.btnEncerrar.disabled = true;
   el.btnPausar.innerHTML = '<span class="btn-icone">⏸</span> Pausar';
+
+  // Espera o bloco em voo terminar (com ativa=false ele não encadeia outro):
+  // encerrar antes dele faria a resposta atrasada gravar por cima do final.
+  while (sessao.despachoAtual) {
+    const emVoo = sessao.despachoAtual;
+    await emVoo;
+    if (sessao.despachoAtual === emVoo) sessao.despachoAtual = null;
+  }
 
   // Gera um último card com o que sobrou da transcrição
   if (sessao.textoPendente.trim()) {
