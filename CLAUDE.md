@@ -10,9 +10,11 @@ protegidas por login, e podem ser revisitadas e exportadas em PDF ou Word.
 Dark mode, pensado para projeção em sala.
 
 O jonIAs também é a **central de dados e IA** da operação comercial: ingere o CDR
-do PABX e as oportunidades do CRM Ramper (uploads de CSV), sincroniza matrículas e
-turmas do MySQL da Unyflex como cópia local, e unifica tudo no modelo canônico
-(tabela `pessoas`) — base para as métricas e relatórios da Etapa 2.
+do PABX (upload de CSV) e as oportunidades do CRM **Omie** (upload da planilha
+.xlsx "Planilha de Oportunidades"), sincroniza matrículas e turmas do MySQL da
+Unyflex como cópia local, e unifica tudo no modelo canônico (tabela `pessoas`) —
+base para as métricas e relatórios da Etapa 2. (O importador anterior, do
+Ramper, foi substituído pelo do Omie.)
 
 ## Identidade: o assistente jonIAs
 
@@ -44,8 +46,9 @@ turmas do MySQL da Unyflex como cópia local, e unifica tudo no modelo canônico
 - IA: `@anthropic-ai/sdk`, modelo **`claude-haiku-4-5`**.
 - Exportação: **puppeteer-core** (usa o Chrome já instalado, `channel: "chrome"` —
   sem download de Chromium) para PDF; biblioteca **docx** para Word.
-- Ingestão: **csv-parse** (CDR e Ramper, upload como text/plain via `file.text()`);
-  **mysql2** para a sincronização somente-leitura da Unyflex.
+- Ingestão: **csv-parse** (CDR, upload como text/plain via `file.text()`);
+  **exceljs** (planilha .xlsx do Omie, upload binário via `arrayBuffer()` +
+  `express.raw`); **mysql2** para a sincronização somente-leitura da Unyflex.
 
 ## Estrutura
 
@@ -54,7 +57,7 @@ aula-ai/
 ├── server.js        # Express: login/sessão, páginas, CRUD de aulas, IA, exportação
 ├── db.js            # conexão better-sqlite3 + migrações (PRAGMA user_version)
 ├── auth.js          # hash argon2id, rate limit progressivo do login, seed do admin
-├── importacao.js    # ingestão de CSV: CDR do PABX e oportunidades do Ramper
+├── importacao.js    # ingestão: CDR do PABX (CSV) e oportunidades do Omie (.xlsx)
 ├── sincronizacao.js # sync snapshot do MySQL Unyflex → SQLite local
 ├── exportacao.js    # geração de PDF (puppeteer) e DOCX (docx) + template HTML
 ├── login.html       # tela de login              (rota /login)
@@ -96,7 +99,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **4**.
+pelo mesmo caminho). Versão atual: **5**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -110,14 +113,22 @@ pelo mesmo caminho). Versão atual: **4**.
 
 Central de dados (migração 4; datas/horas operacionais em **horário local**, sem Z):
 
-- `pessoas(id, nome, ramal UNIQUE, crm_user_id UNIQUE, wallet_nome UNIQUE, ativo, entra_feedback)`
-  — unifica os três identificadores dos consultores; seed com os 6 atuais
-  (Renato com `entra_feedback = 0`; `crm_user_id` do Frederico pendente).
-- `importacoes(id, tipo cdr|oportunidades|mysql, arquivo_nome, hash_sha256, linhas_*, registros_*, detalhes_json, status, erro, usuario_id, iniciado/concluido_em)`
+- `pessoas(id, nome, ramal UNIQUE, crm_user_id UNIQUE, wallet_nome UNIQUE, ativo, entra_feedback, nomes_alternativos)`
+  — unifica os identificadores dos consultores; `nomes_alternativos` é um JSON
+  array com os nomes completos como aparecem no "Vendedor" do Omie; seed com os
+  6 atuais (Renato com `entra_feedback = 0`; `crm_user_id` do Frederico pendente).
+- `importacoes(id, tipo cdr|oportunidades|mysql, arquivo_nome, hash_sha256, linhas_*, registros_novos/atualizados/identicos, detalhes_json, status, erro, usuario_id, iniciado/concluido_em)`
   — auditoria de toda ingestão: cada número tem origem explicável.
 - `ligacoes(id, cdr_id UNIQUE, data_hora, ramal, pessoa_id, numero_a/b, sentido, fila, duracao_seg, atendida, eventos, gravacao, importacao_id)`
   — 1 linha = 1 ligação real (eventos do CDR agrupados por ID, `max()` da duração).
-- `oportunidades(id, crm_id UNIQUE, titulo, organizacao, receita_centavos, etapa, funil, motivo_perda, origem, formulario, oferta, linha_produto, produtos, responsavel, pessoa_id, criado/alterado_em, tempo_etapas_json, importacao_id)`.
+- `oportunidades(id, numero UNIQUE "2026/00583", conta, cnpj_cpf, solucao, titulo, contato, vendedor, pessoa_id, tipo_cliente, fase_atual, status, motivo_conclusao, fase_01..06_em, produtos/servicos/recorrencia/ticket_centavos, meses, temperatura, origem, vertical, telefone, celular_1/2, email, incluido/atualizado_em, extras_json, importacao_id)`
+  — modelo do Omie. `fase_atual` (01_Lead novo, 02_Qualificação, 03_Negociação,
+  06_Conclusão) e `status` (Ativo, Perdido, Conquistado) são **dimensões
+  independentes**; `fase_NN_em` guarda a data de entrada em cada fase (as fases
+  04/05 vêm nas colunas sem nome "Data de -"/"Data de --"); telefones só
+  dígitos (futura chave de cruzamento com matrículas); dinheiro em centavos.
+- `oportunidade_mudancas(id, oportunidade_id, campo fase_atual|status|motivo_conclusao|ticket_centavos, valor_anterior, valor_novo, observado_em, importacao_id)`
+  — histórico de mudanças entre importações ("ficou N dias em Qualificação").
 - `turmas(id = classes.id, nome, start_date, sincronizado_em)` e
   `matriculas(id = enrollments.id, turma_id, student_id, aluno_*, wallet, pessoa_id, criada_em, sincronizado_em)`
   — **cópia snapshot** do MySQL, substituída inteira a cada sync.
@@ -136,7 +147,8 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `POST /api/aulas/:id/encerrar` | salva transcrição/duração/status **antes** de gerar o resumo; falha do resumo não perde dados (`erroResumo` no corpo, HTTP 200) |
 | `GET /api/aulas/:id/pdf` e `/docx` | exportação com `Content-Disposition: attachment` |
 | `POST /api/resumo` | mantida da Etapa 2 por compatibilidade |
-| `POST /api/importacoes/cdr?arquivo=` e `/oportunidades?arquivo=` | upload do CSV como corpo text/plain (25 MB); resposta traz o relatório completo (ignoradas com motivo, ressalvas, avisos); erro estrutural → 422 |
+| `POST /api/importacoes/cdr?arquivo=` | upload do CSV como corpo text/plain (25 MB); resposta traz o relatório completo (ignoradas com motivo, ressalvas, avisos); erro estrutural → 422 |
+| `POST /api/importacoes/oportunidades?arquivo=` | upload do .xlsx do Omie como corpo binário (`application/octet-stream`, 25 MB); resposta traz novos/atualizados/idênticos + período coberto (min/max de "Data de Inclusão"); erro estrutural → 422 |
 | `GET /api/importacoes` e `/:id` | auditoria das ingestões (últimas 50 / detalhes) |
 | `POST /api/sincronizacoes/mysql` | copia o snapshot da Unyflex; 503 sem MYSQL_* no .env |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
@@ -174,13 +186,24 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - **Markdown compartilhado**: `js/markdown.js` funciona no navegador
   (`window.MarkdownAula`) e no Node (usado pelo template do PDF).
 - **Ingestão idempotente com auditoria**: dedupe por upsert na chave natural
-  (`ligacoes.cdr_id`, `oportunidades.crm_id`) — reimportar nunca duplica e a
-  reexportação semanal do Ramper atualiza etapas; hash repetido gera aviso.
-  Linha ruim nunca aborta a importação: vira motivo/ressalva no relatório
-  (`detalhes_json`). Armadilhas do CDR tratadas: eventos agrupados por ID com
-  `max()` da duração, linhas sem ID descartadas, rodapé "DURAÇÃO: HH:MM:SS"
-  ignorado, regex tolerante `/(\d{1,2}):(\d{2}):(\d{2})/`, BOM utf-8-sig,
-  atendida = duração > 0.
+  (`ligacoes.cdr_id`, `oportunidades.numero`) — reimportar nunca duplica; hash
+  repetido gera aviso. Linha ruim nunca aborta a importação: vira motivo/ressalva
+  no relatório (`detalhes_json`). Armadilhas do CDR tratadas: eventos agrupados
+  por ID com `max()` da duração, linhas sem ID descartadas, rodapé
+  "DURAÇÃO: HH:MM:SS" ignorado, regex tolerante `/(\d{1,2}):(\d{2}):(\d{2})/`,
+  BOM utf-8-sig, atendida = duração > 0.
+- **Omie: retrato ∪ histórico**: cada exportação cobre só uma janela recente, o
+  banco é a **união** de todas — o upsert por "Número" insere/atualiza e **nunca
+  apaga** o que não veio no arquivo. Linha idêntica ao banco não sofre UPDATE
+  (contada em `registros_identicos`); mudança em fase/status/motivo/ticket vai
+  para `oportunidade_mudancas` (de → para); `fase_NN_em` usa COALESCE no UPDATE
+  (data de fase conhecida nunca regride a NULL). Armadilhas tratadas: cabeçalho
+  na linha 2 (procurado nas 5 primeiras), **"N/D" = NULL** em qualquer coluna,
+  colunas sem nome "Data de -"/"Data de --" = fases 04/05, datas do exceljs
+  lidas com getters UTC (dia literal da planilha, sem deslocar fuso), dinheiro
+  inteiro em reais → centavos, vendedor casado por `pessoas.nomes_alternativos`
+  (sem match = ressalva no relatório, nunca palpite por primeiro nome), colunas
+  não mapeadas preservadas em `extras_json`.
 - **MySQL nunca ao vivo**: relatórios leem só a cópia local (`turmas`/`matriculas`),
   substituída por snapshot transacional a cada sync — mesmos números para o mesmo
   período e zero carga na produção. Usuário exclusivo somente-SELECT no .env.
@@ -214,9 +237,12 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 ### ✅ Etapa 1 (central de dados) — Ingestão e modelo canônico (concluída)
 - Migração 4: `pessoas` (ramal + crm_user_id + wallet unificados), `ligacoes`,
   `oportunidades`, `turmas`, `matriculas`, `metas`, `periodos`, `importacoes`
-- Importadores idempotentes de CDR e Ramper com relatório e auditoria
+- Importadores idempotentes com relatório e auditoria; CDR (CSV) e oportunidades
 - Sincronização snapshot do MySQL Unyflex (somente leitura, cópia local)
 - Tela `/central` (uploads, sync, histórico de ingestões)
+- Migração 5: fonte de oportunidades trocada do Ramper para o **Omie** (.xlsx) —
+  modelo fase × status, datas de entrada por fase, `oportunidade_mudancas`,
+  `pessoas.nomes_alternativos`, contador de idênticos na auditoria
 
 ### Etapa 2 (central de dados) — Métricas, relatórios e IA (próxima)
 - Métricas por consultor × metas (ligações/dia, leads/dia, matrículas/dia)
