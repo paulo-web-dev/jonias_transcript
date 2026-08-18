@@ -363,6 +363,16 @@ const MIGRACOES = [
       CREATE INDEX idx_snapshots_periodo ON periodo_snapshots(periodo_id, id);
     `);
   },
+
+  // 9 — Metas padrão retroativas: o seed da migração 4 fixou vigente_desde no
+  // dia do deploy (2026-08-17), deixando qualquer período anterior sem meta.
+  // As metas 45/14/1,3 valem como padrão histórico desde o início do ano.
+  () => {
+    db.exec(`
+      UPDATE metas SET vigente_desde = '2026-01-01'
+       WHERE pessoa_id IS NULL AND vigente_desde = '2026-08-17';
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
