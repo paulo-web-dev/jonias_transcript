@@ -209,6 +209,85 @@ const MIGRACOES = [
         (NULL, 'matriculas_dia', 1.3, '2026-08-17');
     `);
   },
+
+  // 5 — Oportunidades passam a vir do Omie (.xlsx), não mais do Ramper.
+  // A tabela antiga (formato Ramper, vazia) é substituída pelo modelo Omie:
+  // "Fase Atual" e "Status" são dimensões independentes (um Perdido continua
+  // registrado na fase onde parou), cada fase tem a data de entrada (colunas
+  // "Data de <fase>" do arquivo; as duas sem nome são as fases 04 e 05) e o
+  // upsert por "Número" nunca apaga o que não veio no arquivo — cada exportação
+  // é um retrato de janela recente e o banco é a união de todas.
+  () => {
+    db.exec(`
+      -- Nomes completos como aparecem na coluna "Vendedor" do Omie (JSON array)
+      ALTER TABLE pessoas ADD COLUMN nomes_alternativos TEXT;
+      UPDATE pessoas SET nomes_alternativos = CASE nome
+        WHEN 'Bianca'    THEN json_array('Bianca Destro')
+        WHEN 'Hirlan'    THEN json_array('Hirlan Rosário')
+        WHEN 'Agnes'     THEN json_array('Agnes Dias Ramos')
+        WHEN 'Renato'    THEN json_array('Renato')
+        WHEN 'Douglas'   THEN json_array('Douglas Gotordelli Alves Martins')
+        WHEN 'Frederico' THEN json_array('Frederico Vieira')
+        ELSE nomes_alternativos END;
+
+      ALTER TABLE importacoes ADD COLUMN registros_identicos INTEGER NOT NULL DEFAULT 0;
+
+      DROP TABLE oportunidades;
+      CREATE TABLE oportunidades (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        numero           TEXT    NOT NULL UNIQUE,
+        conta            TEXT,
+        cnpj_cpf         TEXT,
+        solucao          TEXT,
+        titulo           TEXT,
+        contato          TEXT,
+        vendedor         TEXT,
+        pessoa_id        INTEGER REFERENCES pessoas(id),
+        tipo_cliente     TEXT,
+        fase_atual       TEXT,
+        status           TEXT,
+        motivo_conclusao TEXT,
+        fase_01_em       TEXT,
+        fase_02_em       TEXT,
+        fase_03_em       TEXT,
+        fase_04_em       TEXT,
+        fase_05_em       TEXT,
+        fase_06_em       TEXT,
+        produtos_centavos    INTEGER,
+        servicos_centavos    INTEGER,
+        recorrencia_centavos INTEGER,
+        meses            INTEGER,
+        ticket_centavos  INTEGER,
+        temperatura      INTEGER,
+        origem           TEXT,
+        vertical         TEXT,
+        telefone         TEXT,
+        celular_1        TEXT,
+        celular_2        TEXT,
+        email            TEXT,
+        incluido_em      TEXT,
+        atualizado_em    TEXT,
+        extras_json      TEXT,
+        importacao_id    INTEGER NOT NULL REFERENCES importacoes(id)
+      );
+      CREATE INDEX idx_oportunidades_pessoa   ON oportunidades(pessoa_id, incluido_em);
+      CREATE INDEX idx_oportunidades_fase     ON oportunidades(fase_atual);
+      CREATE INDEX idx_oportunidades_status   ON oportunidades(status);
+      CREATE INDEX idx_oportunidades_origem   ON oportunidades(origem);
+      CREATE INDEX idx_oportunidades_incluido ON oportunidades(incluido_em);
+
+      CREATE TABLE oportunidade_mudancas (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        oportunidade_id INTEGER NOT NULL REFERENCES oportunidades(id) ON DELETE CASCADE,
+        campo           TEXT    NOT NULL CHECK (campo IN ('fase_atual','status','motivo_conclusao','ticket_centavos')),
+        valor_anterior  TEXT,
+        valor_novo      TEXT,
+        observado_em    TEXT    NOT NULL,
+        importacao_id   INTEGER NOT NULL REFERENCES importacoes(id)
+      );
+      CREATE INDEX idx_mudancas_oportunidade ON oportunidade_mudancas(oportunidade_id, observado_em);
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
