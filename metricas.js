@@ -283,41 +283,175 @@ function saudeDosDados() {
   };
 }
 
-// ---------- Modo TV (payload tratado como PÚBLICO) ----------
-// Só agregados do time, ranking de VOLUME (discadas e leads) e progresso
-// coletivo × metas. Nunca: receita por consultor, taxa/TMA individual,
-// feedback ou comparativo qualitativo — o corte é aqui no servidor: os campos
-// nem existem no payload.
-function dadosTv() {
-  const hoje = new Date();
-  const p = (n) => String(n).padStart(2, "0");
-  const iso = (d) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  const segunda = new Date(hoje);
-  segunda.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7)); // seg da semana corrente
-  const de = iso(segunda);
-  const ate = iso(hoje);
-  const m = calcularMetricas(de, ate);
-  return {
-    de,
-    ate,
-    diasUteis: m.diasUteis,
-    atualizadoEm: m.calculadoEm,
-    equipe: {
-      discadas: m.equipe.discadas,
-      metaDiscadas: m.equipe.metaDiscadas,
-      leadsNovos: m.equipe.leadsNovos,
-      metaLeads: m.equipe.metaLeads,
-      matriculas: m.equipe.matriculas,
-      metaMatriculas: m.equipe.metaMatriculas,
-      vendas: m.equipe.vendas,
-    },
-    rankingLigacoes: m.porPessoa
-      .map((x) => ({ nome: x.nome, discadas: x.ligacoes.discadas.valor }))
-      .sort((a, b) => b.discadas - a.discadas),
-    rankingLeads: m.porPessoa
-      .map((x) => ({ nome: x.nome, leads: x.funil.leadsNovos.valor }))
-      .sort((a, b) => b.leads - a.leads),
-  };
+// ---------- Dashboard de TV (payload tratado como PÚBLICO) ----------
+// Por decisão do usuário (revoga a restrição da Etapa 2), a TV MOSTRA receita
+// por consultor e ranking de receita. Continua fora: feedback, pontos de
+// melhoria e qualquer texto avaliativo sobre pessoas — só número, e todos
+// saem do motor SQL acima. Jornada de referência: 09:00–18:00.
+
+const JORNADA = { inicio: 9, fim: 18 }; // horas locais; define ritmo do dia e atraso útil
+
+const p2 = (n) => String(n).padStart(2, "0");
+const isoDia = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+
+function diaUtilAnterior(data) {
+  const d = new Date(data + "T00:00:00");
+  do d.setDate(d.getDate() - 1);
+  while (d.getDay() === 0 || d.getDay() === 6);
+  return isoDia(d);
 }
 
-module.exports = { diasUteis, metasVigentes, calcularMetricas, saudeDosDados, dadosTv };
+// Fonte atrasada = sem dado desde antes do último dia útil anterior a hoje
+// ("mais de 24h úteis"); fim de semana não conta.
+function fonteAtrasada(dadosAte, hoje) {
+  if (!dadosAte) return true;
+  return String(dadosAte).slice(0, 10) < diaUtilAnterior(hoje);
+}
+
+// Ritmo do dia parcial: projeção para o fim da jornada com base na HORA DO
+// ÚLTIMO DADO (não no relógio — se o upload parou às 10h, o dia "parou" às 10h)
+function calcularRitmo(valor, metaDia, horaUltimoDado) {
+  if (metaDia == null || !horaUltimoDado) return { projecao: null, estado: null };
+  const m = /T(\d{2}):(\d{2})/.exec(horaUltimoDado);
+  if (!m) return { projecao: null, estado: null };
+  const horas = Number(m[1]) + Number(m[2]) / 60;
+  const fracao = Math.min(1, Math.max(0, (horas - JORNADA.inicio) / (JORNADA.fim - JORNADA.inicio)));
+  if (fracao < 0.1) return { projecao: null, estado: null, fracao }; // cedo demais para projetar
+  const projecao = Math.round(valor / fracao);
+  const estado = projecao >= metaDia * 1.1 ? "adiantado" : projecao <= metaDia * 0.9 ? "atrasado" : "no_ritmo";
+  return { projecao, estado, fracao };
+}
+
+function dadosTvCompleto() {
+  const agora = new Date();
+  const hoje = isoDia(agora);
+  const segunda = new Date(agora);
+  segunda.setDate(agora.getDate() - ((agora.getDay() + 6) % 7));
+  const semanaDe = isoDia(segunda);
+  const mesDe = hoje.slice(0, 8) + "01";
+  const mesFim = isoDia(new Date(agora.getFullYear(), agora.getMonth() + 1, 0));
+
+  // ---- Frescor (nunca mostrar dado velho como se fosse de hoje) ----
+  const dadoAte = (sql) => db.prepare(sql).get().v;
+  const ultimaIngestao = (tipo) =>
+    db.prepare(`SELECT concluido_em FROM importacoes
+      WHERE tipo = ? AND status = 'concluida' ORDER BY id DESC LIMIT 1`).get(tipo)?.concluido_em ?? null;
+  const frescorDe = (dadosAte, tipo) => ({
+    dadosAte,
+    ultimaIngestao: ultimaIngestao(tipo),
+    atrasada: fonteAtrasada(dadosAte, hoje),
+  });
+  const frescor = {
+    cdr: frescorDe(dadoAte("SELECT MAX(data_hora) v FROM ligacoes"), "cdr"),
+    omie: frescorDe(dadoAte("SELECT MAX(incluido_em) v FROM oportunidades"), "oportunidades"),
+    mysql: frescorDe(dadoAte("SELECT MAX(criada_em) v FROM matriculas"), "mysql"),
+  };
+
+  // ---- Dia (parcial, com ritmo) ----
+  const mDia = calcularMetricas(hoje, hoje);
+  const ultimoDadoHoje = db
+    .prepare("SELECT MAX(data_hora) v FROM ligacoes WHERE data_hora >= ?")
+    .get(hoje).v;
+  const dia = {
+    data: hoje,
+    temDadoHoje: !!ultimoDadoHoje,
+    dadosAte: ultimoDadoHoje ?? frescor.cdr.dadosAte,
+    emCurso: mDia.diasUteis > 0,
+    porPessoa: mDia.porPessoa.map((p) => {
+      const ritmo = calcularRitmo(p.ligacoes.discadas.valor, p.ligacoes.discadas.metaDia, ultimoDadoHoje);
+      return {
+        nome: p.nome,
+        discadas: {
+          valor: p.ligacoes.discadas.valor,
+          metaDia: p.ligacoes.discadas.metaDia,
+          atingimento: p.ligacoes.discadas.atingimento,
+          projecao: ritmo.projecao,
+          estado: ritmo.estado,
+        },
+        atendidas: p.ligacoes.atendidas,
+        taxaAtendimento: p.ligacoes.taxaAtendimento,
+        leads: { valor: p.funil.leadsNovos.valor, metaDia: p.funil.leadsNovos.metaDia },
+        matriculas: { valor: p.matriculas.valor, metaDia: p.matriculas.metaDia },
+        receitaCentavos: p.receitaCentavos,
+      };
+    }),
+    rankingLigacoes: mDia.porPessoa
+      .map((p) => ({ nome: p.nome, valor: p.ligacoes.discadas.valor }))
+      .sort((a, b) => b.valor - a.valor),
+    rankingMatriculas: mDia.porPessoa
+      .map((p) => ({ nome: p.nome, valor: p.matriculas.valor }))
+      .sort((a, b) => b.valor - a.valor),
+  };
+
+  // ---- Semana corrente (meta × dias úteis decorridos — o motor já escala) ----
+  const mSemana = calcularMetricas(semanaDe, hoje);
+  const semana = {
+    de: semanaDe,
+    ate: hoje,
+    diasUteis: mSemana.diasUteis,
+    porPessoa: mSemana.porPessoa.map((p) => ({
+      nome: p.nome,
+      discadas: {
+        valor: p.ligacoes.discadas.valor,
+        meta: p.ligacoes.discadas.meta,
+        atingimento: p.ligacoes.discadas.atingimento,
+      },
+      atendidas: p.ligacoes.atendidas,
+      taxaAtendimento: p.ligacoes.taxaAtendimento,
+      leads: { valor: p.funil.leadsNovos.valor, meta: p.funil.leadsNovos.meta, atingimento: p.funil.leadsNovos.atingimento },
+      matriculas: { valor: p.matriculas.valor, meta: p.matriculas.meta, atingimento: p.matriculas.atingimento },
+      receitaCentavos: p.receitaCentavos,
+    })),
+    equipe: {
+      discadas: mSemana.equipe.discadas,
+      metaDiscadas: mSemana.equipe.metaDiscadas,
+      leadsNovos: mSemana.equipe.leadsNovos,
+      metaLeads: mSemana.equipe.metaLeads,
+      matriculas: mSemana.equipe.matriculas,
+      metaMatriculas: mSemana.equipe.metaMatriculas,
+      vendas: mSemana.equipe.vendas,
+      receitaCentavos: mSemana.equipe.receitaCentavos,
+    },
+    rankingLigacoes: mSemana.porPessoa
+      .map((p) => ({ nome: p.nome, valor: p.ligacoes.discadas.valor }))
+      .sort((a, b) => b.valor - a.valor),
+    rankingLeads: mSemana.porPessoa
+      .map((p) => ({ nome: p.nome, valor: p.funil.leadsNovos.valor }))
+      .sort((a, b) => b.valor - a.valor),
+    rankingReceita: mSemana.porPessoa
+      .map((p) => ({ nome: p.nome, valor: p.receitaCentavos }))
+      .sort((a, b) => b.valor - a.valor),
+  };
+
+  // ---- Mês (receita × meta mensal) ----
+  const metasMes = metasVigentes(mesDe, mesFim);
+  const receitaMes = new Map(db.prepare(
+    `SELECT pessoa_id, SUM(COALESCE(valor_centavos, 0)) receita FROM matriculas
+     WHERE criada_em BETWEEN ? AND ? AND (status IS NULL OR status != 'canceled')
+       AND pessoa_id IS NOT NULL GROUP BY pessoa_id`).all(mesDe, hoje + "T23:59:59")
+    .map((r) => [r.pessoa_id, r.receita]));
+  const consultores = db
+    .prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 ORDER BY nome")
+    .all();
+  const decorridos = diasUteis(mesDe, hoje);
+  const mes = {
+    mes: hoje.slice(0, 7),
+    diasUteisDecorridos: decorridos,
+    diasUteisRestantes: diasUteis(mesDe, mesFim) - decorridos,
+    porPessoa: consultores.map((c) => {
+      const meta = metasMes.porPessoa[c.id]?.receita_mes ?? metasMes.padrao.receita_mes ?? null;
+      const receita = receitaMes.get(c.id) || 0;
+      return {
+        nome: c.nome,
+        receitaCentavos: receita,
+        metaCentavos: meta,
+        atingimento: meta ? pct(receita, meta) : null,
+        faltaCentavos: meta ? Math.max(0, meta - receita) : null,
+      };
+    }),
+  };
+
+  return { atualizadoEm: new Date().toISOString(), jornada: JORNADA, frescor, dia, semana, mes };
+}
+
+module.exports = { diasUteis, metasVigentes, calcularMetricas, saudeDosDados, dadosTvCompleto };

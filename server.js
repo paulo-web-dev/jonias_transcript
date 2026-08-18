@@ -22,7 +22,7 @@ const {
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
 const { importarCdr, importarOportunidadesOmie } = require("./importacao.js");
 const { sincronizarMysql, credenciaisMysql } = require("./sincronizacao.js");
-const { calcularMetricas, diasUteis, saudeDosDados, dadosTv } = require("./metricas.js");
+const { calcularMetricas, diasUteis, saudeDosDados, dadosTvCompleto } = require("./metricas.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -168,7 +168,7 @@ app.get("/api/tv/dados", (req, res) => {
   const ok = tokenTvValido(req);
   if (ok === null) return res.status(503).json({ error: "Modo TV desabilitado." });
   if (!ok) return res.status(401).json({ error: "Token inválido." });
-  res.json(dadosTv());
+  res.json(dadosTvCompleto());
 });
 
 // Todas as demais rotas /api/* exigem login
