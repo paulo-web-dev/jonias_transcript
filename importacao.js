@@ -178,6 +178,53 @@ const COLUNAS_CDR = {
 // depender de blacklist de rótulos.
 const RE_CDR_ID = /^\d+\.\d+$/;
 
+// Eventos de falha explícita do PABX (comparados sem acento/caixa)
+const FALHAS_CDR = new Set(["ocupado", "nao atendeu", "rejeitada", "destino desconectado"]);
+
+// Diferença em segundos entre dois ISO locais ("YYYY-MM-DDTHH:MM:SS")
+function segundosEntreIso(a, b) {
+  const p = (s) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(String(s || ""));
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
+  };
+  const ta = p(a);
+  const tb = p(b);
+  if (ta === null || tb === null) return null;
+  const seg = Math.round((tb - ta) / 1000);
+  return seg < 0 ? null : seg;
+}
+
+// Sinais brutos de atendimento de uma ligação, a partir dos eventos do grupo.
+// A hora das linhas COM ID é sempre o início da chamada, então o momento real
+// do atendimento vem das linhas de evento sem ID; as com ID são só fallback.
+function sinaisDoGrupo(grupo) {
+  let atendidaEm = null;
+  let atendidaEmFallback = null;
+  let encerradaEm = null;
+  let eventoFalha = null;
+  for (const { evento, hora, propria } of grupo.eventosLinhas) {
+    const norm = normalizarNome(evento);
+    if (norm === "atendida") {
+      if (!propria && hora && (!atendidaEm || hora < atendidaEm)) atendidaEm = hora;
+      if (propria && hora && (!atendidaEmFallback || hora < atendidaEmFallback)) atendidaEmFallback = hora;
+    } else if (norm === "encerrada") {
+      if (hora && (!encerradaEm || hora > encerradaEm)) encerradaEm = hora;
+    } else if (FALHAS_CDR.has(norm) && !eventoFalha) {
+      eventoFalha = evento; // guarda o texto como veio no arquivo
+    }
+  }
+  const temAtendida = grupo.eventosLinhas.some((e) => normalizarNome(e.evento) === "atendida");
+  atendidaEm = atendidaEm ?? atendidaEmFallback;
+  return {
+    tem_evento_atendida: temAtendida ? 1 : 0,
+    evento_falha: eventoFalha,
+    atendida_em: atendidaEm,
+    encerrada_em: encerradaEm,
+    tempo_toque_seg: segundosEntreIso(grupo.dataHora, atendidaEm),
+    tempo_conversa_seg: segundosEntreIso(atendidaEm, encerradaEm),
+  };
+}
+
 function importarCdr(textoBruto, arquivoNome, usuarioId) {
   const iniciadoEm = new Date().toISOString();
   const texto = removerBom(textoBruto);
@@ -204,18 +251,31 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
       .map((p) => [p.ramal, p.id])
   );
 
-  // Agrupa eventos por ID de ligação: max(duração), menor HORA, demais campos
-  // do primeiro evento.
+  // Agrupa o arquivo por ligação. O CSV vem em "retratos repetidos": a linha
+  // com ID reaparece várias vezes (só a última traz a duração total) e as
+  // linhas SEM ID são os eventos da mesma ligação (Atendida, Encerrada,
+  // Ocupado…), intercaladas por posição logo abaixo do seu ID. Por isso a
+  // ordem do arquivo importa: cada linha sem ID pertence ao último ID válido.
   const grupos = new Map();
   let lidas = 0;
   let ignoradas = 0;
+  let grupoAtual = null;
 
   for (const linha of linhas) {
     lidas++;
     const cdrId = valor(linha, col.id);
+    const evento = valor(linha, col.evento);
+    const hora = dataHoraLocalIso(valor(linha, col.hora));
+
     if (!cdrId) {
-      ignoradas++;
-      registrarOcorrencia(relatorio.motivos, "sem_id", JSON.stringify(linha).slice(0, 200));
+      // Linha de evento da ligação corrente (não é descarte)
+      if (!grupoAtual) {
+        ignoradas++;
+        registrarOcorrencia(relatorio.motivos, "evento_orfao", JSON.stringify(linha).slice(0, 200));
+        continue;
+      }
+      if (evento) grupoAtual.eventosLinhas.push({ evento, hora, propria: false });
+      grupoAtual.eventos++;
       continue;
     }
     if (!RE_CDR_ID.test(cdrId)) {
@@ -226,10 +286,12 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
 
     let grupo = grupos.get(cdrId);
     if (!grupo) {
-      grupo = { primeiro: linha, eventos: 0, duracaoSeg: 0, dataHora: null };
+      grupo = { primeiro: linha, eventos: 0, duracaoSeg: 0, dataHora: null, eventosLinhas: [] };
       grupos.set(cdrId, grupo);
     }
+    grupoAtual = grupo;
     grupo.eventos++;
+    if (evento) grupo.eventosLinhas.push({ evento, hora, propria: true });
 
     const bruto = valor(linha, col.duracao);
     const seg = duracaoParaSegundos(bruto);
@@ -239,7 +301,6 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
       grupo.duracaoSeg = Math.max(grupo.duracaoSeg, seg);
     }
 
-    const hora = dataHoraLocalIso(valor(linha, col.hora));
     if (hora === null && valor(linha, col.hora)) {
       registrarOcorrencia(relatorio.problemas, "hora_invalida", `${cdrId}: "${valor(linha, col.hora)}"`);
     } else if (hora && (!grupo.dataHora || hora < grupo.dataHora)) {
@@ -249,16 +310,26 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
 
   const upsert = db.prepare(
     `INSERT INTO ligacoes (cdr_id, data_hora, ramal, pessoa_id, numero_a, numero_b,
-       sentido, fila, duracao_seg, atendida, eventos, gravacao, importacao_id)
+       sentido, fila, duracao_seg, atendida, eventos, gravacao,
+       tem_evento_atendida, evento_falha, atendida_em, encerrada_em,
+       tempo_toque_seg, tempo_conversa_seg, importacao_id)
      VALUES (@cdr_id, @data_hora, @ramal, @pessoa_id, @numero_a, @numero_b,
-       @sentido, @fila, @duracao_seg, @atendida, @eventos, @gravacao, @importacao_id)
+       @sentido, @fila, @duracao_seg, @atendida, @eventos, @gravacao,
+       @tem_evento_atendida, @evento_falha, @atendida_em, @encerrada_em,
+       @tempo_toque_seg, @tempo_conversa_seg, @importacao_id)
      ON CONFLICT(cdr_id) DO UPDATE SET
        data_hora = excluded.data_hora, ramal = excluded.ramal,
        pessoa_id = excluded.pessoa_id, numero_a = excluded.numero_a,
        numero_b = excluded.numero_b, sentido = excluded.sentido,
        fila = excluded.fila, duracao_seg = excluded.duracao_seg,
        atendida = excluded.atendida, eventos = excluded.eventos,
-       gravacao = excluded.gravacao, importacao_id = excluded.importacao_id`
+       gravacao = excluded.gravacao,
+       tem_evento_atendida = excluded.tem_evento_atendida,
+       evento_falha = excluded.evento_falha,
+       atendida_em = excluded.atendida_em, encerrada_em = excluded.encerrada_em,
+       tempo_toque_seg = excluded.tempo_toque_seg,
+       tempo_conversa_seg = excluded.tempo_conversa_seg,
+       importacao_id = excluded.importacao_id`
   );
   const buscarExistente = db.prepare("SELECT * FROM ligacoes WHERE cdr_id = ?");
 
@@ -282,6 +353,7 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
         if (ramal && pessoaId === null) {
           registrarOcorrencia(relatorio.problemas, "ramal_desconhecido", `${ramal} (ligação ${cdrId})`);
         }
+        const sinais = sinaisDoGrupo(grupo);
         const registro = {
           cdr_id: cdrId,
           data_hora: grupo.dataHora,
@@ -291,10 +363,13 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
           numero_b: valor(linha, col.numero_b) || null,
           sentido: valor(linha, col.sentido) || null,
           fila: valor(linha, col.fila) || null,
-          duracao_seg: grupo.duracaoSeg,
-          atendida: grupo.duracaoSeg > 0 ? 1 : 0,
+          duracao_seg: grupo.duracaoSeg, // bruta do arquivo (toque + conversa)
+          // Classificação DERIVADA dos sinais: só é atendida quem tem o evento
+          // "Atendida" (a duração bruta > 0 inclui toque de Ocupado/Não atendeu).
+          atendida: sinais.tem_evento_atendida,
           eventos: grupo.eventos,
           gravacao: valor(linha, col.gravacao) || null,
+          ...sinais,
           importacao_id: importacaoId,
         };
         const existente = buscarExistente.get(cdrId);
