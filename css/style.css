@@ -928,9 +928,9 @@ body {
 }
 .lista-simples li span:last-child { color: var(--texto-suave); white-space: nowrap; }
 
-/* ============ Dashboard de TV ============ */
+/* ============ Painel de TV 2.0 ============ */
 
-body.tv { padding: 1.2vw 1.6vw; overflow: hidden; }
+body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: column; height: 100vh; }
 
 .tv-topo {
   display: flex;
@@ -940,134 +940,170 @@ body.tv { padding: 1.2vw 1.6vw; overflow: hidden; }
   margin-bottom: 1vw;
 }
 .tv-topo h1 { font-size: 2vw; white-space: nowrap; }
-.tv-frescor {
-  display: flex;
-  gap: 1.4vw;
-  align-items: center;
-  font-size: 1.15vw;
-  color: var(--texto-suave);
-}
-.tv-frescor .tv-atrasada {
-  color: var(--amarelo);
-  font-weight: 700;
-  animation: tv-pulso 2s infinite;
-}
-@keyframes tv-pulso { 50% { opacity: 0.45; } }
+.tv-frescor { display: flex; gap: 1.3vw; align-items: center; font-size: 1.15vw; color: var(--texto-suave); }
+.tv-frescor .tv-atrasada { color: var(--amarelo); font-weight: 800; animation: tv-pulso 2s infinite; }
+@keyframes tv-pulso { 50% { opacity: 0.4; } }
+#tv-push, #tv-som { font-size: 1.3vw; }
 .tv-relogio { color: var(--texto-suave); }
 
-.tv-paineis {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-areas: "dia semana" "mes mes";
-  gap: 1.2vw;
+/* Visões em rotação (crossfade) */
+.tv-visoes { position: relative; flex: 1; min-height: 0; }
+.tv-visao {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+  display: flex;
+  flex-direction: column;
 }
-#painel-dia { grid-area: dia; }
-#painel-semana { grid-area: semana; }
-#painel-mes { grid-area: mes; }
+.tv-visao.tv-ativa { opacity: 1; }
+.tv-visao.tv-fora { display: none; }
+.tv-visao h2 {
+  font-size: 1.7vw;
+  letter-spacing: 2px;
+  margin-bottom: 1vw;
+  color: var(--texto);
+}
+.tv-corpo { display: grid; grid-template-columns: 1fr 26vw; gap: 2vw; flex: 1; min-height: 0; }
 
-.tv-painel {
-  background: var(--fundo-painel);
-  border: 1px solid var(--borda-painel);
-  border-radius: var(--raio);
-  padding: 1vw 1.2vw;
-  position: relative;
+.tv-rodape { display: flex; justify-content: center; padding-top: 0.6vw; }
+.tv-indicador { font-size: 1vw; color: var(--texto-suave); display: flex; gap: 0.6vw; align-items: center; }
+.tv-indicador .ponto-ativo { color: var(--acento-2); }
+.tv-indicador b { margin-left: 0.5vw; letter-spacing: 2px; }
+
+/* Linha por consultor: nome + barra longa dominam; detalhe é letra pequena */
+.tv-linhas { display: flex; flex-direction: column; gap: 1.1vw; }
+.tv-linha-topo { display: flex; align-items: baseline; gap: 1.2vw; }
+.tv-linha-nome { font-size: 1.9vw; font-weight: 800; min-width: 12vw; }
+.tv-linha-valor b { font-size: 2.3vw; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tv-linha-valor i { font-style: normal; font-size: 1.3vw; color: var(--texto-suave); }
+.tv-linha-status { font-size: 1.25vw; font-weight: 700; margin-left: auto; }
+.status-adiantado { color: var(--verde); }
+.status-no_ritmo { color: var(--acento-2); }
+.status-atrasado { color: var(--vermelho); }
+.status-neutro { color: var(--texto-suave); font-weight: 400; }
+
+.tv-trilha {
+  height: 1.3vw;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+  margin: 0.35vw 0;
 }
-.tv-painel h2 {
-  font-size: 1.3vw;
+.tv-trilha-grande { height: 2.2vw; }
+.tv-fill {
+  height: 100%;
+  width: 0;
+  background: var(--grad);
+  border-radius: 999px;
+  transition: width 0.8s ease;
+}
+.tv-fill.fill-ok { background: linear-gradient(135deg, var(--verde), var(--acento-2)); }
+.tv-linha-detalhe { font-size: 1.05vw; color: var(--texto-suave); }
+.tv-sem-dados .tv-trilha, .tv-sem-dados .tv-linha-valor { opacity: 0.35; }
+
+/* Selo do dia sem CDR (só aparece com ?dia=sempre) */
+.tv-selo {
+  align-self: center;
+  background: rgba(255, 200, 87, 0.12);
+  border: 1px solid var(--amarelo);
+  color: var(--amarelo);
+  font-size: 1.2vw;
+  font-weight: 800;
+  padding: 0.4vw 1.2vw;
+  border-radius: 999px;
+  margin-bottom: 0.8vw;
+}
+
+/* Pódio */
+.tv-podios { display: flex; flex-direction: column; gap: 1.2vw; justify-content: flex-start; }
+.tv-podio h3 {
+  font-size: 1.05vw;
   color: var(--texto-suave);
   text-transform: uppercase;
   letter-spacing: 2px;
-  margin-bottom: 0.8vw;
+  margin-bottom: 0.5vw;
 }
-.tv-esmaecido .tv-cards-pessoas, .tv-esmaecido .tv-rankings { opacity: 0.35; }
-.tv-selo {
-  position: absolute;
-  top: 3.2vw;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-  background: rgba(255, 92, 114, 0.15);
-  border: 1px solid var(--vermelho);
-  color: var(--vermelho);
-  font-size: 1.3vw;
-  font-weight: 800;
-  padding: 0.5vw 1.2vw;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.tv-cards-pessoas {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.8vw;
-  margin-bottom: 0.9vw;
-}
-.tv-pessoa {
-  background: rgba(255, 255, 255, 0.03);
+.tv-podio-blocos { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5vw; align-items: end; }
+.tv-podio-bloco {
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--borda-painel);
-  border-radius: 12px;
-  padding: 0.7vw 0.9vw;
-}
-.tv-pessoa-nome { font-size: 1.25vw; font-weight: 800; margin-bottom: 0.2vw; }
-.tv-pessoa-principal { display: flex; align-items: baseline; gap: 0.5vw; flex-wrap: wrap; }
-.tv-num { font-size: 2.4vw; font-weight: 800; font-variant-numeric: tabular-nums; }
-.tv-meta-sub { font-size: 1vw; color: var(--texto-suave); }
-.tv-pct { font-size: 1.15vw; font-weight: 800; }
-.tv-ritmo { font-size: 0.95vw; font-weight: 700; width: 100%; }
-.ritmo-adiantado { color: var(--verde); }
-.ritmo-no_ritmo { color: var(--acento-2); }
-.ritmo-atrasado { color: var(--vermelho); }
-.tv-pessoa-linhas {
+  border-radius: 10px 10px 0 0;
+  text-align: center;
+  padding: 0.5vw 0.3vw;
   display: flex;
   flex-direction: column;
-  gap: 0.15vw;
-  margin-top: 0.4vw;
-  font-size: 1vw;
-  color: var(--texto-suave);
+  gap: 0.1vw;
 }
-.tv-pessoa-linhas b { color: var(--texto); font-variant-numeric: tabular-nums; }
-.tv-pessoa-linhas i { font-style: normal; font-size: 0.85vw; }
+.podio-1 { min-height: 7vw; background: rgba(108, 123, 255, 0.16); border-color: var(--acento); }
+.podio-2 { min-height: 5.4vw; }
+.podio-3 { min-height: 4.4vw; }
+.tv-podio-vazio { visibility: hidden; }
+.tv-podio-medalha { font-size: 1.6vw; }
+.tv-podio-nome { font-size: 1.05vw; font-weight: 800; }
+.tv-podio-valor { font-size: 1.25vw; font-weight: 800; color: var(--acento-2); font-variant-numeric: tabular-nums; }
 
-.tv-rankings { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 0.8vw; }
-.tv-ranking h3 {
-  font-size: 1vw;
-  color: var(--texto-suave);
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  margin-bottom: 0.4vw;
-}
-.tv-ranking ol { list-style: none; }
-.tv-ranking li {
+/* Mês: a visão mais espaçosa — barras grandes */
+#visao-mes .tv-barras-mes { display: flex; flex-direction: column; gap: 1.4vw; flex: 1; justify-content: center; }
+.tv-barra-mes { display: grid; grid-template-columns: 11vw 1fr 11vw 20vw; align-items: center; gap: 1.4vw; }
+.tv-barra-mes-nome { font-size: 2vw; font-weight: 800; }
+.tv-barra-mes-valor { font-size: 2.2vw; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.tv-barra-mes-extra { font-size: 1.2vw; color: var(--texto-suave); }
+.tv-mes-rodape { text-align: center; font-size: 1.5vw; font-weight: 700; padding-top: 0.8vw; }
+
+/* Destaques ao mudar */
+@keyframes tv-brilho { 0% { box-shadow: 0 0 0 rgba(108,123,255,0); } 20% { box-shadow: 0 0 2vw rgba(108,123,255,0.7); } 100% { box-shadow: 0 0 0 rgba(108,123,255,0); } }
+.tv-glow { animation: tv-brilho 4s ease-out; border-radius: 12px; }
+@keyframes tv-brilho-meta { 0% { box-shadow: 0 0 0 rgba(61,220,132,0); } 20% { box-shadow: 0 0 2.4vw rgba(61,220,132,0.8); } 100% { box-shadow: 0 0 0 rgba(61,220,132,0); } }
+.tv-glow-meta { animation: tv-brilho-meta 4s ease-out; border-radius: 12px; }
+
+/* Celebração de matrícula */
+.tv-celebracao {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
   display: flex;
-  justify-content: space-between;
-  font-size: 1.15vw;
-  padding: 0.18vw 0;
-  border-bottom: 1px dashed var(--borda-painel);
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 14, 23, 0.82);
 }
-.tv-ranking li strong { font-variant-numeric: tabular-nums; }
-.tv-ranking li:first-child { color: var(--acento-2); font-weight: 800; }
-
-.tv-barras { display: flex; flex-direction: column; gap: 0.5vw; }
-.tv-barra-linha { display: grid; grid-template-columns: 9vw 1fr 24vw; align-items: center; gap: 1vw; }
-.tv-barra-nome { font-size: 1.3vw; font-weight: 800; }
-.tv-barra-trilha {
-  height: 1.6vw;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  overflow: hidden;
-}
-.tv-barra-fill {
-  height: 100%;
+.tv-celebracao.oculto { display: none; }
+.tv-celebracao-caixa { text-align: center; animation: tv-celebra-entra 0.5s ease-out; }
+@keyframes tv-celebra-entra { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.tv-celebracao-titulo {
+  font-size: 4vw;
+  font-weight: 900;
   background: var(--grad);
-  border-radius: 999px;
-  width: 0;
-  transition: width 0.8s ease;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
-.tv-barra-info { font-size: 1.15vw; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
+.tv-celebracao-info { font-size: 3vw; font-weight: 800; margin-top: 1vw; }
+.tv-confetes { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.tv-confetes i {
+  position: absolute;
+  top: -3vh;
+  width: 0.8vw;
+  height: 1.6vw;
+  border-radius: 2px;
+  animation: tv-confete 3.2s linear infinite;
+}
+@keyframes tv-confete {
+  to { transform: translateY(110vh) rotate(720deg); }
+}
 
-/* Rotação (?giro=N): um painel por vez, tela cheia */
-body.tv-giro .tv-paineis { display: block; }
-body.tv-giro .tv-painel { display: none; }
-body.tv-giro .tv-painel.tv-ativo { display: block; }
-body.tv-giro .tv-cards-pessoas { grid-template-columns: repeat(3, 1fr); }
-body.tv-giro .tv-num { font-size: 3.4vw; }
+/* Overlay de desbloqueio do som */
+.tv-audio-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 14, 23, 0.9);
+  cursor: pointer;
+}
+.tv-audio-overlay.oculto { display: none; }
+.tv-audio-caixa { text-align: center; font-size: 1.8vw; display: flex; flex-direction: column; gap: 0.8vw; }
+.tv-audio-icone { font-size: 5vw; animation: tv-pulso 1.6s infinite; }

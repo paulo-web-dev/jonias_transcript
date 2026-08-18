@@ -13,35 +13,61 @@
       <span data-fonte="cdr">📞 —</span>
       <span data-fonte="omie">🎯 —</span>
       <span data-fonte="mysql">🗄 —</span>
+      <span id="tv-push" title="conexão de tempo real">⏱</span>
+      <span id="tv-som">🔕</span>
       <span class="tv-relogio" id="tv-relogio">carregando…</span>
     </div>
   </header>
 
-  <div class="tv-paineis" id="tv-paineis">
-    <section class="tv-painel" id="painel-dia">
+  <main class="tv-visoes">
+    <section class="tv-visao" id="visao-dia">
       <h2 id="dia-titulo">HOJE</h2>
-      <div class="tv-selo oculto" id="dia-selo">SEM DADO DE HOJE</div>
-      <div class="tv-cards-pessoas" id="dia-pessoas"></div>
-      <div class="tv-rankings">
-        <div class="tv-ranking"><h3>📞 Ligações (dia)</h3><ol id="dia-rank-lig"></ol></div>
-        <div class="tv-ranking"><h3>🎓 Matrículas (dia)</h3><ol id="dia-rank-mat"></ol></div>
+      <div class="tv-selo oculto" id="dia-selo"></div>
+      <div class="tv-corpo">
+        <div class="tv-linhas" id="dia-linhas"></div>
+        <div class="tv-podios"><div class="tv-podio" id="dia-podio"><h3>🏆 Ligações do dia</h3><div class="tv-podio-blocos"></div></div></div>
       </div>
     </section>
 
-    <section class="tv-painel" id="painel-semana">
+    <section class="tv-visao" id="visao-semana">
       <h2 id="semana-titulo">SEMANA</h2>
-      <div class="tv-cards-pessoas" id="semana-pessoas"></div>
-      <div class="tv-rankings">
-        <div class="tv-ranking"><h3>📞 Ligações</h3><ol id="sem-rank-lig"></ol></div>
-        <div class="tv-ranking"><h3>✨ Leads</h3><ol id="sem-rank-leads"></ol></div>
-        <div class="tv-ranking"><h3>💰 Receita</h3><ol id="sem-rank-rec"></ol></div>
+      <div class="tv-corpo">
+        <div class="tv-linhas" id="semana-linhas"></div>
+        <div class="tv-podios">
+          <div class="tv-podio" id="podio-lig"><h3>📞 Ligações</h3><div class="tv-podio-blocos"></div></div>
+          <div class="tv-podio" id="podio-leads"><h3>✨ Leads</h3><div class="tv-podio-blocos"></div></div>
+          <div class="tv-podio" id="podio-rec"><h3>💰 Receita</h3><div class="tv-podio-blocos"></div></div>
+        </div>
       </div>
     </section>
 
-    <section class="tv-painel tv-painel-mes" id="painel-mes">
-      <h2 id="mes-titulo">MÊS — RECEITA × META</h2>
-      <div class="tv-barras" id="mes-barras"></div>
+    <section class="tv-visao" id="visao-mes">
+      <h2 id="mes-titulo">MÊS</h2>
+      <div class="tv-barras-mes" id="mes-barras"></div>
+      <div class="tv-mes-rodape" id="mes-rodape"></div>
     </section>
+  </main>
+
+  <footer class="tv-rodape">
+    <div class="tv-indicador" id="tv-indicador"></div>
+  </footer>
+
+  <!-- Celebração de matrícula nova (nó único, reutilizado) -->
+  <div class="tv-celebracao oculto" id="celebracao">
+    <div class="tv-confetes" id="confetes"></div>
+    <div class="tv-celebracao-caixa">
+      <div class="tv-celebracao-titulo">🎉 MATRÍCULA NOVA 🎉</div>
+      <div class="tv-celebracao-info" id="celebracao-info">—</div>
+    </div>
+  </div>
+
+  <!-- Desbloqueio de áudio (o navegador exige um gesto) -->
+  <div class="tv-audio-overlay" id="audio-overlay">
+    <div class="tv-audio-caixa">
+      <div class="tv-audio-icone">🔔</div>
+      <div>Toque em qualquer lugar para <strong>ativar o som</strong> do painel</div>
+      <div class="texto-suave">sem toque, o painel continua funcionando — só fica mudo</div>
+    </div>
   </div>
 
   <script src="/js/tv.js"></script>
