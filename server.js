@@ -19,7 +19,7 @@ const {
   limparFalhas,
 } = require("./auth.js");
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
-const { importarCdr, importarOportunidades } = require("./importacao.js");
+const { importarCdr, importarOportunidadesOmie } = require("./importacao.js");
 const { sincronizarMysql, credenciaisMysql } = require("./sincronizacao.js");
 
 const app = express();
@@ -447,10 +447,15 @@ app.get("/api/aulas/:id/docx", async (req, res) => {
 
 // ---------- Central de dados: importações ----------
 
-// Uploads chegam como o conteúdo do arquivo em text/plain (o navegador lê com
-// file.text()); nome do arquivo vai na query string.
-const corpoCsv = express.text({
-  type: ["text/plain", "text/csv", "application/octet-stream"],
+// Uploads chegam com o conteúdo do arquivo no corpo (nome na query string):
+// CDR como text/plain (o navegador lê com file.text()); planilha do Omie como
+// binário (arrayBuffer() + application/octet-stream).
+const corpoCsv = express.text({ type: ["text/plain", "text/csv"], limit: "25mb" });
+const corpoXlsx = express.raw({
+  type: [
+    "application/octet-stream",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ],
   limit: "25mb",
 });
 
@@ -465,14 +470,14 @@ app.post("/api/importacoes/cdr", corpoCsv, (req, res) => {
   res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
 });
 
-app.post("/api/importacoes/oportunidades", corpoCsv, (req, res) => {
-  if (typeof req.body !== "string" || !req.body.trim()) {
-    return res
-      .status(400)
-      .json({ error: "Corpo vazio — envie o conteúdo do CSV como text/plain." });
+app.post("/api/importacoes/oportunidades", corpoXlsx, async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({
+      error: "Corpo vazio — envie o .xlsx do Omie como application/octet-stream.",
+    });
   }
-  const arquivo = String(req.query.arquivo || "oportunidades.csv").slice(0, 200);
-  const resultado = importarOportunidades(req.body, arquivo, req.usuario.id);
+  const arquivo = String(req.query.arquivo || "oportunidades.xlsx").slice(0, 200);
+  const resultado = await importarOportunidadesOmie(req.body, arquivo, req.usuario.id);
   res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
 });
 

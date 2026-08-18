@@ -1,12 +1,13 @@
 "use strict";
 
-// Ingestão de arquivos da central de dados (CDR do PABX e oportunidades do
-// Ramper). Toda importação é idempotente (upsert pela chave natural), nunca
-// aborta por linha ruim (linhas problemáticas viram relatório) e registra
+// Ingestão de arquivos da central de dados (CDR do PABX em CSV e oportunidades
+// do Omie em .xlsx). Toda importação é idempotente (upsert pela chave natural),
+// nunca aborta por linha ruim (linhas problemáticas viram relatório) e registra
 // auditoria completa na tabela importacoes.
 
 const crypto = require("crypto");
 const { parse } = require("csv-parse/sync");
+const ExcelJS = require("exceljs");
 const db = require("./db.js");
 
 const AMOSTRAS_MAX = 20;
@@ -18,8 +19,8 @@ function removerBom(texto) {
   return t.charCodeAt(0) === 0xfeff ? t.slice(1) : t; // BOM do utf-8-sig
 }
 
-function hashSha256(texto) {
-  return crypto.createHash("sha256").update(texto, "utf8").digest("hex");
+function hashSha256(dado) {
+  return crypto.createHash("sha256").update(dado).digest("hex"); // string utf-8 ou Buffer
 }
 
 // Normaliza nomes de cabeçalho: sem acento, sem "º", minúsculas, espaços únicos
@@ -324,40 +325,101 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
   }
 }
 
-// ---------- Oportunidades do CRM Ramper ----------
-// Exportação "LS_exportacao_oportunidades_<data>". Não traz telefone/e-mail.
-// Reimportação semanal atualiza etapa/receita/motivo (upsert por crm_id).
+// ---------- Oportunidades do Omie (.xlsx) ----------
+// Planilha "Planilha de Oportunidades": título na linha 1, cabeçalho na 2.
+// "N/D" é o nulo do Omie. Cada exportação é um retrato de janela recente —
+// o upsert por "Número" insere/atualiza e NUNCA apaga o que não veio no
+// arquivo (o banco é a união de todas as importações). Mudanças de fase,
+// status, motivo e ticket entre importações vão para oportunidade_mudancas.
 
-const COLUNAS_OPORTUNIDADES = {
-  id: ["id"],
-  titulo: ["titulo"],
-  organizacao: ["organizacao/pessoa", "organizacao", "pessoa"],
-  receita: ["receita"],
-  etapa: ["etapa"],
-  funil: ["funil"],
-  motivo_perda: ["motivo de perda", "motivo da perda"],
+// Cabeçalhos (normalizados) → campo. "Data de -" e "Data de --" são as fases
+// 04 e 05, que vêm sem nome no arquivo.
+const COLUNAS_OMIE = {
+  numero: ["numero"],
+  conta: ["conta"],
+  cnpj_cpf: ["cnpj/cpf da conta", "cnpj/cpf"],
+  solucao: ["solucao"],
+  titulo: ["oportunidade"],
+  contato: ["contato"],
+  vendedor: ["vendedor"],
+  tipo_cliente: ["tipo"],
+  fase_atual: ["fase atual"],
+  status: ["status"],
+  motivo_conclusao: ["motivo de conclusao"],
+  fase_01_em: ["data de 01_lead novo"],
+  fase_02_em: ["data de 02_qualificacao"],
+  fase_03_em: ["data de 03_negociacao"],
+  fase_04_em: ["data de -"],
+  fase_05_em: ["data de --"],
+  fase_06_em: ["data de 06_conclusao"],
+  produtos_centavos: ["produtos"],
+  servicos_centavos: ["servicos"],
+  recorrencia_centavos: ["recorrencia"],
+  meses: ["meses"],
+  ticket_centavos: ["ticket calculado"],
+  temperatura: ["temperatura"],
   origem: ["origem"],
-  formulario: ["formulario"],
-  oferta: ["oferta"],
-  linha_produto: ["linha de produto", "linha do produto"],
-  produtos: ["produto(s)", "produtos", "produto"],
-  responsavel: ["responsavel"],
-  criado_em: ["data de criacao", "criado em", "criacao"],
-  alterado_em: ["data de alteracao", "alterado em", "ultima alteracao"],
+  vertical: ["vertical"],
+  telefone: ["telefone"],
+  celular_1: ["celular 1"],
+  celular_2: ["celular 2"],
+  email: ["email"],
+  incluido_em: ["data de inclusao"],
+  atualizado_em: ["data de atualizacao"],
 };
 
-const ETAPAS_CONHECIDAS = new Set([
-  "prospeccao",
-  "qualificacao",
-  "negociacao",
-  "ganha",
-  "perdida",
+const FASES_CONHECIDAS = new Set([
+  "01_lead novo", "02_qualificacao", "03_negociacao", "06_conclusao",
 ]);
+const STATUS_CONHECIDOS = new Set(["ativo", "perdido", "conquistado"]);
 
-// Data "DD/MM/YYYY[ HH:MM[:SS]]" ou ISO, com ou sem hora → ISO local
-function dataFlexivelIso(texto) {
-  const t = String(texto ?? "").trim();
-  if (!t) return null;
+// Campos cuja mudança entre importações vira linha em oportunidade_mudancas
+const CAMPOS_RASTREADOS = ["fase_atual", "status", "motivo_conclusao", "ticket_centavos"];
+
+// "YYYY-MM-DDTHH:MM:SS" no fuso local (mesma convenção dos dados operacionais)
+function agoraLocalIso() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// Valor cru de célula do exceljs → primitivo (texto/número/Date) ou null.
+// "N/D" é o nulo do Omie. Hyperlink/rich text/fórmula viram o texto/resultado.
+function valorCelula(v) {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === "object") {
+    if (v.richText) return valorCelula(v.richText.map((t) => t.text).join(""));
+    if (v.text !== undefined) return valorCelula(v.text);
+    if (v.result !== undefined) return valorCelula(v.result);
+    return null;
+  }
+  if (typeof v === "string") {
+    const t = v.trim();
+    return t === "" || t.toUpperCase() === "N/D" ? null : t;
+  }
+  return v;
+}
+
+// Data de célula → ISO local. O exceljs devolve Date ancorado em UTC, então o
+// dia literal da planilha sai pelos getters UTC (sem deslocamento de fuso).
+// Fallbacks: número serial do Excel e texto "DD/MM/YYYY[ HH:MM[:SS]]"/ISO.
+function dataCelulaIso(v) {
+  if (v === null) return null;
+  if (typeof v === "number" && v > 0) {
+    v = new Date(Date.UTC(1899, 11, 30) + Math.round(v * 86400000));
+  }
+  if (v instanceof Date) {
+    if (isNaN(v)) return null;
+    const p = (n) => String(n).padStart(2, "0");
+    const dia = `${v.getUTCFullYear()}-${p(v.getUTCMonth() + 1)}-${p(v.getUTCDate())}`;
+    const temHora = v.getUTCHours() || v.getUTCMinutes() || v.getUTCSeconds();
+    return temHora
+      ? `${dia}T${p(v.getUTCHours())}:${p(v.getUTCMinutes())}:${p(v.getUTCSeconds())}`
+      : dia;
+  }
+  const t = String(v).trim();
   const comHora = dataHoraLocalIso(t);
   if (comHora) return comHora;
   let m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t);
@@ -367,71 +429,155 @@ function dataFlexivelIso(texto) {
   return null;
 }
 
-function importarOportunidades(textoBruto, arquivoNome, usuarioId) {
+// Reais → centavos: célula numérica multiplica direto; texto usa o parser do CSV
+function centavosCelula(v) {
+  if (v === null) return null;
+  if (typeof v === "number") return Math.round(v * 100);
+  return dinheiroParaCentavos(v);
+}
+
+function inteiroCelula(v) {
+  if (v === null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+function normalizarTelefone(v) {
+  if (v === null) return null;
+  const digitos = String(v).replace(/\D/g, "");
+  return digitos || null;
+}
+
+// Compara o registro canônico novo com a linha do banco (as datas de fase usam
+// o valor pós-COALESCE — data conhecida nunca regride a NULL no UPDATE).
+function registroIdentico(existente, novo) {
+  for (const campo of Object.keys(novo)) {
+    if (campo === "numero" || campo === "importacao_id") continue;
+    let valorNovo = novo[campo];
+    if (campo.startsWith("fase_") && campo.endsWith("_em")) {
+      valorNovo = valorNovo ?? existente[campo];
+    }
+    if ((valorNovo ?? null) !== (existente[campo] ?? null)) return false;
+  }
+  return true;
+}
+
+async function importarOportunidadesOmie(buffer, arquivoNome, usuarioId) {
   const iniciadoEm = new Date().toISOString();
-  const texto = removerBom(textoBruto);
-  const hash = hashSha256(texto);
+  const hash = hashSha256(buffer);
   const relatorio = novoRelatorio();
 
-  let linhas;
+  let planilha;
   try {
-    linhas = lerCsv(texto);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+    planilha = workbook.getWorksheet("Planilha de Oportunidades");
+    if (!planilha) {
+      planilha = workbook.worksheets[0];
+      if (!planilha) throw new Error("o arquivo não tem nenhuma aba");
+      relatorio.avisos.push(
+        `Aba "Planilha de Oportunidades" não encontrada — usando a primeira aba ("${planilha.name}").`
+      );
+    }
   } catch (err) {
     return registrarImportacaoErro("oportunidades", arquivoNome, hash, usuarioId,
-      iniciadoEm, `Arquivo ilegível como CSV: ${err.message}`);
+      iniciadoEm, `Arquivo ilegível como .xlsx: ${err.message}`);
   }
-  if (linhas.length === 0) {
-    return registrarImportacaoErro("oportunidades", arquivoNome, hash, usuarioId,
-      iniciadoEm, "Arquivo vazio (nenhuma linha de dados).");
+
+  // Cabeçalho: primeira das 5 primeiras linhas com "Número" e "Fase Atual"
+  // (a linha 1 do Omie é o título da planilha)
+  let linhaCabecalho = 0;
+  let cabecalhos = []; // índice de coluna (1-based) → nome normalizado
+  for (let r = 1; r <= Math.min(5, planilha.rowCount); r++) {
+    const nomes = planilha.getRow(r).values.map((c) => normalizarNome(valorCelula(c) ?? ""));
+    if (nomes.includes("numero") && nomes.includes("fase atual")) {
+      linhaCabecalho = r;
+      cabecalhos = nomes;
+      break;
+    }
+  }
+  if (!linhaCabecalho) {
+    return registrarImportacaoErro("oportunidades", arquivoNome, hash, usuarioId, iniciadoEm,
+      'Cabeçalho não encontrado: nenhuma das 5 primeiras linhas tem as colunas "Número" e "Fase Atual".');
   }
 
   avisarSeReimportacao(relatorio, hash);
-  const col = resolverColunas(linhas[0], COLUNAS_OPORTUNIDADES, relatorio);
-  // Colunas de "tempo por etapa" são preservadas como vieram, em JSON
-  const colunasTempo = Object.keys(linhas[0]).filter((c) => c.includes("tempo"));
 
-  const pessoas = db
-    .prepare("SELECT id, nome, crm_user_id FROM pessoas")
-    .all();
-  const pessoaPorCrmId = new Map(
-    pessoas.filter((p) => p.crm_user_id !== null).map((p) => [String(p.crm_user_id), p.id])
-  );
-  const pessoaPorNome = new Map(pessoas.map((p) => [normalizarNome(p.nome), p.id]));
-
-  function resolverPessoa(responsavel) {
-    if (!responsavel) return null;
-    if (/^\d+$/.test(responsavel)) return pessoaPorCrmId.get(responsavel) ?? null;
-    // "Nome Sobrenome" também casa pelo primeiro nome cadastrado em pessoas
-    const norm = normalizarNome(responsavel);
-    return (
-      pessoaPorNome.get(norm) ??
-      pessoaPorNome.get(norm.split(" ")[0]) ??
-      null
-    );
+  // campo → índice de coluna (match exato do nome normalizado, com fallback
+  // por inclusão para tolerar variações)
+  const col = {};
+  for (const [campo, candidatos] of Object.entries(COLUNAS_OMIE)) {
+    let idx = cabecalhos.findIndex((c) => candidatos.includes(c));
+    if (idx === -1) idx = cabecalhos.findIndex((c) => c && candidatos.some((cand) => c.includes(cand)));
+    col[campo] = idx === -1 ? null : idx;
+    if (col[campo] === null) {
+      relatorio.avisos.push(`Coluna "${campo}" não encontrada no arquivo.`);
+    }
+  }
+  // Colunas que sobraram (Previsão, Finder, Aging…) são preservadas em extras_json
+  const indicesMapeados = new Set(Object.values(col).filter((i) => i !== null));
+  const colunasExtras = [];
+  const rotuloOriginal = planilha.getRow(linhaCabecalho).values;
+  for (let i = 1; i < cabecalhos.length; i++) {
+    if (cabecalhos[i] && !indicesMapeados.has(i)) {
+      colunasExtras.push({ idx: i, rotulo: String(valorCelula(rotuloOriginal[i]) ?? cabecalhos[i]) });
+    }
   }
 
-  const upsert = db.prepare(
-    `INSERT INTO oportunidades (crm_id, titulo, organizacao, receita_centavos, etapa,
-       funil, motivo_perda, origem, formulario, oferta, linha_produto, produtos,
-       responsavel, pessoa_id, criado_em, alterado_em, tempo_etapas_json, importacao_id)
-     VALUES (@crm_id, @titulo, @organizacao, @receita_centavos, @etapa, @funil,
-       @motivo_perda, @origem, @formulario, @oferta, @linha_produto, @produtos,
-       @responsavel, @pessoa_id, @criado_em, @alterado_em, @tempo_etapas_json, @importacao_id)
-     ON CONFLICT(crm_id) DO UPDATE SET
-       titulo = excluded.titulo, organizacao = excluded.organizacao,
-       receita_centavos = excluded.receita_centavos, etapa = excluded.etapa,
-       funil = excluded.funil, motivo_perda = excluded.motivo_perda,
-       origem = excluded.origem, formulario = excluded.formulario,
-       oferta = excluded.oferta, linha_produto = excluded.linha_produto,
-       produtos = excluded.produtos, responsavel = excluded.responsavel,
-       pessoa_id = excluded.pessoa_id, criado_em = excluded.criado_em,
-       alterado_em = excluded.alterado_em, tempo_etapas_json = excluded.tempo_etapas_json,
-       importacao_id = excluded.importacao_id`
+  const pessoas = db.prepare("SELECT id, nome, nomes_alternativos FROM pessoas").all();
+  const pessoaPorNome = new Map();
+  for (const p of pessoas) {
+    pessoaPorNome.set(normalizarNome(p.nome), p.id);
+    for (const alt of JSON.parse(p.nomes_alternativos || "[]")) {
+      pessoaPorNome.set(normalizarNome(alt), p.id);
+    }
+  }
+
+  const buscarExistente = db.prepare("SELECT * FROM oportunidades WHERE numero = ?");
+  const inserir = db.prepare(
+    `INSERT INTO oportunidades (numero, conta, cnpj_cpf, solucao, titulo, contato,
+       vendedor, pessoa_id, tipo_cliente, fase_atual, status, motivo_conclusao,
+       fase_01_em, fase_02_em, fase_03_em, fase_04_em, fase_05_em, fase_06_em,
+       produtos_centavos, servicos_centavos, recorrencia_centavos, meses,
+       ticket_centavos, temperatura, origem, vertical, telefone, celular_1,
+       celular_2, email, incluido_em, atualizado_em, extras_json, importacao_id)
+     VALUES (@numero, @conta, @cnpj_cpf, @solucao, @titulo, @contato, @vendedor,
+       @pessoa_id, @tipo_cliente, @fase_atual, @status, @motivo_conclusao,
+       @fase_01_em, @fase_02_em, @fase_03_em, @fase_04_em, @fase_05_em, @fase_06_em,
+       @produtos_centavos, @servicos_centavos, @recorrencia_centavos, @meses,
+       @ticket_centavos, @temperatura, @origem, @vertical, @telefone, @celular_1,
+       @celular_2, @email, @incluido_em, @atualizado_em, @extras_json, @importacao_id)`
   );
-  const existe = db.prepare("SELECT 1 FROM oportunidades WHERE crm_id = ?");
+  const atualizar = db.prepare(
+    `UPDATE oportunidades SET conta = @conta, cnpj_cpf = @cnpj_cpf,
+       solucao = @solucao, titulo = @titulo, contato = @contato,
+       vendedor = @vendedor, pessoa_id = @pessoa_id, tipo_cliente = @tipo_cliente,
+       fase_atual = @fase_atual, status = @status, motivo_conclusao = @motivo_conclusao,
+       fase_01_em = COALESCE(@fase_01_em, fase_01_em),
+       fase_02_em = COALESCE(@fase_02_em, fase_02_em),
+       fase_03_em = COALESCE(@fase_03_em, fase_03_em),
+       fase_04_em = COALESCE(@fase_04_em, fase_04_em),
+       fase_05_em = COALESCE(@fase_05_em, fase_05_em),
+       fase_06_em = COALESCE(@fase_06_em, fase_06_em),
+       produtos_centavos = @produtos_centavos, servicos_centavos = @servicos_centavos,
+       recorrencia_centavos = @recorrencia_centavos, meses = @meses,
+       ticket_centavos = @ticket_centavos, temperatura = @temperatura,
+       origem = @origem, vertical = @vertical, telefone = @telefone,
+       celular_1 = @celular_1, celular_2 = @celular_2, email = @email,
+       incluido_em = @incluido_em, atualizado_em = @atualizado_em,
+       extras_json = @extras_json, importacao_id = @importacao_id
+     WHERE numero = @numero`
+  );
+  const gravarMudanca = db.prepare(
+    `INSERT INTO oportunidade_mudancas (oportunidade_id, campo, valor_anterior,
+       valor_novo, observado_em, importacao_id)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
 
   let lidas = 0;
   let ignoradas = 0;
+  let periodoDe = null;
+  let periodoAte = null;
 
   try {
     const resultado = db.transaction(() => {
@@ -442,70 +588,124 @@ function importarOportunidades(textoBruto, arquivoNome, usuarioId) {
         )
         .run(arquivoNome, hash, usuarioId, iniciadoEm);
       const importacaoId = info.lastInsertRowid;
+      const observadoEm = agoraLocalIso();
 
       let novos = 0;
       let atualizados = 0;
-      for (const linha of linhas) {
+      let identicos = 0;
+
+      for (let r = linhaCabecalho + 1; r <= planilha.rowCount; r++) {
+        const valores = planilha.getRow(r).values;
+        if (!valores.some((v) => valorCelula(v) !== null)) continue; // linha vazia
         lidas++;
-        const crmId = valor(linha, col.id);
-        if (!crmId) {
+
+        const cel = (campo) => (col[campo] === null ? null : valorCelula(valores[col[campo]]));
+        const texto = (campo) => {
+          const v = cel(campo);
+          return v === null ? null : String(v).trim();
+        };
+
+        const numero = texto("numero");
+        if (!numero) {
           ignoradas++;
-          registrarOcorrencia(relatorio.motivos, "sem_id", JSON.stringify(linha).slice(0, 200));
+          registrarOcorrencia(relatorio.motivos, "sem_numero",
+            valores.map((v) => valorCelula(v)).filter((v) => v !== null).join(" | "));
           continue;
         }
 
-        const receitaBruta = valor(linha, col.receita);
-        const receita = dinheiroParaCentavos(receitaBruta);
-        if (receita === null && receitaBruta) {
-          registrarOcorrencia(relatorio.problemas, "receita_invalida", `${crmId}: "${receitaBruta}"`);
+        const faseAtual = texto("fase_atual");
+        if (faseAtual && !FASES_CONHECIDAS.has(normalizarNome(faseAtual))) {
+          registrarOcorrencia(relatorio.problemas, "fase_desconhecida", `${numero}: "${faseAtual}"`);
+        }
+        const status = texto("status");
+        if (status && !STATUS_CONHECIDOS.has(normalizarNome(status))) {
+          registrarOcorrencia(relatorio.problemas, "status_desconhecido", `${numero}: "${status}"`);
         }
 
-        const etapa = valor(linha, col.etapa);
-        if (etapa && !ETAPAS_CONHECIDAS.has(normalizarNome(etapa))) {
-          registrarOcorrencia(relatorio.problemas, "etapa_desconhecida", `${crmId}: "${etapa}"`);
+        const vendedor = texto("vendedor");
+        const pessoaId = vendedor ? (pessoaPorNome.get(normalizarNome(vendedor)) ?? null) : null;
+        if (vendedor && pessoaId === null) {
+          registrarOcorrencia(relatorio.problemas, "vendedor_sem_match", `${numero}: "${vendedor}"`);
         }
 
-        const responsavel = valor(linha, col.responsavel);
-        const pessoaId = resolverPessoa(responsavel);
-        if (responsavel && pessoaId === null) {
-          registrarOcorrencia(relatorio.problemas, "responsavel_sem_match", `${crmId}: "${responsavel}"`);
+        const extras = {};
+        for (const { idx, rotulo } of colunasExtras) {
+          const v = valorCelula(valores[idx]);
+          if (v !== null) extras[rotulo] = v instanceof Date ? dataCelulaIso(v) : v;
         }
 
-        const tempoEtapas = {};
-        for (const c of colunasTempo) tempoEtapas[c] = linha[c] ?? "";
-
-        if (existe.get(crmId)) atualizados++;
-        else novos++;
-        upsert.run({
-          crm_id: crmId,
-          titulo: valor(linha, col.titulo) || null,
-          organizacao: valor(linha, col.organizacao) || null,
-          receita_centavos: receita,
-          etapa: etapa || null,
-          funil: valor(linha, col.funil) || null,
-          motivo_perda: valor(linha, col.motivo_perda) || null,
-          origem: valor(linha, col.origem) || null,
-          formulario: valor(linha, col.formulario) || null,
-          oferta: valor(linha, col.oferta) || null,
-          linha_produto: valor(linha, col.linha_produto) || null,
-          produtos: valor(linha, col.produtos) || null,
-          responsavel: responsavel || null,
+        const registro = {
+          numero,
+          conta: texto("conta"),
+          cnpj_cpf: texto("cnpj_cpf"),
+          solucao: texto("solucao"),
+          titulo: texto("titulo"),
+          contato: texto("contato"),
+          vendedor,
           pessoa_id: pessoaId,
-          criado_em: dataFlexivelIso(valor(linha, col.criado_em)),
-          alterado_em: dataFlexivelIso(valor(linha, col.alterado_em)),
-          tempo_etapas_json: colunasTempo.length ? JSON.stringify(tempoEtapas) : null,
+          tipo_cliente: texto("tipo_cliente"),
+          fase_atual: faseAtual,
+          status,
+          motivo_conclusao: texto("motivo_conclusao"),
+          fase_01_em: dataCelulaIso(cel("fase_01_em")),
+          fase_02_em: dataCelulaIso(cel("fase_02_em")),
+          fase_03_em: dataCelulaIso(cel("fase_03_em")),
+          fase_04_em: dataCelulaIso(cel("fase_04_em")),
+          fase_05_em: dataCelulaIso(cel("fase_05_em")),
+          fase_06_em: dataCelulaIso(cel("fase_06_em")),
+          produtos_centavos: centavosCelula(cel("produtos_centavos")),
+          servicos_centavos: centavosCelula(cel("servicos_centavos")),
+          recorrencia_centavos: centavosCelula(cel("recorrencia_centavos")),
+          meses: inteiroCelula(cel("meses")),
+          ticket_centavos: centavosCelula(cel("ticket_centavos")),
+          temperatura: inteiroCelula(cel("temperatura")),
+          origem: texto("origem"),
+          vertical: texto("vertical"),
+          telefone: normalizarTelefone(cel("telefone")),
+          celular_1: normalizarTelefone(cel("celular_1")),
+          celular_2: normalizarTelefone(cel("celular_2")),
+          email: texto("email")?.toLowerCase() ?? null,
+          incluido_em: dataCelulaIso(cel("incluido_em")),
+          atualizado_em: dataCelulaIso(cel("atualizado_em")),
+          extras_json: Object.keys(extras).length ? JSON.stringify(extras) : null,
           importacao_id: importacaoId,
-        });
+        };
+
+        if (registro.incluido_em) {
+          if (!periodoDe || registro.incluido_em < periodoDe) periodoDe = registro.incluido_em;
+          if (!periodoAte || registro.incluido_em > periodoAte) periodoAte = registro.incluido_em;
+        }
+
+        const existente = buscarExistente.get(numero);
+        if (!existente) {
+          novos++;
+          inserir.run(registro);
+        } else if (registroIdentico(existente, registro)) {
+          identicos++; // nada a gravar — nem histórico
+        } else {
+          atualizados++;
+          for (const campo of CAMPOS_RASTREADOS) {
+            if ((registro[campo] ?? null) !== (existente[campo] ?? null)) {
+              gravarMudanca.run(existente.id, campo,
+                existente[campo] === null ? null : String(existente[campo]),
+                registro[campo] === null ? null : String(registro[campo]),
+                observadoEm, importacaoId);
+            }
+          }
+          atualizar.run(registro);
+        }
       }
 
+      relatorio.periodo = { de: periodoDe, ate: periodoAte };
       db.prepare(
         `UPDATE importacoes SET linhas_lidas = ?, linhas_validas = ?, linhas_ignoradas = ?,
-           registros_novos = ?, registros_atualizados = ?, detalhes_json = ?, concluido_em = ?
+           registros_novos = ?, registros_atualizados = ?, registros_identicos = ?,
+           detalhes_json = ?, concluido_em = ?
          WHERE id = ?`
-      ).run(lidas, lidas - ignoradas, ignoradas, novos, atualizados,
+      ).run(lidas, lidas - ignoradas, ignoradas, novos, atualizados, identicos,
         JSON.stringify(relatorio), new Date().toISOString(), importacaoId);
 
-      return { importacaoId, novos, atualizados };
+      return { importacaoId, novos, atualizados, identicos };
     })();
 
     return {
@@ -518,6 +718,8 @@ function importarOportunidades(textoBruto, arquivoNome, usuarioId) {
       linhasIgnoradas: ignoradas,
       registrosNovos: resultado.novos,
       registrosAtualizados: resultado.atualizados,
+      registrosIdenticos: resultado.identicos,
+      periodo: { de: periodoDe, ate: periodoAte },
       detalhes: relatorio,
     };
   } catch (err) {
@@ -528,7 +730,7 @@ function importarOportunidades(textoBruto, arquivoNome, usuarioId) {
 
 module.exports = {
   importarCdr,
-  importarOportunidades,
+  importarOportunidadesOmie,
   // utilitários exportados para os demais importadores/testes
   removerBom,
   hashSha256,
@@ -537,4 +739,6 @@ module.exports = {
   duracaoParaSegundos,
   dataHoraLocalIso,
   dinheiroParaCentavos,
+  normalizarTelefone,
+  dataCelulaIso,
 };
