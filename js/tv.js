@@ -15,6 +15,9 @@ const DIA_SEMPRE = params.get("dia") === "sempre";
 const SOM_ATIVO = params.get("som") !== "0";
 const VOLUME = Math.min(1, Math.max(0, Number(params.get("volume") ?? 0.5) || 0.5));
 const POLLING_MS = 60000;
+// Teto de segurança da celebração: um evento com mais de N matrículas novas
+// atualiza os números normalmente mas NÃO comemora (lote/backfill, não venda)
+const TETO_CELEBRACAO = Math.max(1, Number(params.get("teto")) || 5);
 
 const dinheiro = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 const reais = (c) => dinheiro.format((c || 0) / 100);
@@ -269,15 +272,30 @@ function renderizar(d, origem) {
   // ---- Diff para animação/som/celebração (só com payload anterior) ----
   const mudancas = { houve: false };
   if (anterior) {
+    // Celebração: SÓ matrícula com criada_em de HOJE (delta do painel do dia —
+    // backfill/histórico muda semana e mês sem virar confete), com teto de
+    // segurança contra lotes.
+    const candidatas = [];
+    let novasHoje = 0;
+    for (const p of d.dia.porPessoa) {
+      const antes = anterior.dia.porPessoa.find((a) => a.nome === p.nome);
+      if (!antes || anterior.dia.data !== d.dia.data) continue; // virada de dia: sem base de comparação
+      const delta = p.matriculas.valor - antes.matriculas.valor;
+      if (delta > 0) {
+        novasHoje += delta;
+        const deltaReceita = p.receitaCentavos - antes.receitaCentavos;
+        candidatas.push(`${p.nome} · +${delta} matrícula${delta > 1 ? "s" : ""}` +
+          (deltaReceita > 0 ? ` · +${reais(deltaReceita)}` : ""));
+      }
+    }
+    if (novasHoje > 0 && novasHoje <= TETO_CELEBRACAO) candidatas.forEach(celebrar);
+    else if (novasHoje > TETO_CELEBRACAO) {
+      console.log(`[tv] celebração suprimida: ${novasHoje} matrículas novas de hoje num único evento (teto ${TETO_CELEBRACAO}) — números atualizados normalmente`);
+    }
+
     for (const p of d.semana.porPessoa) {
       const antes = anterior.semana.porPessoa.find((a) => a.nome === p.nome);
       if (!antes) continue;
-      const deltaMat = p.matriculas.valor - antes.matriculas.valor;
-      if (deltaMat > 0) {
-        const deltaReceita = p.receitaCentavos - antes.receitaCentavos;
-        celebrar(`${p.nome} · +${deltaMat} matrícula${deltaMat > 1 ? "s" : ""}` +
-          (deltaReceita > 0 ? ` · +${reais(deltaReceita)}` : ""));
-      }
       if (JSON.stringify(antes) !== JSON.stringify(p)) mudancas.houve = true;
       mudancas[p.nome] = {
         cruzouDiscadas: (antes.discadas.atingimento ?? 0) < 100 && (p.discadas.atingimento ?? 0) >= 100,
@@ -296,11 +314,26 @@ function renderizar(d, origem) {
   const selo = el("dia-selo");
   selo.classList.toggle("oculto", d.dia.temDadoHoje);
   if (!d.dia.temDadoHoje) selo.textContent = `SEM DADO DE HOJE — último: ${dataHoraBr(d.dia.dadosAte)}`;
+  // "terça passada: 39" — o número que a equipe entende de imediato; métrica
+  // sem dado na semana anterior é omitida em silêncio
+  const DIAS_SEMANA = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+  const c = d.dia.comparativo || {};
+  const rotuloPassado = c.data
+    ? DIAS_SEMANA[new Date(c.data + "T00:00:00").getDay()] + " passada"
+    : "";
   for (const p of d.dia.porPessoa) {
     const linha = document.querySelector(`#dia-linhas [data-nome="${p.nome}"]`);
     if (!linha) continue;
     const semDados = !p.discadas.valor && !p.leads.valor && !p.matriculas.valor && !p.receitaCentavos;
     const rotulos = { adiantado: "↗ adiantado", no_ritmo: "→ no ritmo", atrasado: "↘ atrasado" };
+    const sp = p.semanaPassada;
+    const partesPassado = [];
+    if (sp && c.temDiscadas) partesPassado.push(`📞 ${num(sp.discadas)}`);
+    if (sp && c.temLeads) partesPassado.push(`✨ ${num(sp.leads)}`);
+    if (sp && c.temMatriculas) partesPassado.push(`🎓 ${num(sp.matriculas)}`);
+    const comparTexto = partesPassado.length
+      ? ` · ${rotuloPassado}: ${partesPassado.join(" ")}`
+      : "";
     atualizarLinha(linha, {
       semDados,
       principal: p.discadas.valor,
@@ -311,7 +344,7 @@ function renderizar(d, origem) {
         : (p.discadas.valor ? "projeção em breve" : ""),
       statusClasse: p.discadas.estado ? "status-" + p.discadas.estado : "status-neutro",
       detalhe: `✅ ${num(p.atendidas)} atend. (${p.taxaAtendimento ?? "—"}%) · ✨ ${num(p.leads.valor)} leads · ` +
-        `🎓 ${num(p.matriculas.valor)} matr. · 💰 ${kReais(p.receitaCentavos)}`,
+        `🎓 ${num(p.matriculas.valor)} matr. · 💰 ${kReais(p.receitaCentavos)}${comparTexto}`,
       mudou: mudancas[p.nome]?.mudou,
       cruzouMeta: mudancas[p.nome]?.cruzouDiscadas,
     });

@@ -168,7 +168,7 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `GET /api/metricas?de=&ate=` | cálculo ao vivo do motor de métricas (preview) |
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
-| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20), `?fixo=dia\|semana\|mes`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=0`, `?volume=0–1` |
+| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20), `?fixo=dia\|semana\|mes`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=0`, `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console) |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -320,13 +320,13 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   oportunidade, conquistadas sem matrícula, conflitos, alunos órfãos)
 - Painel de TV 2.0 `/tv?token=` — **rotação automática** entre três visões
   (crossfade + indicador): **HOJE** (barras discadas × meta com ritmo projetado
-  pela hora do último dado do CDR, jornada 09:00–18:00; a visão **sai da
+  pela hora do último dado do CDR, jornada 09:00–18:00; comparativo "terça passada: N" por consultor para discadas/leads/matrículas — métrica sem dado no mesmo dia da semana anterior é omitida em silêncio; a visão **sai da
   rotação** quando não há CDR do dia — `?dia=sempre` força com selo), **SEMANA**
   (barras × meta escalada, selo ✓ ao cruzar meta, pódios visuais de
   ligações/leads/receita) e **MÊS** (a mais espaçosa: barras grandes de receita
   × R$ 75.000). **Tempo real por SSE**: ingestão concluída → evento → refetch;
   polling de 60 s como rede de segurança; diff no cliente anima contagem, dá
-  glow em quem mudou/cruzou meta e dispara **celebração de matrícula nova**
+  glow em quem mudou/cruzou meta e dispara **celebração de matrícula nova** — **somente matrícula com criada_em de HOJE** (delta do painel do dia: backfill/lote histórico muda números sem confete) e com teto de segurança
   (overlay ~5 s com nome + valor, confete e som próprio). Som via WebAudio
   sintetizado, **desbloqueado por um toque** (overlay inicial; indicador 🔔/🔕)
   — única interação permitida na tela. `pessoas.entra_painel = 0` (Renato) fica

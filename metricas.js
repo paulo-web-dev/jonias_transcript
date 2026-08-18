@@ -361,7 +361,30 @@ function dadosTvCompleto() {
   const ultimoDadoHoje = db
     .prepare("SELECT MAX(data_hora) v FROM ligacoes WHERE data_hora >= ?")
     .get(hoje).v;
+
+  // Comparativo: mesmo dia da semana passada ("terça passada: 39"). Uma
+  // métrica sem NENHUM dado naquele dia (fonte não cobria) é omitida — zero de
+  // verdade (dia coberto, pessoa sem registro) continua aparecendo como 0.
+  const dataPassada = new Date(agora);
+  dataPassada.setDate(agora.getDate() - 7);
+  const diaPassado = isoDia(dataPassada);
+  const mPassado = calcularMetricas(diaPassado, diaPassado);
+  const passadoPainel = mPassado.porPessoa.filter((p) => nomesPainel.has(p.nome));
+  const somaPassado = (fn) => passadoPainel.reduce((s, p) => s + fn(p), 0);
+  const comparativo = {
+    data: diaPassado,
+    temDiscadas: somaPassado((p) => p.ligacoes.discadas.valor) > 0,
+    temLeads: somaPassado((p) => p.funil.leadsNovos.valor) > 0,
+    temMatriculas: somaPassado((p) => p.matriculas.valor) > 0,
+  };
+  const passadoPorNome = new Map(passadoPainel.map((p) => [p.nome, {
+    discadas: p.ligacoes.discadas.valor,
+    leads: p.funil.leadsNovos.valor,
+    matriculas: p.matriculas.valor,
+  }]));
+
   const dia = {
+    comparativo,
     data: hoje,
     temDadoHoje: !!ultimoDadoHoje,
     dadosAte: ultimoDadoHoje ?? frescor.cdr.dadosAte,
@@ -382,6 +405,7 @@ function dadosTvCompleto() {
         leads: { valor: p.funil.leadsNovos.valor, metaDia: p.funil.leadsNovos.metaDia },
         matriculas: { valor: p.matriculas.valor, metaDia: p.matriculas.metaDia },
         receitaCentavos: p.receitaCentavos,
+        semanaPassada: passadoPorNome.get(p.nome) ?? null,
       };
     }),
     rankingLigacoes: doPainel(mDia.porPessoa)
