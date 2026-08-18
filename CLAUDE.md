@@ -186,12 +186,21 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - **Markdown compartilhado**: `js/markdown.js` funciona no navegador
   (`window.MarkdownAula`) e no Node (usado pelo template do PDF).
 - **Ingestão idempotente com auditoria**: dedupe por upsert na chave natural
-  (`ligacoes.cdr_id`, `oportunidades.numero`) — reimportar nunca duplica; hash
-  repetido gera aviso. Linha ruim nunca aborta a importação: vira motivo/ressalva
-  no relatório (`detalhes_json`). Armadilhas do CDR tratadas: eventos agrupados
-  por ID com `max()` da duração, linhas sem ID descartadas, rodapé
-  "DURAÇÃO: HH:MM:SS" ignorado, regex tolerante `/(\d{1,2}):(\d{2}):(\d{2})/`,
-  BOM utf-8-sig, atendida = duração > 0.
+  (`ligacoes.cdr_id`, `oportunidades.numero`) — reimportar nunca duplica; linha
+  idêntica ao banco não sofre UPDATE (contador `registros_identicos` nos dois
+  importadores); hash repetido gera aviso. Linha ruim nunca aborta a importação:
+  vira motivo/ressalva no relatório (`detalhes_json`). Armadilhas do CDR
+  tratadas: eventos agrupados por ID com `max()` da duração, linhas sem ID
+  descartadas, **ID validado contra o padrão real `/^\d+\.\d+$/`** (epoch.seq —
+  descarta rodapés "TOTAL: N"/"DURAÇÃO: HH:MM:SS" com motivo `id_invalido`, sem
+  blacklist de rótulos), regex tolerante `/(\d{1,2}):(\d{2}):(\d{2})/`, BOM
+  utf-8-sig, atendida = duração > 0.
+- **Ressalva conhecida (CDR)**: a DURAÇÃO do arquivo **inclui o tempo de toque**
+  (Ocupado/Não atendeu/Rejeitada saem com duração > 0), então
+  `atendida = duração > 0` superestima a taxa de atendimento (~98% aparente vs
+  ~59% por evento "Atendida"). As linhas sem ID do CSV são eventos das mesmas
+  ligações (Atendida, Encerrada, Ocupado…), intercaladas por posição. A regra de
+  `atendida` está **pendente de decisão do usuário** — não mudar sem ele.
 - **Omie: retrato ∪ histórico**: cada exportação cobre só uma janela recente, o
   banco é a **união** de todas — o upsert por "Número" insere/atualiza e **nunca
   apaga** o que não veio no arquivo. Linha idêntica ao banco não sofre UPDATE
@@ -204,6 +213,12 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   inteiro em reais → centavos, vendedor casado por `pessoas.nomes_alternativos`
   (sem match = ressalva no relatório, nunca palpite por primeiro nome), colunas
   não mapeadas preservadas em `extras_json`.
+- **Ressalva conhecida (Omie)**: a exportação parece reter só uma janela recente
+  (leads por dia crescem monotonicamente até o último dia do arquivo — artefato,
+  não aceleração real). A contagem de leads novos por dia só é confiável para os
+  dias finais de cada arquivo. Cada importação compara a **sobreposição** com o
+  banco e avisa quantas oportunidades sumiram do retrato (e quantas dentro do
+  período coberto) — é o que prova ou derruba a hipótese a cada novo arquivo.
 - **MySQL nunca ao vivo**: relatórios leem só a cópia local (`turmas`/`matriculas`),
   substituída por snapshot transacional a cada sync — mesmos números para o mesmo
   período e zero carga na produção. Usuário exclusivo somente-SELECT no .env.

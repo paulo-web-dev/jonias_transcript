@@ -173,6 +173,11 @@ const COLUNAS_CDR = {
   gravacao: ["gravacao"],
 };
 
+// IDs reais de ligação são "epoch.sequência" (ex.: 1786364904.95). Validar o
+// formato descarta qualquer rodapé/sumário ("TOTAL: 1226", "DURAÇÃO: …") sem
+// depender de blacklist de rótulos.
+const RE_CDR_ID = /^\d+\.\d+$/;
+
 function importarCdr(textoBruto, arquivoNome, usuarioId) {
   const iniciadoEm = new Date().toISOString();
   const texto = removerBom(textoBruto);
@@ -213,10 +218,9 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
       registrarOcorrencia(relatorio.motivos, "sem_id", JSON.stringify(linha).slice(0, 200));
       continue;
     }
-    // Rodapé "DURAÇÃO: HH:MM:SS" quando cai na primeira coluna
-    if (/^dura/i.test(normalizarNome(cdrId))) {
+    if (!RE_CDR_ID.test(cdrId)) {
       ignoradas++;
-      registrarOcorrencia(relatorio.motivos, "rodape", cdrId);
+      registrarOcorrencia(relatorio.motivos, "id_invalido", cdrId);
       continue;
     }
 
@@ -256,7 +260,7 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
        atendida = excluded.atendida, eventos = excluded.eventos,
        gravacao = excluded.gravacao, importacao_id = excluded.importacao_id`
   );
-  const existe = db.prepare("SELECT 1 FROM ligacoes WHERE cdr_id = ?");
+  const buscarExistente = db.prepare("SELECT * FROM ligacoes WHERE cdr_id = ?");
 
   try {
     const resultado = db.transaction(() => {
@@ -270,6 +274,7 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
 
       let novos = 0;
       let atualizados = 0;
+      let identicos = 0;
       for (const [cdrId, grupo] of grupos) {
         const linha = grupo.primeiro;
         const ramal = valor(linha, col.ramal);
@@ -277,9 +282,7 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
         if (ramal && pessoaId === null) {
           registrarOcorrencia(relatorio.problemas, "ramal_desconhecido", `${ramal} (ligação ${cdrId})`);
         }
-        if (existe.get(cdrId)) atualizados++;
-        else novos++;
-        upsert.run({
+        const registro = {
           cdr_id: cdrId,
           data_hora: grupo.dataHora,
           ramal: ramal || null,
@@ -293,17 +296,25 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
           eventos: grupo.eventos,
           gravacao: valor(linha, col.gravacao) || null,
           importacao_id: importacaoId,
-        });
+        };
+        const existente = buscarExistente.get(cdrId);
+        if (!existente) novos++;
+        else if (registroIdentico(existente, registro)) {
+          identicos++; // linha igual ao banco: não regrava
+          continue;
+        } else atualizados++;
+        upsert.run(registro);
       }
 
       db.prepare(
         `UPDATE importacoes SET linhas_lidas = ?, linhas_validas = ?, linhas_ignoradas = ?,
-           registros_novos = ?, registros_atualizados = ?, detalhes_json = ?, concluido_em = ?
+           registros_novos = ?, registros_atualizados = ?, registros_identicos = ?,
+           detalhes_json = ?, concluido_em = ?
          WHERE id = ?`
-      ).run(lidas, lidas - ignoradas, ignoradas, novos, atualizados,
+      ).run(lidas, lidas - ignoradas, ignoradas, novos, atualizados, identicos,
         JSON.stringify(relatorio), new Date().toISOString(), importacaoId);
 
-      return { importacaoId, novos, atualizados };
+      return { importacaoId, novos, atualizados, identicos };
     })();
 
     return {
@@ -317,6 +328,7 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
       ligacoes: grupos.size,
       registrosNovos: resultado.novos,
       registrosAtualizados: resultado.atualizados,
+      registrosIdenticos: resultado.identicos,
       detalhes: relatorio,
     };
   } catch (err) {
@@ -448,8 +460,9 @@ function normalizarTelefone(v) {
   return digitos || null;
 }
 
-// Compara o registro canônico novo com a linha do banco (as datas de fase usam
-// o valor pós-COALESCE — data conhecida nunca regride a NULL no UPDATE).
+// Compara o registro canônico novo com a linha do banco (usado pelo CDR e pelo
+// Omie). Nas datas de fase do Omie compara o valor pós-COALESCE — data
+// conhecida nunca regride a NULL no UPDATE.
 function registroIdentico(existente, novo) {
   for (const campo of Object.keys(novo)) {
     if (campo === "numero" || campo === "importacao_id") continue;
@@ -523,6 +536,13 @@ async function importarOportunidadesOmie(buffer, arquivoNome, usuarioId) {
       colunasExtras.push({ idx: i, rotulo: String(valorCelula(rotuloOriginal[i]) ?? cabecalhos[i]) });
     }
   }
+
+  // Sobreposição com o banco: cada arquivo é um retrato de janela recente, e a
+  // suspeita é que a exportação retenha só um subconjunto (leads por dia
+  // crescendo até o último dia). Comparar o que sumiu entre arquivos prova ou
+  // derruba a hipótese.
+  const existentesAntes = db.prepare("SELECT numero, incluido_em FROM oportunidades").all();
+  const numerosDoArquivo = new Set();
 
   const pessoas = db.prepare("SELECT id, nome, nomes_alternativos FROM pessoas").all();
   const pessoaPorNome = new Map();
@@ -612,6 +632,7 @@ async function importarOportunidadesOmie(buffer, arquivoNome, usuarioId) {
             valores.map((v) => valorCelula(v)).filter((v) => v !== null).join(" | "));
           continue;
         }
+        numerosDoArquivo.add(numero);
 
         const faseAtual = texto("fase_atual");
         if (faseAtual && !FASES_CONHECIDAS.has(normalizarNome(faseAtual))) {
@@ -697,6 +718,32 @@ async function importarOportunidadesOmie(buffer, arquivoNome, usuarioId) {
       }
 
       relatorio.periodo = { de: periodoDe, ate: periodoAte };
+
+      // Sobreposição: o que estava no banco e não veio neste arquivo
+      if (existentesAntes.length) {
+        const ausentes = existentesAntes.filter((o) => !numerosDoArquivo.has(o.numero));
+        if (ausentes.length) {
+          const naJanela = ausentes.filter(
+            (o) => o.incluido_em && periodoDe && o.incluido_em >= periodoDe
+          ).length;
+          relatorio.avisos.push(
+            `${ausentes.length} oportunidade(s) já no banco não vieram neste arquivo` +
+              (naJanela
+                ? ` — ${naJanela} dela(s) com Data de Inclusão dentro do período coberto ` +
+                  `(${periodoDe} a ${periodoAte}): indício de que a exportação retém só um subconjunto.`
+                : " (todas anteriores ao período coberto — esperado para um retrato de janela recente).")
+          );
+        } else {
+          relatorio.avisos.push(
+            "Todas as oportunidades já no banco vieram também neste arquivo (sobreposição completa)."
+          );
+        }
+      }
+      relatorio.avisos.push(
+        "Ressalva conhecida: a exportação do Omie parece reter só uma janela recente — " +
+          "a contagem de leads novos por dia é confiável apenas para os dias finais de cada arquivo."
+      );
+
       db.prepare(
         `UPDATE importacoes SET linhas_lidas = ?, linhas_validas = ?, linhas_ignoradas = ?,
            registros_novos = ?, registros_atualizados = ?, registros_identicos = ?,
