@@ -119,8 +119,13 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   6 atuais (Renato com `entra_feedback = 0`; `crm_user_id` do Frederico pendente).
 - `importacoes(id, tipo cdr|oportunidades|mysql, arquivo_nome, hash_sha256, linhas_*, registros_novos/atualizados/identicos, detalhes_json, status, erro, usuario_id, iniciado/concluido_em)`
   — auditoria de toda ingestão: cada número tem origem explicável.
-- `ligacoes(id, cdr_id UNIQUE, data_hora, ramal, pessoa_id, numero_a/b, sentido, fila, duracao_seg, atendida, eventos, gravacao, importacao_id)`
-  — 1 linha = 1 ligação real (eventos do CDR agrupados por ID, `max()` da duração).
+- `ligacoes(id, cdr_id UNIQUE, data_hora, ramal, pessoa_id, numero_a/b, sentido, fila, duracao_seg, atendida, eventos, gravacao, tem_evento_atendida, evento_falha, atendida_em, encerrada_em, tempo_toque_seg, tempo_conversa_seg, importacao_id)`
+  — 1 linha = 1 ligação real (eventos do CDR agrupados por ID, `max()` da
+  duração). `duracao_seg` é a duração **bruta** do arquivo (toque + conversa);
+  os sinais (`tem_evento_atendida`, `evento_falha`, `atendida_em`,
+  `encerrada_em`) ficam persistidos e `atendida`/`tempo_toque_seg`/
+  `tempo_conversa_seg` são derivados deles — regra recalculável por SQL, sem
+  reimportar.
 - `oportunidades(id, numero UNIQUE "2026/00583", conta, cnpj_cpf, solucao, titulo, contato, vendedor, pessoa_id, tipo_cliente, fase_atual, status, motivo_conclusao, fase_01..06_em, produtos/servicos/recorrencia/ticket_centavos, meses, temperatura, origem, vertical, telefone, celular_1/2, email, incluido/atualizado_em, extras_json, importacao_id)`
   — modelo do Omie. `fase_atual` (01_Lead novo, 02_Qualificação, 03_Negociação,
   06_Conclusão) e `status` (Ativo, Perdido, Conquistado) são **dimensões
@@ -194,13 +199,24 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   descartadas, **ID validado contra o padrão real `/^\d+\.\d+$/`** (epoch.seq —
   descarta rodapés "TOTAL: N"/"DURAÇÃO: HH:MM:SS" com motivo `id_invalido`, sem
   blacklist de rótulos), regex tolerante `/(\d{1,2}):(\d{2}):(\d{2})/`, BOM
-  utf-8-sig, atendida = duração > 0.
-- **Ressalva conhecida (CDR)**: a DURAÇÃO do arquivo **inclui o tempo de toque**
-  (Ocupado/Não atendeu/Rejeitada saem com duração > 0), então
-  `atendida = duração > 0` superestima a taxa de atendimento (~98% aparente vs
-  ~59% por evento "Atendida"). As linhas sem ID do CSV são eventos das mesmas
-  ligações (Atendida, Encerrada, Ocupado…), intercaladas por posição. A regra de
-  `atendida` está **pendente de decisão do usuário** — não mudar sem ele.
+  utf-8-sig.
+- **Atendida é derivada de sinais, não da duração** (decisão do usuário,
+  2026-08-18): o CSV do CDR vem em "retratos repetidos" — a linha com ID
+  reaparece várias vezes (só a última traz a duração total) e as linhas **sem
+  ID são eventos da mesma ligação** (Atendida, Encerrada, Ocupado…),
+  associadas por posição ao último ID válido. A DURAÇÃO bruta **inclui o tempo
+  de toque** (Ocupado/Não atendeu saem com duração > 0), então:
+  `atendida = tem_evento_atendida` (o grupo contém o evento "Atendida").
+  Três buckets distinguíveis por SQL: atendida (`atendida = 1`), falha
+  explícita (`atendida = 0 AND evento_falha IS NOT NULL` — Ocupado, Não
+  atendeu, Rejeitada, Destino Desconectado) e "só Encerrada"
+  (`atendida = 0 AND evento_falha IS NULL` — chamou e desligaram antes de
+  atender; classificado como NÃO atendida, mas operacionalmente distinto).
+  **TMA usa sempre `tempo_conversa_seg`** (atendida_em → encerrada_em), nunca
+  `duracao_seg` — a duração bruta infla o TMA com o tempo de toque. Mudança de
+  regra futura = UPDATE por SQL sobre os sinais persistidos, sem reimportar.
+  ⚠ Relatórios gerados antes desta correção usavam `atendida = duração > 0`
+  (~98% de taxa aparente vs ~59% real) e **não são comparáveis**.
 - **Omie: retrato ∪ histórico**: cada exportação cobre só uma janela recente, o
   banco é a **união** de todas — o upsert por "Número" insere/atualiza e **nunca
   apaga** o que não veio no arquivo. Linha idêntica ao banco não sofre UPDATE
