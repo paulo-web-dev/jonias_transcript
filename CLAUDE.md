@@ -103,7 +103,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **10**.
+pelo mesmo caminho). Versão atual: **11**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -120,7 +120,7 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 - `pessoas(id, nome, ramal UNIQUE, crm_user_id UNIQUE, wallet_nome UNIQUE, ativo, entra_feedback, nomes_alternativos)`
   — unifica os identificadores dos consultores; `nomes_alternativos` é um JSON
   array com os nomes completos como aparecem no "Vendedor" do Omie; seed com os
-  6 atuais (Renato com `entra_feedback = 0`; `crm_user_id` do Frederico pendente).
+  6 atuais (Renato com `entra_feedback = 0` e `entra_painel = 0`; `crm_user_id` do Frederico pendente). `tipo`: consultor | canal; `entra_painel` controla as visões de prospecção da TV.
 - `importacoes(id, tipo cdr|oportunidades|mysql, arquivo_nome, hash_sha256, linhas_*, registros_novos/atualizados/identicos, detalhes_json, status, erro, usuario_id, iniciado/concluido_em)`
   — auditoria de toda ingestão: cada número tem origem explicável.
 - `ligacoes(id, cdr_id UNIQUE, data_hora, ramal, pessoa_id, numero_a/b, sentido, fila, duracao_seg, atendida, eventos, gravacao, tem_evento_atendida, evento_falha, atendida_em, encerrada_em, tempo_toque_seg, tempo_conversa_seg, importacao_id)`
@@ -168,7 +168,7 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `GET /api/metricas?de=&ate=` | cálculo ao vivo do motor de métricas (preview) |
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
-| `GET /tv?token=` e `GET /api/tv/dados?token=` | dashboard de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. Rotação opcional: `?giro=N` segundos |
+| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20), `?fixo=dia\|semana\|mes`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=0`, `?volume=0–1` |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -318,16 +318,23 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - Períodos congelados com versões (`periodo_snapshots`) — tela `/relatorios`
 - Tela `/saude` (frescor, wallets/vendedores sem match, matrículas sem
   oportunidade, conquistadas sem matrícula, conflitos, alunos órfãos)
-- Dashboard de TV `/tv?token=` — três painéis: **HOJE** (parcial, com ritmo
-  projetado pela hora do último dado do CDR — jornada 09:00–18:00; selo "SEM
-  DADO DE HOJE" quando o CDR não cobre o dia), **SEMANA** (acumulado × meta ×
-  dias úteis decorridos, rankings de ligações/leads/receita) e **MÊS** (barras
-  de receita × R$ 75.000 com dias úteis restantes). Frescor por fonte no topo,
-  ⚠ pulsante quando > 1 dia útil sem dado. Update-in-place sem piscar,
-  `?giro=N` para rotação. **Decisão revogada em 2026-08-18**: receita por
-  consultor e ranking de receita APARECEM na TV; continua fora qualquer texto
-  avaliativo sobre pessoas (feedback, pontos de melhoria) — só número, tudo do
-  motor SQL, zero IA
+- Painel de TV 2.0 `/tv?token=` — **rotação automática** entre três visões
+  (crossfade + indicador): **HOJE** (barras discadas × meta com ritmo projetado
+  pela hora do último dado do CDR, jornada 09:00–18:00; a visão **sai da
+  rotação** quando não há CDR do dia — `?dia=sempre` força com selo), **SEMANA**
+  (barras × meta escalada, selo ✓ ao cruzar meta, pódios visuais de
+  ligações/leads/receita) e **MÊS** (a mais espaçosa: barras grandes de receita
+  × R$ 75.000). **Tempo real por SSE**: ingestão concluída → evento → refetch;
+  polling de 60 s como rede de segurança; diff no cliente anima contagem, dá
+  glow em quem mudou/cruzou meta e dispara **celebração de matrícula nova**
+  (overlay ~5 s com nome + valor, confete e som próprio). Som via WebAudio
+  sintetizado, **desbloqueado por um toque** (overlay inicial; indicador 🔔/🔕)
+  — única interação permitida na tela. `pessoas.entra_painel = 0` (Renato) fica
+  fora de dia/semana/rankings; a receita dele aparece só na visão do mês.
+  "Sem dados" (tudo zero) é neutro cinza — vermelho só para atrasado com dado
+  real. **Decisão revogada em 2026-08-18**: receita por consultor e ranking de
+  receita APARECEM na TV; continua fora qualquer texto avaliativo sobre pessoas
+  — só número, tudo do motor SQL, zero IA
 - Validado contra a conferência da semana 10–14/08 (1.225+1 discadas, 723
   atendidas, taxas por consultor, 176 leads na janela, 4 vendas)
 
