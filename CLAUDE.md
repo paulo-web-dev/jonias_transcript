@@ -103,7 +103,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **9**.
+pelo mesmo caminho). Versão atual: **10**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -144,8 +144,10 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   desde o último sync, margem de 3 dias; primeiro sync completo; nunca DELETE).
   `status = 'canceled'` **não conta como receita**; matrícula com aluno órfão na
   origem é mantida com dados em branco (nunca descartada em silêncio).
-- `metas(id, pessoa_id NULL=todos, indicador, valor, vigente_desde/ate)` — seed:
-  45 ligações/dia, 14 leads/dia, 1.3 matrículas/dia.
+- `metas(id, pessoa_id NULL=todos, indicador ligacoes_dia|leads_dia|matriculas_dia|receita_mes, valor, vigente_desde/ate)`
+  — seed: 45 ligações/dia, 14 leads/dia, 1.3 matrículas/dia e **receita_mes =
+  7.500.000 centavos (R$ 75.000/mês por consultor)**, todos vigentes desde
+  2026-01-01; override por pessoa via `pessoa_id`.
 - `periodos(id, nome, data_inicio, data_fim)` — períodos de relatório (Etapa 2).
 
 ## Rotas
@@ -166,7 +168,7 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `GET /api/metricas?de=&ate=` | cálculo ao vivo do motor de métricas (preview) |
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
-| `GET /tv?token=` e `GET /api/tv/dados?token=` | modo TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503 |
+| `GET /tv?token=` e `GET /api/tv/dados?token=` | dashboard de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. Rotação opcional: `?giro=N` segundos |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -316,9 +318,16 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - Períodos congelados com versões (`periodo_snapshots`) — tela `/relatorios`
 - Tela `/saude` (frescor, wallets/vendedores sem match, matrículas sem
   oportunidade, conquistadas sem matrícula, conflitos, alunos órfãos)
-- Modo TV `/tv?token=` — payload público cortado NO SERVIDOR: só agregados do
-  time, ranking de volume (discadas/leads) e progresso coletivo; nunca receita
-  por consultor, taxa/TMA individual ou qualquer comparativo qualitativo
+- Dashboard de TV `/tv?token=` — três painéis: **HOJE** (parcial, com ritmo
+  projetado pela hora do último dado do CDR — jornada 09:00–18:00; selo "SEM
+  DADO DE HOJE" quando o CDR não cobre o dia), **SEMANA** (acumulado × meta ×
+  dias úteis decorridos, rankings de ligações/leads/receita) e **MÊS** (barras
+  de receita × R$ 75.000 com dias úteis restantes). Frescor por fonte no topo,
+  ⚠ pulsante quando > 1 dia útil sem dado. Update-in-place sem piscar,
+  `?giro=N` para rotação. **Decisão revogada em 2026-08-18**: receita por
+  consultor e ranking de receita APARECEM na TV; continua fora qualquer texto
+  avaliativo sobre pessoas (feedback, pontos de melhoria) — só número, tudo do
+  motor SQL, zero IA
 - Validado contra a conferência da semana 10–14/08 (1.225+1 discadas, 723
   atendidas, taxas por consultor, 176 leads na janela, 4 vendas)
 
