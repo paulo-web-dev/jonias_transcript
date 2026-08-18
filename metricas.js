@@ -347,6 +347,15 @@ function dadosTvCompleto() {
     mysql: frescorDe(dadoAte("SELECT MAX(criada_em) v FROM matriculas"), "mysql"),
   };
 
+  // Quem entra nas visões de prospecção (dia/semana): consultores com
+  // entra_painel = 1. A visão do mês (receita) usa todos os consultores.
+  const nomesPainel = new Set(
+    db.prepare(
+      "SELECT nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 AND entra_painel = 1"
+    ).all().map((p) => p.nome)
+  );
+  const doPainel = (lista) => lista.filter((p) => nomesPainel.has(p.nome));
+
   // ---- Dia (parcial, com ritmo) ----
   const mDia = calcularMetricas(hoje, hoje);
   const ultimoDadoHoje = db
@@ -357,7 +366,7 @@ function dadosTvCompleto() {
     temDadoHoje: !!ultimoDadoHoje,
     dadosAte: ultimoDadoHoje ?? frescor.cdr.dadosAte,
     emCurso: mDia.diasUteis > 0,
-    porPessoa: mDia.porPessoa.map((p) => {
+    porPessoa: doPainel(mDia.porPessoa).map((p) => {
       const ritmo = calcularRitmo(p.ligacoes.discadas.valor, p.ligacoes.discadas.metaDia, ultimoDadoHoje);
       return {
         nome: p.nome,
@@ -375,10 +384,10 @@ function dadosTvCompleto() {
         receitaCentavos: p.receitaCentavos,
       };
     }),
-    rankingLigacoes: mDia.porPessoa
+    rankingLigacoes: doPainel(mDia.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.ligacoes.discadas.valor }))
       .sort((a, b) => b.valor - a.valor),
-    rankingMatriculas: mDia.porPessoa
+    rankingMatriculas: doPainel(mDia.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.matriculas.valor }))
       .sort((a, b) => b.valor - a.valor),
   };
@@ -389,7 +398,7 @@ function dadosTvCompleto() {
     de: semanaDe,
     ate: hoje,
     diasUteis: mSemana.diasUteis,
-    porPessoa: mSemana.porPessoa.map((p) => ({
+    porPessoa: doPainel(mSemana.porPessoa).map((p) => ({
       nome: p.nome,
       discadas: {
         valor: p.ligacoes.discadas.valor,
@@ -402,23 +411,27 @@ function dadosTvCompleto() {
       matriculas: { valor: p.matriculas.valor, meta: p.matriculas.meta, atingimento: p.matriculas.atingimento },
       receitaCentavos: p.receitaCentavos,
     })),
-    equipe: {
-      discadas: mSemana.equipe.discadas,
-      metaDiscadas: mSemana.equipe.metaDiscadas,
-      leadsNovos: mSemana.equipe.leadsNovos,
-      metaLeads: mSemana.equipe.metaLeads,
-      matriculas: mSemana.equipe.matriculas,
-      metaMatriculas: mSemana.equipe.metaMatriculas,
-      vendas: mSemana.equipe.vendas,
-      receitaCentavos: mSemana.equipe.receitaCentavos,
-    },
-    rankingLigacoes: mSemana.porPessoa
+    equipe: (() => {
+      const lista = doPainel(mSemana.porPessoa);
+      const soma = (fn) => lista.reduce((s, p) => s + fn(p), 0);
+      return {
+        discadas: soma((p) => p.ligacoes.discadas.valor),
+        metaDiscadas: soma((p) => p.ligacoes.discadas.meta || 0),
+        leadsNovos: soma((p) => p.funil.leadsNovos.valor),
+        metaLeads: soma((p) => p.funil.leadsNovos.meta || 0),
+        matriculas: soma((p) => p.matriculas.valor),
+        metaMatriculas: Math.round(soma((p) => p.matriculas.meta || 0) * 10) / 10,
+        vendas: soma((p) => p.funil.vendas),
+        receitaCentavos: soma((p) => p.receitaCentavos),
+      };
+    })(),
+    rankingLigacoes: doPainel(mSemana.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.ligacoes.discadas.valor }))
       .sort((a, b) => b.valor - a.valor),
-    rankingLeads: mSemana.porPessoa
+    rankingLeads: doPainel(mSemana.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.funil.leadsNovos.valor }))
       .sort((a, b) => b.valor - a.valor),
-    rankingReceita: mSemana.porPessoa
+    rankingReceita: doPainel(mSemana.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.receitaCentavos }))
       .sort((a, b) => b.valor - a.valor),
   };

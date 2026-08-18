@@ -397,6 +397,16 @@ const MIGRACOES = [
       VALUES (NULL, 'receita_mes', 7500000, '2026-01-01');
     `);
   },
+
+  // 11 — Flag do painel de TV: quem não faz prospecção (Renato) não aparece
+  // nas visões de dia/semana nem em ranking — mostrá-lo como "atrasado" na
+  // parede seria errado. A receita dele continua na visão do mês.
+  () => {
+    db.exec(`
+      ALTER TABLE pessoas ADD COLUMN entra_painel INTEGER NOT NULL DEFAULT 1;
+      UPDATE pessoas SET entra_painel = 0 WHERE nome = 'Renato';
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
