@@ -171,6 +171,41 @@ app.get("/api/tv/dados", (req, res) => {
   res.json(dadosTvCompleto());
 });
 
+// SSE: empurra "dados atualizados" para as TVs quando uma ingestão termina.
+// A TV refaz o fetch e decide sozinha o que animar/celebrar (diff no cliente).
+const conexoesTv = new Set();
+
+app.get("/api/tv/eventos", (req, res) => {
+  const ok = tokenTvValido(req);
+  if (ok === null) return res.status(503).json({ error: "Modo TV desabilitado." });
+  if (!ok) return res.status(401).json({ error: "Token inválido." });
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no", // proxies não devem bufferizar o stream
+  });
+  res.write(": conectado\n\n");
+  conexoesTv.add(res);
+  req.on("close", () => conexoesTv.delete(res));
+});
+
+// Heartbeat-comentário mantém a conexão viva através de proxies
+setInterval(() => {
+  for (const res of conexoesTv) res.write(": ping\n\n");
+}, 25000).unref();
+
+function emitirEventoTv(fonte) {
+  const evento = `data: ${JSON.stringify({ tipo: "dados", fonte })}\n\n`;
+  for (const res of conexoesTv) {
+    try {
+      res.write(evento);
+    } catch (_) {
+      conexoesTv.delete(res);
+    }
+  }
+}
+
 // Todas as demais rotas /api/* exigem login
 app.use("/api", exigirLoginApi);
 
@@ -502,6 +537,7 @@ app.post("/api/importacoes/cdr", corpoCsv, (req, res) => {
   }
   const arquivo = String(req.query.arquivo || "cdr.csv").slice(0, 200);
   const resultado = importarCdr(req.body, arquivo, req.usuario.id);
+  if (resultado.status !== "erro") emitirEventoTv("cdr");
   res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
 });
 
@@ -513,12 +549,15 @@ app.post("/api/importacoes/oportunidades", corpoXlsx, async (req, res) => {
   }
   const arquivo = String(req.query.arquivo || "oportunidades.xlsx").slice(0, 200);
   const resultado = await importarOportunidadesOmie(req.body, arquivo, req.usuario.id);
+  if (resultado.status !== "erro") emitirEventoTv("oportunidades");
   res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
 });
 
 app.post("/api/sincronizacoes/mysql", async (req, res) => {
   try {
-    res.json(await sincronizarMysql(req.usuario.id));
+    const resultado = await sincronizarMysql(req.usuario.id);
+    emitirEventoTv("mysql");
+    res.json(resultado);
   } catch (err) {
     if (err.semCredenciais) return res.status(503).json({ error: err.message });
     console.error("[/api/sincronizacoes/mysql]", err.message || err);
