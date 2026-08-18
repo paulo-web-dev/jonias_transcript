@@ -7,22 +7,41 @@
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body class="tv">
-  <div class="tv-topo">
+  <header class="tv-topo">
     <h1>jon<span class="grad">IA</span>s — Painel da Equipe</h1>
-    <span class="tv-relogio" id="tv-relogio">carregando…</span>
-  </div>
-
-  <div class="tv-grade" id="tv-cards"></div>
-
-  <div class="tv-colunas">
-    <div class="tv-ranking">
-      <h2>📞 Ligações discadas (semana)</h2>
-      <ol id="tv-ranking-ligacoes"></ol>
+    <div class="tv-frescor" id="tv-frescor">
+      <span data-fonte="cdr">📞 —</span>
+      <span data-fonte="omie">🎯 —</span>
+      <span data-fonte="mysql">🗄 —</span>
+      <span class="tv-relogio" id="tv-relogio">carregando…</span>
     </div>
-    <div class="tv-ranking">
-      <h2>✨ Leads novos (semana)</h2>
-      <ol id="tv-ranking-leads"></ol>
-    </div>
+  </header>
+
+  <div class="tv-paineis" id="tv-paineis">
+    <section class="tv-painel" id="painel-dia">
+      <h2 id="dia-titulo">HOJE</h2>
+      <div class="tv-selo oculto" id="dia-selo">SEM DADO DE HOJE</div>
+      <div class="tv-cards-pessoas" id="dia-pessoas"></div>
+      <div class="tv-rankings">
+        <div class="tv-ranking"><h3>📞 Ligações (dia)</h3><ol id="dia-rank-lig"></ol></div>
+        <div class="tv-ranking"><h3>🎓 Matrículas (dia)</h3><ol id="dia-rank-mat"></ol></div>
+      </div>
+    </section>
+
+    <section class="tv-painel" id="painel-semana">
+      <h2 id="semana-titulo">SEMANA</h2>
+      <div class="tv-cards-pessoas" id="semana-pessoas"></div>
+      <div class="tv-rankings">
+        <div class="tv-ranking"><h3>📞 Ligações</h3><ol id="sem-rank-lig"></ol></div>
+        <div class="tv-ranking"><h3>✨ Leads</h3><ol id="sem-rank-leads"></ol></div>
+        <div class="tv-ranking"><h3>💰 Receita</h3><ol id="sem-rank-rec"></ol></div>
+      </div>
+    </section>
+
+    <section class="tv-painel tv-painel-mes" id="painel-mes">
+      <h2 id="mes-titulo">MÊS — RECEITA × META</h2>
+      <div class="tv-barras" id="mes-barras"></div>
+    </section>
   </div>
 
   <script src="/js/tv.js"></script>
