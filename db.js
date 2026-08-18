@@ -304,6 +304,35 @@ const MIGRACOES = [
       ALTER TABLE ligacoes ADD COLUMN tempo_conversa_seg  INTEGER; -- atendida_em → encerrada_em (TMA usa isto, nunca duracao_seg)
     `);
   },
+
+  // 7 — Sync real do MySQL: o esquema confirmado usa classes.title/subtitle
+  // (não "name") e o cancelamento vive em enrollments.status ('canceled' não
+  // conta como receita). matriculas deixa de ser full-replace (vira upsert
+  // incremental), então turmas nunca são apagadas e o resultado do cruzamento
+  // matrícula ↔ oportunidade (por e-mail/telefone) persiste entre syncs.
+  () => {
+    db.exec(`
+      ALTER TABLE turmas ADD COLUMN subtitulo TEXT;
+      ALTER TABLE turmas ADD COLUMN end_date  TEXT;
+
+      ALTER TABLE matriculas ADD COLUMN status          TEXT;    -- enum da origem; 'canceled' = fora da receita
+      ALTER TABLE matriculas ADD COLUMN valor_centavos  INTEGER; -- final_value * 100
+      ALTER TABLE matriculas ADD COLUMN oportunidade_id INTEGER REFERENCES oportunidades(id);
+      ALTER TABLE matriculas ADD COLUMN match_metodo    TEXT;    -- 'email' | 'telefone'
+      ALTER TABLE matriculas ADD COLUMN match_confianca TEXT;    -- 'alta' | 'media' | 'baixa'
+      CREATE INDEX idx_matriculas_oportunidade ON matriculas(oportunidade_id);
+
+      -- Formatos reais do enrollments.wallet entram como nomes alternativos
+      UPDATE pessoas SET nomes_alternativos = CASE nome
+        WHEN 'Bianca'    THEN json_array('Bianca Destro')
+        WHEN 'Hirlan'    THEN json_array('Hirlan Rosário', 'Hirlan Silva Santos do Rosario')
+        WHEN 'Agnes'     THEN json_array('Agnes Dias Ramos', 'Agnes Ramos')
+        WHEN 'Renato'    THEN json_array('Renato', 'Renato Fernando da Silva Monteiro')
+        WHEN 'Douglas'   THEN json_array('Douglas Gotordelli Alves Martins')
+        WHEN 'Frederico' THEN json_array('Frederico Vieira', 'Frederico Alberto Vieira')
+        ELSE nomes_alternativos END;
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
