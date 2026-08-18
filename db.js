@@ -373,6 +373,30 @@ const MIGRACOES = [
        WHERE pessoa_id IS NULL AND vigente_desde = '2026-08-17';
     `);
   },
+
+  // 10 — Meta mensal de receita (R$ 75.000/mês por consultor, em CENTAVOS).
+  // O CHECK de metas.indicador é fixo e o SQLite não altera CHECK — a tabela é
+  // recriada com o indicador novo, preservando dados e constraints.
+  () => {
+    db.exec(`
+      CREATE TABLE metas_nova (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        pessoa_id     INTEGER REFERENCES pessoas(id),
+        indicador     TEXT    NOT NULL CHECK (indicador IN ('ligacoes_dia','leads_dia','matriculas_dia','receita_mes')),
+        valor         REAL    NOT NULL,
+        vigente_desde TEXT    NOT NULL,
+        vigente_ate   TEXT,
+        UNIQUE (indicador, pessoa_id, vigente_desde)
+      );
+      INSERT INTO metas_nova (id, pessoa_id, indicador, valor, vigente_desde, vigente_ate)
+        SELECT id, pessoa_id, indicador, valor, vigente_desde, vigente_ate FROM metas;
+      DROP TABLE metas;
+      ALTER TABLE metas_nova RENAME TO metas;
+
+      INSERT INTO metas (pessoa_id, indicador, valor, vigente_desde)
+      VALUES (NULL, 'receita_mes', 7500000, '2026-01-01');
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
