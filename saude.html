@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Saúde dos Dados — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">saúde dos dados</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <a href="/relatorios" class="btn-topo">📊 Relatórios</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista">
+    <p class="texto-suave">Se um painel mostrar número errado por dado faltando, esta tela mostra antes.
+      Frescor das fontes, atribuições quebradas e furos de cruzamento.</p>
+
+    <h2 class="secao-titulo">Frescor das fontes</h2>
+    <div class="grade-fontes" id="cartoes-fontes"></div>
+
+    <div class="grade-fontes">
+      <div class="fonte-card">
+        <h3>👛 Wallets sem match</h3>
+        <p class="texto-suave">Matrículas cujo vendedor (wallet) não casa com ninguém — a atribuição de venda
+          quebra silenciosamente aqui.</p>
+        <ul class="lista-simples" id="lista-wallets"></ul>
+      </div>
+      <div class="fonte-card">
+        <h3>🧑‍💼 Vendedores do CRM sem match</h3>
+        <p class="texto-suave">Oportunidades do Omie cujo vendedor não casa com ninguém em <code>pessoas</code>.</p>
+        <ul class="lista-simples" id="lista-vendedores"></ul>
+      </div>
+      <div class="fonte-card">
+        <h3>🕳 Matrículas da equipe sem oportunidade</h3>
+        <p class="texto-suave">Vendas dos consultores (janela coberta pelo Omie) que não têm oportunidade no CRM
+          — ou a venda não passou pelo CRM, ou o cruzamento falhou.</p>
+        <ul class="lista-simples" id="lista-sem-oportunidade"></ul>
+      </div>
+      <div class="fonte-card">
+        <h3>🏆 Conquistadas sem matrícula</h3>
+        <p class="texto-suave">Ou o CRM marcou venda que não virou matrícula, ou o cruzamento está falhando.</p>
+        <ul class="lista-simples" id="lista-conquistadas"></ul>
+      </div>
+      <div class="fonte-card">
+        <h3>⚠ Conflitos de atribuição</h3>
+        <p class="texto-suave">Wallet da matrícula ≠ vendedor da oportunidade casada. Vale o wallet, mas fica
+          registrado.</p>
+        <ul class="lista-simples" id="lista-conflitos"></ul>
+      </div>
+      <div class="fonte-card">
+        <h3>👻 Alunos órfãos</h3>
+        <p class="texto-suave">Matrículas cujo aluno não existe mais na origem (mantidas com dados em branco).</p>
+        <p id="alunos-orfaos" class="metrica-valor">—</p>
+      </div>
+    </div>
+  </main>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/saude.js"></script>
+</body>
+</html>
