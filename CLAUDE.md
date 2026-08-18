@@ -58,7 +58,7 @@ aula-ai/
 ├── db.js            # conexão better-sqlite3 + migrações (PRAGMA user_version)
 ├── auth.js          # hash argon2id, rate limit progressivo do login, seed do admin
 ├── importacao.js    # ingestão: CDR do PABX (CSV) e oportunidades do Omie (.xlsx)
-├── sincronizacao.js # sync snapshot do MySQL Unyflex → SQLite local
+├── sincronizacao.js # sync incremental do MySQL Unyflex → SQLite + cruzamento
 ├── exportacao.js    # geração de PDF (puppeteer) e DOCX (docx) + template HTML
 ├── login.html       # tela de login              (rota /login)
 ├── aulas.html       # lista "Minhas Aulas"       (rota /aulas)
@@ -134,9 +134,12 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   dígitos (futura chave de cruzamento com matrículas); dinheiro em centavos.
 - `oportunidade_mudancas(id, oportunidade_id, campo fase_atual|status|motivo_conclusao|ticket_centavos, valor_anterior, valor_novo, observado_em, importacao_id)`
   — histórico de mudanças entre importações ("ficou N dias em Qualificação").
-- `turmas(id = classes.id, nome, start_date, sincronizado_em)` e
-  `matriculas(id = enrollments.id, turma_id, student_id, aluno_*, wallet, pessoa_id, criada_em, sincronizado_em)`
-  — **cópia snapshot** do MySQL, substituída inteira a cada sync.
+- `turmas(id = classes.id, nome = title, subtitulo = subtitle, start_date, end_date, sincronizado_em)` e
+  `matriculas(id = enrollments.id, turma_id, student_id, aluno_* normalizados, wallet, pessoa_id, status, valor_centavos, oportunidade_id, match_metodo, match_confianca, criada_em, sincronizado_em)`
+  — cópia local do MySQL por **upsert incremental** (`enrollments.updated_at`
+  desde o último sync, margem de 3 dias; primeiro sync completo; nunca DELETE).
+  `status = 'canceled'` **não conta como receita**; matrícula com aluno órfão na
+  origem é mantida com dados em branco (nunca descartada em silêncio).
 - `metas(id, pessoa_id NULL=todos, indicador, valor, vigente_desde/ate)` — seed:
   45 ligações/dia, 14 leads/dia, 1.3 matrículas/dia.
 - `periodos(id, nome, data_inicio, data_fim)` — períodos de relatório (Etapa 2).
@@ -155,7 +158,7 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `POST /api/importacoes/cdr?arquivo=` | upload do CSV como corpo text/plain (25 MB); resposta traz o relatório completo (ignoradas com motivo, ressalvas, avisos); erro estrutural → 422 |
 | `POST /api/importacoes/oportunidades?arquivo=` | upload do .xlsx do Omie como corpo binário (`application/octet-stream`, 25 MB); resposta traz novos/atualizados/idênticos + período coberto (min/max de "Data de Inclusão"); erro estrutural → 422 |
 | `GET /api/importacoes` e `/:id` | auditoria das ingestões (últimas 50 / detalhes) |
-| `POST /api/sincronizacoes/mysql` | copia o snapshot da Unyflex; 503 sem MYSQL_* no .env |
+| `POST /api/sincronizacoes/mysql` | sync incremental da Unyflex + cruzamento matrícula↔oportunidade; 503 sem MYSQL_* no .env |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -236,8 +239,24 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   banco e avisa quantas oportunidades sumiram do retrato (e quantas dentro do
   período coberto) — é o que prova ou derruba a hipótese a cada novo arquivo.
 - **MySQL nunca ao vivo**: relatórios leem só a cópia local (`turmas`/`matriculas`),
-  substituída por snapshot transacional a cada sync — mesmos números para o mesmo
-  período e zero carga na produção. Usuário exclusivo somente-SELECT no .env.
+  atualizada por sync incremental transacional — mesmos números para o mesmo
+  período e zero carga na produção. Usuário exclusivo somente-SELECT **apenas em
+  classes, enrollments e students** (qualquer query em outra tabela: avisar o
+  usuário, não assumir permissão). Esquema real confirmado: curso é
+  `classes.title`/`subtitle` (não "name"); cancelamento é
+  `enrollments.status = 'canceled'` (sem `deleted_at`). Timeout de 10s na
+  conexão e 30s por query — falha explícita na tela, nunca trava o app.
+- **Cruzamento matrícula ↔ vendedor/oportunidade** (roda ao fim de cada sync,
+  só no SQLite): (a) direta — `wallet` → `pessoas` por nome normalizado exato
+  contra `nome` + `nomes_alternativos` (formatos reais do wallet incluídos na
+  migração 7; sem match = listado no relatório, ex.: "Unyflex", ex-vendedores);
+  (b) por contato — e-mail exato em minúsculas (confiança alta), telefone pelos
+  últimos 9 dígitos (média) ou 8 (baixa), gravado em
+  `oportunidade_id`/`match_metodo`/`match_confianca`. Matrícula sem match
+  NUNCA é descartada (pode ser venda fora do CRM). Relação
+  oportunidade→matrículas é **1:N** (uma venda B2G vira várias matrículas).
+  Empate entre oportunidades candidatas: prefere Conquistada, depois a mais
+  recente.
 - **Segurança**: HTML sempre escapado antes de renderizar; senhas só como hash
   argon2id no banco; `SESSION_SECRET` obrigatório (fail-fast, sem fallback);
   cookie `httpOnly` + `sameSite: lax` + `secure` quando `NODE_ENV=production`,
