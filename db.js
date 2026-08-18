@@ -288,6 +288,22 @@ const MIGRACOES = [
       CREATE INDEX idx_mudancas_oportunidade ON oportunidade_mudancas(oportunidade_id, observado_em);
     `);
   },
+
+  // 6 — Sinais brutos de atendimento por ligação. A DURAÇÃO do CDR inclui o
+  // tempo de toque (Ocupado/Não atendeu saem com duração > 0), então "atendida"
+  // passa a ser DERIVADA dos sinais: atendida = tem_evento_atendida. Os sinais
+  // ficam persistidos para a regra poder mudar depois por SQL, sem reimportar.
+  // duracao_seg segue guardando a duração bruta do arquivo (toque + conversa).
+  () => {
+    db.exec(`
+      ALTER TABLE ligacoes ADD COLUMN tem_evento_atendida INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE ligacoes ADD COLUMN evento_falha        TEXT;    -- Ocupado|Não atendeu|Rejeitada|Destino Desconectado (como veio)
+      ALTER TABLE ligacoes ADD COLUMN atendida_em         TEXT;    -- hora do evento "Atendida"
+      ALTER TABLE ligacoes ADD COLUMN encerrada_em        TEXT;    -- hora do último evento "Encerrada"
+      ALTER TABLE ligacoes ADD COLUMN tempo_toque_seg     INTEGER; -- início → atendida_em
+      ALTER TABLE ligacoes ADD COLUMN tempo_conversa_seg  INTEGER; -- atendida_em → encerrada_em (TMA usa isto, nunca duracao_seg)
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
