@@ -54,7 +54,7 @@ async function chamarApi(url, opcoes) {
 
 // ---------- Relatório de importação ----------
 
-const NOMES_TIPO = { cdr: "CDR do PABX", oportunidades: "Oportunidades (Ramper)", mysql: "MySQL Unyflex" };
+const NOMES_TIPO = { cdr: "CDR do PABX", oportunidades: "Oportunidades (Omie)", mysql: "MySQL Unyflex" };
 
 function blocoOcorrencias(titulo, grupo) {
   const chaves = Object.keys(grupo || {});
@@ -83,11 +83,20 @@ function mostrarRelatorio(titulo, resultado) {
         `<strong>${resultado.matriculas}</strong> matrícula(s).</p>`
     );
   } else {
+    const identicos =
+      resultado.registrosIdenticos > 0 ? `, ${resultado.registrosIdenticos} idêntico(s)` : "";
     linhas.push(
       `<p>✔ ${resultado.linhasLidas} linha(s) lida(s), ${resultado.linhasValidas} válida(s), ` +
         `${resultado.linhasIgnoradas} ignorada(s) — ` +
         `<strong>${resultado.registrosNovos} novo(s)</strong>, ` +
-        `${resultado.registrosAtualizados} atualizado(s).</p>`
+        `${resultado.registrosAtualizados} atualizado(s)${identicos}.</p>`
+    );
+  }
+  const periodo = resultado.periodo || d.periodo;
+  if (periodo?.de) {
+    linhas.push(
+      `<p class="texto-suave">Período coberto pelo arquivo (Data de Inclusão): ` +
+        `${escapeHtml(periodo.de)} a ${escapeHtml(periodo.ate)}.</p>`
     );
   }
   linhas.push(blocoOcorrencias("Linhas ignoradas (por quê)", d.motivos));
@@ -105,16 +114,19 @@ function mostrarRelatorio(titulo, resultado) {
 
 // ---------- Uploads ----------
 
-async function enviarArquivo(input, rota, statusEl, rotulo) {
+// binario = true envia o arquivo como está (planilha .xlsx do Omie);
+// caso contrário o conteúdo vai como texto (CSV do CDR).
+async function enviarArquivo(input, rota, statusEl, rotulo, binario) {
   const arquivo = input.files?.[0];
   if (!arquivo) return;
   input.value = ""; // permite reenviar o mesmo arquivo
   statusEl.textContent = `jonIAs está importando "${arquivo.name}"…`;
   try {
-    const texto = await arquivo.text();
+    const corpo = binario ? await arquivo.arrayBuffer() : await arquivo.text();
+    const tipo = binario ? "application/octet-stream" : "text/plain;charset=utf-8";
     const resultado = await chamarApi(
       `${rota}?arquivo=${encodeURIComponent(arquivo.name)}`,
-      { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: texto }
+      { method: "POST", headers: { "Content-Type": tipo }, body: corpo }
     );
     statusEl.textContent =
       resultado.status === "erro"
@@ -129,14 +141,15 @@ async function enviarArquivo(input, rota, statusEl, rotulo) {
 }
 
 el.arquivoCdr.addEventListener("change", () =>
-  enviarArquivo(el.arquivoCdr, "/api/importacoes/cdr", el.cdrStatus, "CDR do PABX")
+  enviarArquivo(el.arquivoCdr, "/api/importacoes/cdr", el.cdrStatus, "CDR do PABX", false)
 );
 el.arquivoOportunidades.addEventListener("change", () =>
   enviarArquivo(
     el.arquivoOportunidades,
     "/api/importacoes/oportunidades",
     el.oportunidadesStatus,
-    "Oportunidades (Ramper)"
+    "Oportunidades (Omie)",
+    true
   )
 );
 
@@ -199,7 +212,8 @@ async function carregarImportacoes() {
         imp.status === "erro"
           ? escapeHtml(imp.erro || "erro")
           : `${imp.linhas_lidas} lida(s) · ${imp.linhas_ignoradas} ignorada(s) · ` +
-            `${imp.registros_novos} novo(s) · ${imp.registros_atualizados} atualizado(s)`;
+            `${imp.registros_novos} novo(s) · ${imp.registros_atualizados} atualizado(s)` +
+            (imp.registros_identicos > 0 ? ` · ${imp.registros_identicos} idêntico(s)` : "");
       item.innerHTML = `
         <div class="aula-info">
           <div class="aula-nome-linha">
@@ -232,6 +246,7 @@ async function carregarImportacoes() {
               linhasIgnoradas: det.linhas_ignoradas,
               registrosNovos: det.registros_novos,
               registrosAtualizados: det.registros_atualizados,
+              registrosIdenticos: det.registros_identicos,
               detalhes: det.detalhes,
             }
           );

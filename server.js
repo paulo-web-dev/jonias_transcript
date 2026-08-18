@@ -512,7 +512,8 @@ app.get("/api/importacoes", (req, res) => {
     .prepare(
       `SELECT i.id, i.tipo, i.arquivo_nome, i.linhas_lidas, i.linhas_validas,
               i.linhas_ignoradas, i.registros_novos, i.registros_atualizados,
-              i.status, i.erro, i.iniciado_em, i.concluido_em, u.login AS usuario
+              i.registros_identicos, i.status, i.erro, i.iniciado_em,
+              i.concluido_em, u.login AS usuario
        FROM importacoes i JOIN usuarios u ON u.id = i.usuario_id
        ORDER BY i.id DESC LIMIT 50`
     )
