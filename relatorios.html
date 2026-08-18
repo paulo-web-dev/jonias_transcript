@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Relatórios — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">relatórios</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <a href="/saude" class="btn-topo">🩺 Saúde dos dados</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista">
+    <div class="lista-controles">
+      <h2 class="secao-titulo">Períodos</h2>
+      <button id="btn-novo-periodo" class="btn btn-primario"><span class="btn-icone">＋</span> Novo período</button>
+    </div>
+    <div id="lista-periodos" class="lista-aulas"></div>
+    <div id="periodos-vazio" class="estado-vazio oculto">
+      <p>Nenhum período criado ainda.<br />Crie um período para congelar os números de uma semana.</p>
+    </div>
+
+    <div id="painel-periodo" class="oculto">
+      <div class="relatorio-cabecalho painel-cabecalho">
+        <h2 class="secao-titulo" id="painel-titulo">—</h2>
+        <div class="painel-acoes">
+          <select id="seletor-versao" class="campo-select" title="Versões do congelamento"></select>
+          <button id="btn-recongelar" class="btn btn-secundario btn-mini">⟳ Recongelar</button>
+          <button id="btn-fechar-painel" class="btn-fechar" title="Fechar">✕</button>
+        </div>
+      </div>
+      <p id="painel-congelado" class="texto-suave"></p>
+
+      <div class="grade-metricas" id="cards-equipe"></div>
+
+      <h3 class="secao-titulo">Por consultor</h3>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-consultores">
+          <thead>
+            <tr>
+              <th>Consultor</th>
+              <th>Discadas</th><th>Meta</th><th>%</th>
+              <th>Atend.</th><th>Taxa</th><th>TMA</th>
+              <th>Leads</th><th>Meta</th><th>%</th>
+              <th>Perdidas</th><th>Vendas</th>
+              <th>Matríc.</th><th>Meta</th><th>%</th>
+              <th>Receita</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <p class="texto-suave">Perdidas com “≈” usam a Data de Atualização como aproximação (o Omie não traz a data
+        da perda fora da fase 06). TMA calculado sobre tempo de conversa, sem tempo de toque.</p>
+      <div id="detalhe-consultor" class="relatorio oculto">
+        <div class="relatorio-cabecalho">
+          <h3 id="detalhe-titulo">—</h3>
+          <button id="btn-fechar-detalhe" class="btn-fechar" title="Fechar">✕</button>
+        </div>
+        <div id="detalhe-conteudo"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Modal: novo período -->
+  <div id="modal-periodo" class="modal oculto">
+    <div class="modal-caixa modal-pequena">
+      <div class="modal-cabecalho">
+        <h2>Novo período</h2>
+        <button class="btn-fechar" data-fechar="modal-periodo" title="Fechar">✕</button>
+      </div>
+      <div class="modal-conteudo">
+        <label class="campo"><span>Nome</span>
+          <input type="text" id="campo-periodo-nome" placeholder="Ex.: Semana 10–14/08" maxlength="120" />
+        </label>
+        <label class="campo"><span>Início</span><input type="date" id="campo-periodo-de" /></label>
+        <label class="campo"><span>Fim</span><input type="date" id="campo-periodo-ate" /></label>
+        <button id="btn-semana-passada" class="btn btn-secundario btn-mini">Preencher com a semana passada (seg–sex)</button>
+        <p class="texto-suave">Criar o período <strong>congela os números na hora</strong>. Se dados da semana
+          chegarem depois, use “Recongelar” — a versão anterior fica guardada.</p>
+        <p id="modal-periodo-erro" class="login-erro oculto"></p>
+      </div>
+      <div class="modal-rodape">
+        <button id="btn-confirmar-periodo" class="btn btn-primario">Criar e congelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/relatorios.js"></script>
+</body>
+</html>

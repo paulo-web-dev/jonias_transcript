@@ -838,3 +838,149 @@ body {
   word-break: break-all;
 }
 .relatorio-erro { color: var(--vermelho); }
+
+/* ============ Relatórios (Etapa 2) ============ */
+
+.painel-cabecalho { margin-top: 2rem; }
+.painel-acoes { display: flex; gap: 0.5rem; align-items: center; }
+.campo-select {
+  background: var(--fundo-painel);
+  border: 1px solid var(--borda-painel);
+  color: var(--texto);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.82rem;
+}
+
+.grade-metricas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0 1.5rem;
+}
+.metrica-card {
+  background: var(--fundo-painel);
+  border: 1px solid var(--borda-painel);
+  border-radius: var(--raio);
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.metrica-rotulo {
+  font-size: 0.72rem;
+  color: var(--texto-suave);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.metrica-valor { font-size: 1.6rem; font-weight: 700; }
+.metrica-extra { font-size: 0.78rem; color: var(--texto-suave); }
+
+.tabela-scroll { overflow-x: auto; }
+.tabela-metricas {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+.tabela-metricas th, .tabela-metricas td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--borda-painel);
+  text-align: right;
+}
+.tabela-metricas th:first-child, .tabela-metricas td:first-child { text-align: left; }
+.tabela-metricas th {
+  font-size: 0.7rem;
+  color: var(--texto-suave);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.tabela-metricas tbody tr { cursor: pointer; }
+.tabela-metricas tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
+.tabela-metricas tfoot td { font-weight: 700; border-top: 2px solid var(--borda-painel); }
+.celula-nome { font-weight: 600; }
+.pct-ok { color: var(--verde); font-weight: 700; }
+.pct-meio { color: var(--amarelo); font-weight: 700; }
+.pct-baixo { color: var(--vermelho); font-weight: 700; }
+.conflito { cursor: help; }
+.conflito-aviso {
+  border: 1px solid rgba(255, 200, 87, 0.4);
+  background: rgba(255, 200, 87, 0.08);
+  border-radius: 8px;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.8rem;
+}
+.conflito-aviso a { color: var(--acento-2); }
+
+/* ============ Saúde dos dados ============ */
+
+.saude-alerta { color: var(--vermelho); font-weight: 700; }
+.saude-ok { color: var(--verde); }
+.lista-simples { list-style: none; }
+.lista-simples li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--borda-painel);
+  font-size: 0.88rem;
+}
+.lista-simples li span:last-child { color: var(--texto-suave); white-space: nowrap; }
+
+/* ============ Modo TV ============ */
+
+body.tv {
+  padding: 2.5vw;
+  overflow: hidden;
+}
+.tv-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2vw;
+}
+.tv-topo h1 { font-size: 3vw; }
+.tv-topo .tv-relogio { color: var(--texto-suave); font-size: 1.4vw; }
+.tv-grade {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.2vw;
+  margin-bottom: 2vw;
+}
+.tv-card {
+  background: var(--fundo-painel);
+  border: 1px solid var(--borda-painel);
+  border-radius: var(--raio);
+  padding: 1.5vw;
+  text-align: center;
+}
+.tv-card .tv-rotulo {
+  display: block;
+  font-size: 1.1vw;
+  color: var(--texto-suave);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+.tv-card .tv-valor { display: block; font-size: 4.5vw; font-weight: 800; line-height: 1.2; }
+.tv-card .tv-meta { display: block; font-size: 1.2vw; color: var(--texto-suave); }
+.tv-progresso {
+  height: 0.8vw;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-top: 0.8vw;
+}
+.tv-progresso div { height: 100%; background: var(--grad); border-radius: 999px; }
+.tv-colunas { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2vw; }
+.tv-ranking { background: var(--fundo-painel); border: 1px solid var(--borda-painel); border-radius: var(--raio); padding: 1.2vw 1.5vw; }
+.tv-ranking h2 { font-size: 1.4vw; color: var(--texto-suave); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 0.8vw; }
+.tv-ranking ol { list-style: none; }
+.tv-ranking li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 1.8vw;
+  padding: 0.4vw 0;
+  border-bottom: 1px dashed var(--borda-painel);
+}
+.tv-ranking li strong { font-variant-numeric: tabular-nums; }
