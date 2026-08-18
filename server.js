@@ -3,6 +3,7 @@
 require("dotenv").config();
 
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 const session = require("express-session");
 const SqliteStore = require("better-sqlite3-session-store")(session);
@@ -21,6 +22,7 @@ const {
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
 const { importarCdr, importarOportunidadesOmie } = require("./importacao.js");
 const { sincronizarMysql, credenciaisMysql } = require("./sincronizacao.js");
+const { calcularMetricas, diasUteis, saudeDosDados, dadosTv } = require("./metricas.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -142,6 +144,33 @@ app.post("/api/logout", (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
+// ---------- Modo TV (fora do auth de sessão: token de dispositivo) ----------
+// A tela fica exposta numa sala — o payload é tratado como público e o corte
+// do que aparece é feito no servidor (dadosTv não contém receita por
+// consultor, taxa/TMA individual nem qualquer comparativo qualitativo).
+function tokenTvValido(req) {
+  const esperado = process.env.TV_TOKEN;
+  if (!esperado) return null; // modo TV desabilitado
+  const recebido = String(req.query.token || "");
+  const a = Buffer.from(recebido);
+  const b = Buffer.from(esperado);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+app.get("/tv", (req, res) => {
+  const ok = tokenTvValido(req);
+  if (ok === null) return res.status(503).send("Modo TV desabilitado — defina TV_TOKEN no .env.");
+  if (!ok) return res.status(401).send("Token inválido.");
+  res.sendFile(path.join(__dirname, "tv.html"));
+});
+
+app.get("/api/tv/dados", (req, res) => {
+  const ok = tokenTvValido(req);
+  if (ok === null) return res.status(503).json({ error: "Modo TV desabilitado." });
+  if (!ok) return res.status(401).json({ error: "Token inválido." });
+  res.json(dadosTv());
+});
+
 // Todas as demais rotas /api/* exigem login
 app.use("/api", exigirLoginApi);
 
@@ -159,6 +188,12 @@ app.get("/aula", exigirLoginPagina, (req, res) =>
 );
 app.get("/central", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "central.html"))
+);
+app.get("/relatorios", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "relatorios.html"))
+);
+app.get("/saude", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "saude.html"))
 );
 
 // ---------- CRUD de aulas ----------
@@ -535,6 +570,121 @@ app.get("/api/importacoes/:id", (req, res) => {
     detalhes = JSON.parse(importacao.detalhes_json || "{}");
   } catch (_) {}
   res.json({ ...importacao, detalhes });
+});
+
+// ---------- Etapa 2: métricas, períodos congelados e saúde ----------
+
+const RE_DATA = /^\d{4}-\d{2}-\d{2}$/;
+function validarIntervalo(de, ate, res) {
+  if (!RE_DATA.test(de || "") || !RE_DATA.test(ate || "")) {
+    res.status(400).json({ error: "Datas inválidas — use YYYY-MM-DD em `de` e `ate`." });
+    return false;
+  }
+  if (ate < de) {
+    res.status(400).json({ error: "`ate` não pode ser anterior a `de`." });
+    return false;
+  }
+  return true;
+}
+
+// Cálculo ao vivo (preview). Os números defensáveis vêm dos períodos congelados.
+app.get("/api/metricas", (req, res) => {
+  const { de, ate } = req.query;
+  if (!validarIntervalo(de, ate, res)) return;
+  res.json(calcularMetricas(de, ate));
+});
+
+app.get("/api/periodos", (req, res) => {
+  const periodos = db
+    .prepare(
+      `SELECT p.id, p.nome, p.data_inicio, p.data_fim, p.criado_em,
+              COUNT(s.id) AS versoes, MAX(s.criado_em) AS congelado_em
+       FROM periodos p LEFT JOIN periodo_snapshots s ON s.periodo_id = p.id
+       GROUP BY p.id ORDER BY p.data_inicio DESC`
+    )
+    .all();
+  res.json({ periodos });
+});
+
+function congelarPeriodo(periodo, usuarioId) {
+  const dados = calcularMetricas(periodo.data_inicio, periodo.data_fim);
+  const info = db
+    .prepare(
+      `INSERT INTO periodo_snapshots (periodo_id, criado_em, usuario_id, dias_uteis, dados_json)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .run(periodo.id, new Date().toISOString(), usuarioId, dados.diasUteis, JSON.stringify(dados));
+  return info.lastInsertRowid;
+}
+
+// Criar um período congela imediatamente (snapshot v1): consultar depois
+// devolve sempre os mesmos números, mesmo que novos dados tenham entrado.
+app.post("/api/periodos", (req, res) => {
+  const nome = String(req.body?.nome || "").trim().slice(0, 120);
+  const de = String(req.body?.de || "");
+  const ate = String(req.body?.ate || "");
+  if (!nome) return res.status(400).json({ error: "Informe o nome do período." });
+  if (!validarIntervalo(de, ate, res)) return;
+  try {
+    const resultado = db.transaction(() => {
+      const info = db
+        .prepare("INSERT INTO periodos (nome, data_inicio, data_fim, criado_em) VALUES (?, ?, ?, ?)")
+        .run(nome, de, ate, new Date().toISOString());
+      const periodo = { id: info.lastInsertRowid, data_inicio: de, data_fim: ate };
+      congelarPeriodo(periodo, req.usuario.id);
+      return periodo.id;
+    })();
+    res.status(201).json({ id: resultado });
+  } catch (err) {
+    if (String(err.message).includes("UNIQUE")) {
+      return res.status(409).json({ error: "Já existe um período com essas datas." });
+    }
+    console.error("[/api/periodos]", err.message);
+    res.status(500).json({ error: "Falha ao criar o período." });
+  }
+});
+
+// Snapshot vigente (ou uma versão específica via ?versao=) + trilha de versões
+app.get("/api/periodos/:id", (req, res) => {
+  const periodo = db.prepare("SELECT * FROM periodos WHERE id = ?").get(req.params.id);
+  if (!periodo) return res.status(404).json({ error: "Período não encontrado." });
+  const versoes = db
+    .prepare(
+      `SELECT s.id, s.criado_em, s.dias_uteis, u.login AS usuario
+       FROM periodo_snapshots s JOIN usuarios u ON u.id = s.usuario_id
+       WHERE s.periodo_id = ? ORDER BY s.id`
+    )
+    .all(periodo.id);
+  const versaoId = req.query.versao ? Number(req.query.versao) : versoes.at(-1)?.id;
+  const snapshot = db
+    .prepare("SELECT * FROM periodo_snapshots WHERE id = ? AND periodo_id = ?")
+    .get(versaoId, periodo.id);
+  if (!snapshot) return res.status(404).json({ error: "Versão não encontrada." });
+  res.json({
+    periodo,
+    versoes,
+    versaoAtual: snapshot.id,
+    congeladoEm: snapshot.criado_em,
+    dados: JSON.parse(snapshot.dados_json),
+  });
+});
+
+// Recongelar: recalcula e grava NOVA versão — as anteriores ficam guardadas
+app.post("/api/periodos/:id/recongelar", (req, res) => {
+  const periodo = db.prepare("SELECT * FROM periodos WHERE id = ?").get(req.params.id);
+  if (!periodo) return res.status(404).json({ error: "Período não encontrado." });
+  const snapshotId = congelarPeriodo(periodo, req.usuario.id);
+  res.json({ ok: true, snapshotId });
+});
+
+app.delete("/api/periodos/:id", (req, res) => {
+  const info = db.prepare("DELETE FROM periodos WHERE id = ?").run(req.params.id);
+  if (!info.changes) return res.status(404).json({ error: "Período não encontrado." });
+  res.json({ ok: true });
+});
+
+app.get("/api/saude", (req, res) => {
+  res.json(saudeDosDados());
 });
 
 // ---------- Erros ----------
