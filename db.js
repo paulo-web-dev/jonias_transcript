@@ -333,6 +333,36 @@ const MIGRACOES = [
         ELSE nomes_alternativos END;
     `);
   },
+
+  // 8 — Etapa 2: pessoas ganham tipo ('consultor' | 'canal') e os períodos
+  // ganham snapshots versionados. O canal Unyflex entra nos totais da empresa
+  // mas nunca em ranking, metas ou feedback. Cada congelamento de período é
+  // uma versão nova em periodo_snapshots — versões antigas ficam guardadas
+  // (dá para dizer quando e por que um número mudou).
+  () => {
+    db.exec(`
+      ALTER TABLE pessoas ADD COLUMN tipo TEXT NOT NULL DEFAULT 'consultor';
+
+      INSERT INTO pessoas (nome, wallet_nome, ativo, entra_feedback, tipo, nomes_alternativos)
+      VALUES ('Unyflex', 'Unyflex', 1, 0, 'canal', json_array());
+
+      -- Reatribui as matrículas já sincronizadas do balcão (só o wallet exato;
+      -- "Unyflex U" segue sem match por decisão do usuário)
+      UPDATE matriculas
+         SET pessoa_id = (SELECT id FROM pessoas WHERE nome = 'Unyflex' AND tipo = 'canal')
+       WHERE pessoa_id IS NULL AND TRIM(wallet) = 'Unyflex';
+
+      CREATE TABLE periodo_snapshots (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        periodo_id  INTEGER NOT NULL REFERENCES periodos(id) ON DELETE CASCADE,
+        criado_em   TEXT    NOT NULL,
+        usuario_id  INTEGER NOT NULL REFERENCES usuarios(id),
+        dias_uteis  INTEGER NOT NULL,
+        dados_json  TEXT    NOT NULL
+      );
+      CREATE INDEX idx_snapshots_periodo ON periodo_snapshots(periodo_id, id);
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
