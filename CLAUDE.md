@@ -65,6 +65,10 @@ aula-ai/
 ├── index.html       # sessão ao vivo             (rota /aula-ao-vivo?id=N)
 ├── aula-view.html   # visualização de encerrada  (rota /aula?id=N)
 ├── central.html     # central de dados           (rota /central)
+├── relatorios.html  # períodos e métricas        (rota /relatorios)
+├── saude.html       # saúde dos dados            (rota /saude)
+├── tv.html          # painel público da sala     (rota /tv?token=)
+├── metricas.js      # motor de métricas em SQL puro + saúde + payload TV
 ├── css/style.css    # tema dark completo (robô, listas, modais, login, view, central)
 ├── js/
 │   ├── markdown.js  # conversor MD→HTML compartilhado (navegador + servidor/PDF)
@@ -74,7 +78,7 @@ aula-ai/
 │   ├── central.js   # uploads, sincronização e histórico de ingestões
 │   └── login.js
 ├── aula-ai.db       # SQLite (gerado em runtime, ignorado no git)
-└── .env             # ANTHROPIC_API_KEY, ADMIN_USER, ADMIN_PASS, SESSION_SECRET
+└── .env             # ANTHROPIC_API_KEY, SESSION_SECRET, ADMIN_*, MYSQL_*, TV_TOKEN
 ```
 
 ## Como rodar
@@ -159,6 +163,10 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `POST /api/importacoes/oportunidades?arquivo=` | upload do .xlsx do Omie como corpo binário (`application/octet-stream`, 25 MB); resposta traz novos/atualizados/idênticos + período coberto (min/max de "Data de Inclusão"); erro estrutural → 422 |
 | `GET /api/importacoes` e `/:id` | auditoria das ingestões (últimas 50 / detalhes) |
 | `POST /api/sincronizacoes/mysql` | sync incremental da Unyflex + cruzamento matrícula↔oportunidade; 503 sem MYSQL_* no .env |
+| `GET /api/metricas?de=&ate=` | cálculo ao vivo do motor de métricas (preview) |
+| `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
+| `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
+| `GET /tv?token=` e `GET /api/tv/dados?token=` | modo TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503 |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -294,10 +302,29 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   modelo fase × status, datas de entrada por fase, `oportunidade_mudancas`,
   `pessoas.nomes_alternativos`, contador de idênticos na auditoria
 
-### Etapa 2 (central de dados) — Métricas, relatórios e IA (próxima)
-- Métricas por consultor × metas (ligações/dia, leads/dia, matrículas/dia)
-- Relatórios por período (semana fecha os mesmos números sempre)
-- Relatório de feedback individual (respeitando `entra_feedback`)
+### ✅ Etapa 2 (central de dados) — Motor de métricas (concluída)
+- `metricas.js`: motor **em SQL puro — nenhum número sai de modelo de linguagem**;
+  denominador = **dias úteis** (seg–sex, sem feriados — limitação conhecida);
+  discadas (meta 45/dia, inclui "só Encerrada") ≠ atendidas (qualidade);
+  **TMA = tempo_conversa_seg, nunca duração bruta**; leads (meta 14/dia) por
+  `fase_01_em`; perdidas por `COALESCE(fase_06_em, atualizado_em)` (flag de
+  aproximação); **matrículas (meta 1,3/dia, conta alunos) ≠ vendas
+  (conquistadas) ≠ receita — sempre as três lado a lado**; conflito de
+  atribuição: vale o wallet, contado e exposto; canais (Unyflex) e sem
+  atribuição fecham os totais da empresa fora de ranking/metas/feedback.
+  Migração 9 retroagiu as metas padrão para 2026-01-01.
+- Períodos congelados com versões (`periodo_snapshots`) — tela `/relatorios`
+- Tela `/saude` (frescor, wallets/vendedores sem match, matrículas sem
+  oportunidade, conquistadas sem matrícula, conflitos, alunos órfãos)
+- Modo TV `/tv?token=` — payload público cortado NO SERVIDOR: só agregados do
+  time, ranking de volume (discadas/leads) e progresso coletivo; nunca receita
+  por consultor, taxa/TMA individual ou qualquer comparativo qualitativo
+- Validado contra a conferência da semana 10–14/08 (1.225+1 discadas, 723
+  atendidas, taxas por consultor, 176 leads na janela, 4 vendas)
+
+### Etapa 3 (central de dados) — IA sobre as métricas (próxima)
+- Relatório de feedback individual (respeitando `entra_feedback`; Renato fora)
+- Camada de IA consumindo as métricas prontas do motor — nunca gerando números
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)
