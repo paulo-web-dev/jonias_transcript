@@ -1093,6 +1093,26 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
   to { transform: translateY(110vh) rotate(720deg); }
 }
 
+/* Toast de ingestão concluída (canto inferior direito, some sozinho) */
+.tv-toast {
+  position: fixed;
+  right: 1.6vw;
+  bottom: 1.6vw;
+  z-index: 40;
+  padding: 0.8vw 1.4vw;
+  border-radius: 0.6vw;
+  background: rgba(11, 14, 23, 0.92);
+  border: 1px solid var(--borda-painel);
+  font-size: 1.3vw;
+  font-weight: 700;
+  color: var(--texto);
+  opacity: 0;
+  transform: translateY(1vw);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+.tv-toast-visivel { opacity: 1; transform: none; }
+
 /* Overlay de desbloqueio do som */
 .tv-audio-overlay {
   position: fixed;

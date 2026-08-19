@@ -327,10 +327,18 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   × R$ 75.000). **Tempo real por SSE**: ingestão concluída → evento → refetch;
   polling de 60 s como rede de segurança; diff no cliente anima contagem, dá
   glow em quem mudou/cruzou meta e dispara **celebração de matrícula nova** — **somente matrícula com criada_em de HOJE** (delta do painel do dia: backfill/lote histórico muda números sem confete) e com teto de segurança
-  (overlay ~5 s com nome + valor, confete e som próprio). Som via WebAudio
+  (overlay ~5 s com nome + valor, confete e som próprio). **Toda ingestão
+  concluída recebida por SSE** (nunca pelo polling) toca um alerta curto —
+  distinto do som de matrícula — e mostra um toast no canto com a fonte ("CDR
+  atualizado", "Omie atualizado", "Unyflex sincronizado"); rajada de eventos =
+  um som só, toast acumulando as fontes. Som via WebAudio
   sintetizado, **desbloqueado por um toque** (overlay inicial; indicador 🔔/🔕)
-  — única interação permitida na tela. `pessoas.entra_painel = 0` (Renato) fica
-  fora de dia/semana/rankings; a receita dele aparece só na visão do mês.
+  — única interação permitida na tela. `pessoas.entra_painel = 0` fica
+  fora de dia/semana/rankings; a receita aparece só na visão do mês. Estado
+  atual da flag: Renato (decisão permanente) e, **temporariamente desde
+  2026-08-19, Hirlan e Douglas** — reverter com
+  `UPDATE pessoas SET entra_painel = 1 WHERE nome IN ('Hirlan','Douglas');`
+  (a flag só afeta a TV; /relatorios, /saude e feedback continuam com todos).
   "Sem dados" (tudo zero) é neutro cinza — vermelho só para atrasado com dado
   real. **Decisão revogada em 2026-08-18**: receita por consultor e ranking de
   receita APARECEM na TV; continua fora qualquer texto avaliativo sobre pessoas

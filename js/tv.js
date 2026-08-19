@@ -63,7 +63,9 @@ function tocarNotas(notas) {
   }
 }
 
-const somDadoNovo = () => tocarNotas([
+// Alerta de ingestão concluída (curto e discreto) — diferente do arpejo da
+// matrícula, que continua exclusivo da celebração
+const somAlerta = () => tocarNotas([
   { freq: 880, inicio: 0, dur: 0.09 },
   { freq: 1175, inicio: 0.1, dur: 0.12 },
 ]);
@@ -303,7 +305,6 @@ function renderizar(d, origem) {
         mudou: JSON.stringify(antes) !== JSON.stringify(p),
       };
     }
-    if (mudancas.houve && origem === "sse") somDadoNovo();
   }
   anterior = d;
 
@@ -427,11 +428,43 @@ async function atualizar(origem) {
   }
 }
 
+// Aviso de ingestão concluída (só push/SSE; polling continua mudo): som de
+// alerta + toast com a fonte. Vários eventos juntos = um som só e um toast
+// acumulando as fontes.
+const ROTULOS_FONTE = { cdr: "CDR atualizado", oportunidades: "Omie atualizado", mysql: "Unyflex sincronizado" };
+const fontesPendentes = new Set();
+let toastTimer = null;
+let alertaSuprimidoAte = 0;
+
+function notificarIngestao(fonte) {
+  fontesPendentes.add(fonte);
+  const agora = performance.now();
+  if (agora >= alertaSuprimidoAte) {
+    somAlerta();
+    alertaSuprimidoAte = agora + 3000;
+  }
+  const toast = el("tv-toast");
+  toast.textContent = [...fontesPendentes]
+    .map((f) => ROTULOS_FONTE[f] || "Dados atualizados").join(" · ");
+  toast.classList.add("tv-toast-visivel");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove("tv-toast-visivel");
+    fontesPendentes.clear();
+    toastTimer = null;
+  }, 4500);
+}
+
 function conectarSse() {
   const fonte = new EventSource(`/api/tv/eventos?token=${encodeURIComponent(token)}`);
   fonte.onopen = () => { el("tv-push").textContent = "⚡"; el("tv-push").title = "tempo real conectado"; };
   fonte.onerror = () => { el("tv-push").textContent = "⏱"; el("tv-push").title = "reconectando — polling ativo"; };
-  fonte.onmessage = () => atualizar("sse");
+  fonte.onmessage = (ev) => {
+    let f = null;
+    try { f = JSON.parse(ev.data).fonte; } catch (_) { /* payload inesperado: toast genérico */ }
+    notificarIngestao(f);
+    atualizar("sse");
+  };
   return fonte; // EventSource reconecta sozinho; mantemos uma única instância
 }
 
