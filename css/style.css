@@ -966,6 +966,21 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
   color: var(--texto);
 }
 .tv-corpo { display: grid; grid-template-columns: 1fr 26vw; gap: 2vw; flex: 1; min-height: 0; }
+.tv-coluna { display: flex; flex-direction: column; gap: 1vw; min-height: 0; }
+
+/* Gráficos SVG (traço grosso, rótulo grande — legíveis a 4 metros) */
+.tv-chart { width: 100%; height: auto; display: block; }
+.tv-acumulado { flex: 1; min-height: 0; display: flex; align-items: flex-end; justify-content: center; }
+.tv-acumulado svg { max-height: 100%; width: 100%; }
+.tv-spark { width: 8vw; height: 2.2vw; flex: none; align-self: center; }
+.tv-spark-svg { width: 100%; height: 100%; display: block; }
+.tv-funil h3 {
+  font-size: 1.05vw;
+  color: var(--texto-suave);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.5vw;
+}
 
 .tv-rodape { display: flex; justify-content: center; padding-top: 0.6vw; position: relative; }
 /* Indicador de som no rodapé: discreto, arma o áudio com um clique */
@@ -1048,11 +1063,13 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
 .tv-podio-valor { font-size: 1.25vw; font-weight: 800; color: var(--acento-2); font-variant-numeric: tabular-nums; }
 
 /* Mês: a visão mais espaçosa — barras grandes */
-#visao-mes .tv-barras-mes { display: flex; flex-direction: column; gap: 1.4vw; flex: 1; justify-content: center; }
-.tv-barra-mes { display: grid; grid-template-columns: 11vw 1fr 11vw 20vw; align-items: center; gap: 1.4vw; }
-.tv-barra-mes-nome { font-size: 2vw; font-weight: 800; }
-.tv-barra-mes-valor { font-size: 2.2vw; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
-.tv-barra-mes-extra { font-size: 1.2vw; color: var(--texto-suave); }
+/* Mês: gauges semicirculares de receita × meta (leem melhor de longe que barra) */
+#visao-mes .tv-barras-mes { display: flex; gap: 2.5vw; flex: 1; justify-content: center; align-items: center; flex-wrap: wrap; }
+.tv-gauge { text-align: center; width: 19vw; }
+.tv-gauge-svg { width: 100%; height: auto; display: block; }
+.tv-gauge-nome { font-size: 2vw; font-weight: 800; margin-top: -0.4vw; }
+.tv-gauge-valor { font-size: 2.3vw; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tv-gauge-extra { font-size: 1.1vw; color: var(--texto-suave); }
 .tv-mes-rodape { text-align: center; font-size: 1.5vw; font-weight: 700; padding-top: 0.8vw; }
 
 /* Destaques ao mudar */
@@ -1072,7 +1089,26 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
   background: rgba(11, 14, 23, 0.82);
 }
 .tv-celebracao.oculto { display: none; }
-.tv-celebracao-caixa { text-align: center; animation: tv-celebra-entra 0.5s ease-out; }
+.tv-celebracao-caixa { text-align: center; animation: tv-celebra-entra 0.5s ease-out; margin-bottom: 20vh; }
+
+/* Capivara comemorando (arte original em SVG; sobe, quica e acena) */
+.tv-capivara {
+  position: absolute;
+  bottom: -1vh;
+  left: 50%;
+  width: 20vw;
+  transform: translateX(-50%);
+  animation: capi-sobe 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.tv-capivara svg { width: 100%; height: auto; display: block; animation: capi-pula 1.15s ease-in-out 0.9s infinite; }
+@keyframes capi-sobe { from { transform: translateX(-50%) translateY(130%); } to { transform: translateX(-50%) translateY(0); } }
+@keyframes capi-pula { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(-2.4vh); } }
+.capi-braco {
+  transform-box: fill-box;
+  transform-origin: 50% 88%;
+  animation: capi-acena 0.45s ease-in-out infinite alternate;
+}
+@keyframes capi-acena { from { transform: rotate(-24deg); } to { transform: rotate(18deg); } }
 @keyframes tv-celebra-entra { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .tv-celebracao-titulo {
   font-size: 4vw;

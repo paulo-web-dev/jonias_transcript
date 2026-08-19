@@ -331,7 +331,21 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   "dia N de 5" no título — só a TV usa meta fechada, o motor interno segue
   proporcional; selo ✓ ao cruzar meta, pódios visuais de
   ligações/leads/receita) e **MÊS** (a mais espaçosa: barras grandes de receita
-  × R$ 75.000). **Legibilidade (2026-08-19)**: linha do consultor enxuta — nome,
+  × R$ 75.000). **Gráficos em SVG puro desenhados no próprio tv.js — sem CDN
+  (o container pode não ter internet)**: sparkline de discadas dos últimos 5
+  dias úteis ao lado do número no DIA (termina no último dia com dado — nunca
+  mostra zero de dado-que-não-chegou como queda); curva acumulada da semana ×
+  traçado ideal (45/dia até 225) na SEMANA; funil de oportunidades ATIVAS por
+  fase do Omie na visão do DIA; gauges semicirculares de receita × R$ 75k no
+  MÊS. Regra: legível a 4 metros — traço grosso, rótulo grande, innerHTML só
+  quando o SVG muda (sem flicker). **Celebração em dois níveis**: FESTA =
+  matrícula nova E meta batida (dia 45 ligações; semana 225/70/6,5, sempre na
+  virada <100% → ≥100%) — capivara feliz em **SVG original** (arte própria,
+  sem personagem de terceiros) subindo e acenando, confete cheio, fanfarra
+  WebAudio ~3,5 s, overlay de 6 s com nome e valor; `?festa=demo` dispara uma
+  festa de exemplo ao carregar. DISCRETO = ingestão comum (pulso de borda +
+  toast), sem festa — acontece várias vezes ao dia.
+  **Legibilidade (2026-08-19)**: linha do consultor enxuta — nome,
   número principal (discadas × meta), barra, ritmo/atingimento e no máximo dois
   secundários (✨ leads e 🎓 matrículas; no dia, + comparativo de discadas da
   semana passada); atendidas/taxa/TMA/receita saíram da linha — detalhe fino é

@@ -24,14 +24,20 @@
       <div class="tv-selo oculto" id="dia-selo"></div>
       <div class="tv-corpo">
         <div class="tv-linhas" id="dia-linhas"></div>
-        <div class="tv-podios"><div class="tv-podio" id="dia-podio"><h3>🏆 Ligações do dia</h3><div class="tv-podio-blocos"></div></div></div>
+        <div class="tv-podios">
+          <div class="tv-podio" id="dia-podio"><h3>🏆 Ligações do dia</h3><div class="tv-podio-blocos"></div></div>
+          <div class="tv-funil" id="dia-funil"><h3>🎯 Funil — oportunidades ativas</h3><div class="tv-funil-corpo"></div></div>
+        </div>
       </div>
     </section>
 
     <section class="tv-visao" id="visao-semana">
       <h2 id="semana-titulo">SEMANA</h2>
       <div class="tv-corpo">
-        <div class="tv-linhas" id="semana-linhas"></div>
+        <div class="tv-coluna">
+          <div class="tv-linhas" id="semana-linhas"></div>
+          <div class="tv-acumulado" id="semana-acumulado"></div>
+        </div>
         <div class="tv-podios">
           <div class="tv-podio" id="podio-lig"><h3>📞 Ligações</h3><div class="tv-podio-blocos"></div></div>
           <div class="tv-podio" id="podio-leads"><h3>✨ Leads</h3><div class="tv-podio-blocos"></div></div>
@@ -58,12 +64,45 @@
   <!-- Toast de ingestão concluída (nó único, reutilizado) -->
   <div class="tv-toast" id="tv-toast"></div>
 
-  <!-- Celebração de matrícula nova (nó único, reutilizado) -->
+  <!-- Celebração nível festa: matrícula nova / meta batida (nó único, reutilizado).
+       A capivara é arte original em SVG, desenhada aqui — sem asset externo. -->
   <div class="tv-celebracao oculto" id="celebracao">
     <div class="tv-confetes" id="confetes"></div>
     <div class="tv-celebracao-caixa">
-      <div class="tv-celebracao-titulo">🎉 MATRÍCULA NOVA 🎉</div>
+      <div class="tv-celebracao-titulo" id="celebracao-titulo">🎉 MATRÍCULA NOVA 🎉</div>
       <div class="tv-celebracao-info" id="celebracao-info">—</div>
+    </div>
+    <div class="tv-capivara" aria-hidden="true">
+      <svg viewBox="0 0 260 210">
+        <!-- pata traseira -->
+        <ellipse cx="78" cy="192" rx="24" ry="11" fill="#7a4f28"/>
+        <!-- corpo e barriga -->
+        <ellipse cx="118" cy="132" rx="82" ry="58" fill="#a5713f"/>
+        <ellipse cx="104" cy="150" rx="48" ry="32" fill="#b98354" opacity="0.7"/>
+        <!-- perna da frente -->
+        <rect x="132" y="160" width="20" height="36" rx="10" fill="#8a5a2f"/>
+        <!-- orelhas -->
+        <circle cx="158" cy="48" r="12" fill="#8a5a2f"/>
+        <circle cx="208" cy="44" r="12" fill="#8a5a2f"/>
+        <circle cx="158" cy="48" r="6" fill="#6b4423"/>
+        <circle cx="208" cy="44" r="6" fill="#6b4423"/>
+        <!-- cabeça quadradona de capivara -->
+        <rect x="142" y="44" width="96" height="78" rx="32" fill="#a5713f"/>
+        <!-- focinho -->
+        <rect x="196" y="76" width="46" height="46" rx="18" fill="#c08b56"/>
+        <ellipse cx="216" cy="92" rx="3.5" ry="5.5" fill="#4a2f18"/>
+        <ellipse cx="228" cy="92" rx="3.5" ry="5.5" fill="#4a2f18"/>
+        <path d="M 214 108 Q 221 115 230 109" fill="none" stroke="#4a2f18" stroke-width="3.5" stroke-linecap="round"/>
+        <!-- olho feliz e bochecha -->
+        <circle cx="176" cy="76" r="7" fill="#2b1a0c"/>
+        <circle cx="178.5" cy="73.5" r="2.2" fill="#fff"/>
+        <ellipse cx="172" cy="96" rx="10" ry="5.5" fill="#d98c5f" opacity="0.55"/>
+        <!-- braço acenando (animado por CSS) -->
+        <g class="capi-braco">
+          <rect x="138" y="64" width="17" height="58" rx="8.5" fill="#8a5a2f"/>
+          <circle cx="146.5" cy="64" r="11" fill="#a5713f"/>
+        </g>
+      </svg>
     </div>
   </div>
 

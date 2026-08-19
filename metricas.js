@@ -384,6 +384,37 @@ function dadosTvCompleto() {
     matriculas: p.matriculas.valor,
   }]));
 
+  // ---- Séries diárias de discadas (sparkline dos últimos 5 dias úteis e
+  // curva acumulada da semana) — agrupadas por dia local, SQL puro ----
+  const listaDiasUteis = (ateIso, n) => {
+    const dias = [];
+    const d = new Date(ateIso + "T00:00:00");
+    while (dias.length < n) {
+      if (d.getDay() >= 1 && d.getDay() <= 5) dias.unshift(isoDia(d));
+      d.setDate(d.getDate() - 1);
+    }
+    return dias;
+  };
+  // Sem CDR de hoje o sparkline termina no dia útil anterior — um zero de
+  // "dado que ainda não chegou" leria como queda real
+  const diasSpark = listaDiasUteis(ultimoDadoHoje ? hoje : diaUtilAnterior(hoje), 5);
+  const diasSemanaCheia = Array.from({ length: 5 }, (_, i) => {
+    const d = new Date(semanaDe + "T00:00:00");
+    d.setDate(d.getDate() + i);
+    return isoDia(d);
+  });
+  const desdeSeries = (diasSpark[0] < semanaDe ? diasSpark[0] : semanaDe) + "T00:00:00";
+  const linhasDiaSerie = db.prepare(
+    `SELECT pe.nome nome, substr(l.data_hora, 1, 10) dia, COUNT(*) n
+       FROM ligacoes l JOIN pessoas pe ON pe.id = l.pessoa_id
+      WHERE l.data_hora >= ?
+      GROUP BY pe.nome, dia`).all(desdeSeries);
+  const seriePorNome = new Map();
+  for (const r of linhasDiaSerie) {
+    (seriePorNome.get(r.nome) ?? seriePorNome.set(r.nome, new Map()).get(r.nome)).set(r.dia, r.n);
+  }
+  const discadasEm = (nome, diaIso) => seriePorNome.get(nome)?.get(diaIso) ?? 0;
+
   const dia = {
     comparativo,
     data: hoje,
@@ -407,8 +438,10 @@ function dadosTvCompleto() {
         matriculas: { valor: p.matriculas.valor, metaDia: p.matriculas.metaDia },
         receitaCentavos: p.receitaCentavos,
         semanaPassada: passadoPorNome.get(p.nome) ?? null,
+        sparkline: diasSpark.map((di) => discadasEm(p.nome, di)),
       };
     }),
+    sparklineDias: diasSpark,
     rankingLigacoes: doPainel(mDia.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.ligacoes.discadas.valor }))
       .sort((a, b) => b.valor - a.valor),
@@ -462,7 +495,28 @@ function dadosTvCompleto() {
     rankingReceita: doPainel(mSemana.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.receitaCentavos }))
       .sort((a, b) => b.valor - a.valor),
+    // Curva acumulada da semana × traçado ideal (45/dia até 225 na sexta);
+    // valores só para os dias já decorridos, ideal desenhado no cliente
+    acumulado: (() => {
+      const decorridos = diasSemanaCheia.filter((di) => di <= hoje);
+      const metaDia = metasVigentes(hoje, hoje).padrao.ligacoes_dia ?? null;
+      return {
+        dias: diasSemanaCheia,
+        metaDia,
+        metaSemana: metaDia != null ? metaDia * 5 : null,
+        porPessoa: doPainel(mSemana.porPessoa).map((p) => {
+          let soma = 0;
+          return { nome: p.nome, valores: decorridos.map((di) => (soma += discadasEm(p.nome, di))) };
+        }),
+      };
+    })(),
   };
+
+  // ---- Funil Omie: oportunidades ATIVAS por fase (onde está represado) ----
+  const funil = db.prepare(
+    `SELECT fase_atual fase, COUNT(*) n FROM oportunidades
+      WHERE status = 'Ativo' AND fase_atual IS NOT NULL
+      GROUP BY fase_atual ORDER BY fase_atual`).all();
 
   // ---- Mês (receita × meta mensal) ----
   const metasMes = metasVigentes(mesDe, mesFim);
@@ -492,7 +546,7 @@ function dadosTvCompleto() {
     }),
   };
 
-  return { atualizadoEm: new Date().toISOString(), jornada: JORNADA, frescor, dia, semana, mes };
+  return { atualizadoEm: new Date().toISOString(), jornada: JORNADA, frescor, dia, semana, mes, funil };
 }
 
 module.exports = { diasUteis, metasVigentes, calcularMetricas, saudeDosDados, dadosTvCompleto };

@@ -88,11 +88,22 @@ const somAlerta = () => tocarNotas([
   { freq: 880, inicio: 0, dur: 0.09 },
   { freq: 1175, inicio: 0.1, dur: 0.12 },
 ]);
-const somMatricula = () => tocarNotas([
-  { freq: 523, inicio: 0, dur: 0.15 },
-  { freq: 659, inicio: 0.14, dur: 0.15 },
-  { freq: 784, inicio: 0.28, dur: 0.15 },
-  { freq: 1047, inicio: 0.42, dur: 0.45 },
+// NÍVEL FESTA (matrícula nova / meta batida): fanfarra sintetizada de ~3,5 s —
+// subida, repique e acorde final. Exclusiva da celebração.
+const somFesta = () => tocarNotas([
+  { freq: 523, inicio: 0.0, dur: 0.16 },
+  { freq: 659, inicio: 0.15, dur: 0.16 },
+  { freq: 784, inicio: 0.3, dur: 0.16 },
+  { freq: 1047, inicio: 0.45, dur: 0.3 },
+  { freq: 784, inicio: 0.85, dur: 0.14 },
+  { freq: 1047, inicio: 1.0, dur: 0.35 },
+  { freq: 1319, inicio: 1.45, dur: 0.22 },
+  { freq: 1047, inicio: 1.68, dur: 0.22 },
+  { freq: 1319, inicio: 1.9, dur: 0.45 },
+  { freq: 523, inicio: 2.5, dur: 0.95 },
+  { freq: 659, inicio: 2.5, dur: 0.95 },
+  { freq: 784, inicio: 2.5, dur: 0.95 },
+  { freq: 1047, inicio: 2.55, dur: 1.05 },
 ]);
 
 el("tv-som").addEventListener("click", tentarArmarSom);
@@ -132,19 +143,110 @@ function brilhar(elemento, classe = "tv-glow") {
   elemento.classList.add(classe);
 }
 
+// ---------- Gráficos em SVG puro (desenhados aqui — sem CDN externo) ----------
+// Regra: legível a 4 metros — poucos elementos, traço grosso, rótulo grande.
+
+const CORES_SERIE = ["var(--acento-2)", "var(--verde)", "var(--amarelo)", "var(--acento)"];
+
+// Tendência em miniatura: discadas dos últimos 5 dias úteis
+function svgSparkline(vals) {
+  if (!vals || vals.length < 2) return "";
+  const W = 150, H = 44, P = 7;
+  const max = Math.max(...vals, 1);
+  const x = (i) => P + (i * (W - 2 * P)) / (vals.length - 1);
+  const y = (v) => H - P - (v / max) * (H - 2 * P);
+  const u = vals.length - 1;
+  return `<svg viewBox="0 0 ${W} ${H}" class="tv-spark-svg">
+    <polyline points="${vals.map((v, i) => `${x(i)},${y(v)}`).join(" ")}" fill="none"
+      stroke="var(--acento-2)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+    <circle cx="${x(u)}" cy="${y(vals[u])}" r="6" fill="var(--acento-2)"/></svg>`;
+}
+
+// Curva acumulada da semana × traçado ideal (45/dia até a meta na sexta)
+function svgAcumulado(a) {
+  if (!a || !a.metaSemana || !a.porPessoa.length || !a.porPessoa[0].valores.length) return "";
+  const W = 780, H = 210, PL = 18, PR = 190, PT = 30, PB = 34;
+  const maxY = Math.max(a.metaSemana, ...a.porPessoa.map((p) => p.valores[p.valores.length - 1] || 0)) * 1.06;
+  const x = (i) => PL + (i * (W - PL - PR)) / 4;
+  const y = (v) => H - PB - (v / maxY) * (H - PT - PB);
+  const ideal = Array.from({ length: 5 }, (_, i) => `${x(i)},${y(a.metaDia * (i + 1))}`).join(" ");
+  const fins = a.porPessoa.map((p, i) => ({
+    nome: p.nome,
+    cor: CORES_SERIE[i % CORES_SERIE.length],
+    valor: p.valores[p.valores.length - 1],
+    vx: x(p.valores.length - 1),
+    vy: y(p.valores[p.valores.length - 1]),
+    pts: p.valores.map((v, j) => `${x(j)},${y(v)}`).join(" "),
+  }));
+  // anti-colisão vertical dos rótulos de fim de linha
+  const rot = fins.map((f) => ({ ...f, ry: f.vy })).sort((m, n) => m.ry - n.ry);
+  for (let i = 1; i < rot.length; i++) if (rot[i].ry - rot[i - 1].ry < 30) rot[i].ry = rot[i - 1].ry + 30;
+  const DIAS = ["seg", "ter", "qua", "qui", "sex"];
+  return `<svg viewBox="0 0 ${W} ${H}" class="tv-chart">
+    <polyline points="${ideal}" fill="none" stroke="var(--texto-suave)" stroke-width="4" stroke-dasharray="12 10" opacity="0.85"/>
+    <text x="${x(4)}" y="${y(a.metaSemana) - 12}" font-size="23" fill="var(--texto-suave)" text-anchor="end">ritmo p/ ${a.metaSemana}</text>
+    ${DIAS.map((d2, i) => `<text x="${x(i)}" y="${H - 6}" font-size="22" fill="var(--texto-suave)" text-anchor="middle">${d2}</text>`).join("")}
+    ${rot.map((f) => `
+      <polyline points="${f.pts}" fill="none" stroke="${f.cor}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${f.vx}" cy="${f.vy}" r="9" fill="${f.cor}"/>
+      <text x="${f.vx + 16}" y="${f.ry + 8}" font-size="26" font-weight="800" fill="${f.cor}">${f.nome} ${num(f.valor)}</text>`).join("")}
+  </svg>`;
+}
+
+// Funil de oportunidades ativas por fase (onde está represado)
+function svgFunil(fases) {
+  if (!fases || !fases.length) return "";
+  const W = 460, ROW = 78, PAD = 6;
+  const H = fases.length * ROW + PAD * 2;
+  const max = Math.max(...fases.map((f) => f.n), 1);
+  return `<svg viewBox="0 0 ${W} ${H}" class="tv-chart">` + fases.map((f, i) => {
+    const w = Math.max(56, (f.n / max) * (W - 16));
+    const y0 = PAD + i * ROW;
+    const nome = String(f.fase).replace(/^\d+_/, "");
+    // contorno escuro atrás do texto claro: legível sobre a barra E sobre o fundo
+    return `<rect x="${(W - w) / 2}" y="${y0}" width="${w}" height="${ROW - 16}" rx="14"
+        fill="${CORES_SERIE[i % CORES_SERIE.length]}" opacity="0.9"/>
+      <text x="${W / 2}" y="${y0 + (ROW - 16) / 2 + 10}" text-anchor="middle" font-size="28"
+        font-weight="800" fill="#e8ecf4" stroke="#0b0e17" stroke-width="6" paint-order="stroke">${nome} · ${num(f.n)}</text>`;
+  }).join("") + `</svg>`;
+}
+
+// Gauge semicircular da receita do mês × meta — lê melhor de longe que barra fina
+const ARCO_GAUGE = Math.PI * 78;
+function svgGauge() {
+  const arco = "M 22 100 A 78 78 0 0 1 178 100";
+  return `<svg viewBox="0 0 200 112" class="tv-gauge-svg">
+    <path d="${arco}" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="17" stroke-linecap="round"/>
+    <path d="${arco}" fill="none" stroke="var(--acento-2)" stroke-width="17" stroke-linecap="round"
+      stroke-dasharray="${ARCO_GAUGE}" stroke-dashoffset="${ARCO_GAUGE}" data-campo="arco"
+      style="transition: stroke-dashoffset 0.8s ease, stroke 0.8s ease"/>
+    <text x="100" y="96" text-anchor="middle" font-size="34" font-weight="800" fill="var(--texto)" data-campo="pct">—</text>
+  </svg>`;
+}
+
 // ---------- Linhas por consultor (barra longa + detalhe subordinado) ----------
 
-function montarLinhas(container, nomes, comRitmo) {
+function montarLinhas(container, nomes, comSpark) {
   container.innerHTML = nomes.map((nome) => `
     <div class="tv-linha" data-nome="${nome}">
       <div class="tv-linha-topo">
         <span class="tv-linha-nome">${nome}</span>
         <span class="tv-linha-valor"><b data-campo="principal" data-v="0">0</b><i data-campo="principal-meta"></i></span>
+        ${comSpark ? '<span class="tv-spark" data-campo="spark" title="discadas — últimos 5 dias úteis"></span>' : ""}
         <span class="tv-linha-status" data-campo="status"></span>
       </div>
       <div class="tv-trilha"><div class="tv-fill" data-campo="barra"></div></div>
       <div class="tv-linha-detalhe" data-campo="detalhe"></div>
     </div>`).join("");
+}
+
+// innerHTML só quando o SVG mudou — evita flicker no refresh
+function trocarSvg(alvo, html) {
+  if (!alvo) return;
+  if (alvo.dataset.h !== html) {
+    alvo.innerHTML = html;
+    alvo.dataset.h = html;
+  }
 }
 
 function atualizarLinha(linha, dados) {
@@ -197,31 +299,34 @@ function atualizarPodio(podioEl, itens, formatar) {
   }
 }
 
-// ---------- Celebração (fila; nó único reutilizado) ----------
+// ---------- Celebração NÍVEL FESTA (fila; nó único reutilizado) ----------
+// Matrícula nova e meta batida: capivara + confete + fanfarra, ~6 s.
+// Ingestão comum fica no nível discreto (pulso de borda + toast), sem festa.
 
 const filaCelebracao = [];
 let celebrando = false;
 
-function celebrar(texto) {
-  filaCelebracao.push(texto);
+function celebrar(titulo, info) {
+  filaCelebracao.push({ titulo, info });
   if (!celebrando) proximaCelebracao();
 }
 
 function proximaCelebracao() {
-  const texto = filaCelebracao.shift();
-  if (!texto) { celebrando = false; return; }
+  const festa = filaCelebracao.shift();
+  if (!festa) { celebrando = false; return; }
   celebrando = true;
-  el("celebracao-info").textContent = texto;
+  el("celebracao-titulo").textContent = festa.titulo;
+  el("celebracao-info").textContent = festa.info;
   const confetes = el("confetes");
-  confetes.innerHTML = Array.from({ length: 40 }, (_, i) =>
-    `<i style="left:${(i * 53) % 100}%;animation-delay:${(i % 10) * 0.12}s;background:hsl(${(i * 47) % 360},90%,60%)"></i>`).join("");
+  confetes.innerHTML = Array.from({ length: 60 }, (_, i) =>
+    `<i style="left:${(i * 53) % 100}%;animation-delay:${(i % 12) * 0.11}s;background:hsl(${(i * 47) % 360},90%,60%)"></i>`).join("");
   el("celebracao").classList.remove("oculto");
-  somMatricula();
+  somFesta();
   setTimeout(() => {
     el("celebracao").classList.add("oculto");
     confetes.innerHTML = "";
     setTimeout(proximaCelebracao, 600);
-  }, 5000);
+  }, 6000);
 }
 
 // ---------- Rotação entre visões ----------
@@ -269,11 +374,11 @@ function montar(d) {
   montarLinhas(el("dia-linhas"), d.dia.porPessoa.map((p) => p.nome), true);
   montarLinhas(el("semana-linhas"), d.semana.porPessoa.map((p) => p.nome), false);
   el("mes-barras").innerHTML = d.mes.porPessoa.map((p) => `
-    <div class="tv-barra-mes" data-nome="${p.nome}">
-      <span class="tv-barra-mes-nome">${p.nome}</span>
-      <div class="tv-trilha tv-trilha-grande"><div class="tv-fill" data-campo="barra"></div></div>
-      <span class="tv-barra-mes-valor" data-campo="valor" data-v="0">—</span>
-      <span class="tv-barra-mes-extra" data-campo="extra"></span>
+    <div class="tv-gauge" data-nome="${p.nome}">
+      ${svgGauge()}
+      <div class="tv-gauge-nome">${p.nome}</div>
+      <div class="tv-gauge-valor" data-campo="valor" data-v="0">—</div>
+      <div class="tv-gauge-extra" data-campo="extra"></div>
     </div>`).join("");
   montado = true;
 }
@@ -314,20 +419,39 @@ function renderizar(d, origem) {
           (deltaReceita > 0 ? ` · +${reais(deltaReceita)}` : ""));
       }
     }
-    if (novasHoje > 0 && novasHoje <= TETO_CELEBRACAO) candidatas.forEach(celebrar);
-    else if (novasHoje > TETO_CELEBRACAO) {
+    if (novasHoje > 0 && novasHoje <= TETO_CELEBRACAO) {
+      candidatas.forEach((info) => celebrar("🎉 MATRÍCULA NOVA 🎉", info));
+    } else if (novasHoje > TETO_CELEBRACAO) {
       console.log(`[tv] celebração suprimida: ${novasHoje} matrículas novas de hoje num único evento (teto ${TETO_CELEBRACAO}) — números atualizados normalmente`);
     }
 
+    // Meta do DIA batida (45 ligações) também é festa — só na virada <100 → ≥100
+    if (anterior.dia.data === d.dia.data) {
+      for (const p of d.dia.porPessoa) {
+        const antes = anterior.dia.porPessoa.find((a) => a.nome === p.nome);
+        if (!antes) continue;
+        if ((antes.discadas.atingimento ?? 0) < 100 && (p.discadas.atingimento ?? 0) >= 100) {
+          celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.discadas.valor)} ligações — meta do dia!`);
+        }
+      }
+    }
+
+    const mesmaSemana = anterior.semana.de === d.semana.de;
     for (const p of d.semana.porPessoa) {
       const antes = anterior.semana.porPessoa.find((a) => a.nome === p.nome);
       if (!antes) continue;
       if (JSON.stringify(antes) !== JSON.stringify(p)) mudancas.houve = true;
+      const cruzou = (m) => (antes[m].atingimento ?? 0) < 100 && (p[m].atingimento ?? 0) >= 100;
       mudancas[p.nome] = {
-        cruzouDiscadas: (antes.discadas.atingimento ?? 0) < 100 && (p.discadas.atingimento ?? 0) >= 100,
-        cruzouMatriculas: (antes.matriculas.atingimento ?? 0) < 100 && (p.matriculas.atingimento ?? 0) >= 100,
+        cruzouDiscadas: cruzou("discadas"),
+        cruzouMatriculas: cruzou("matriculas"),
         mudou: JSON.stringify(antes) !== JSON.stringify(p),
       };
+      if (mesmaSemana) {
+        if (cruzou("discadas")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.discadas.valor)} ligações — meta da semana!`);
+        if (cruzou("leads")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.leads.valor)} leads — meta da semana!`);
+        if (cruzou("matriculas")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.matriculas.valor)} matrículas — meta da semana!`);
+      }
     }
   }
   anterior = d;
@@ -370,8 +494,12 @@ function renderizar(d, origem) {
       mudou: mudancas[p.nome]?.mudou,
       cruzouMeta: mudancas[p.nome]?.cruzouDiscadas,
     });
+    trocarSvg(linha.querySelector('[data-campo="spark"]'), svgSparkline(p.sparkline));
   }
   atualizarPodio(el("dia-podio"), d.dia.rankingLigacoes.map((r) => ({ nome: r.nome, valor: r.valor })), num);
+  const funilHtml = svgFunil(d.funil);
+  el("dia-funil").classList.toggle("oculto", !funilHtml);
+  trocarSvg(document.querySelector("#dia-funil .tv-funil-corpo"), funilHtml);
 
   // ---- SEMANA ----
   el("semana-titulo").textContent =
@@ -397,6 +525,7 @@ function renderizar(d, origem) {
   atualizarPodio(el("podio-lig"), d.semana.rankingLigacoes, num);
   atualizarPodio(el("podio-leads"), d.semana.rankingLeads, num);
   atualizarPodio(el("podio-rec"), d.semana.rankingReceita, kReais);
+  trocarSvg(el("semana-acumulado"), svgAcumulado(d.semana.acumulado));
 
   // ---- MÊS ----
   el("mes-titulo").textContent =
@@ -405,14 +534,17 @@ function renderizar(d, origem) {
   let totalMes = 0;
   for (const p of d.mes.porPessoa) {
     totalMes += p.receitaCentavos;
-    const linha = document.querySelector(`#mes-barras [data-nome="${p.nome}"]`);
-    if (!linha) continue;
-    const barra = linha.querySelector('[data-campo="barra"]');
-    barra.style.width = Math.min(100, p.atingimento ?? 0) + "%";
-    barra.classList.toggle("fill-ok", (p.atingimento ?? 0) >= 100);
-    animarNumero(linha.querySelector('[data-campo="valor"]'), p.receitaCentavos, kReais);
-    linha.querySelector('[data-campo="extra"]').textContent =
-      `${p.atingimento ?? "—"}% · faltam ${kReais(p.faltaCentavos)}`;
+    const card = document.querySelector(`#mes-barras [data-nome="${p.nome}"]`);
+    if (!card) continue;
+    const fracao = Math.min(1, (p.atingimento ?? 0) / 100);
+    const arco = card.querySelector('[data-campo="arco"]');
+    arco.setAttribute("stroke-dashoffset", ARCO_GAUGE * (1 - fracao));
+    arco.setAttribute("stroke", (p.atingimento ?? 0) >= 100 ? "var(--verde)" : "var(--acento-2)");
+    card.querySelector('[data-campo="pct"]').textContent =
+      p.atingimento == null ? "—" : `${Math.round(p.atingimento)}%`;
+    animarNumero(card.querySelector('[data-campo="valor"]'), p.receitaCentavos, kReais);
+    card.querySelector('[data-campo="extra"]').textContent =
+      `meta ${kReais(p.metaCentavos)} · faltam ${kReais(p.faltaCentavos)}`;
   }
   el("mes-rodape").textContent = `Equipe no mês: ${reais(totalMes)}`;
 }
@@ -492,3 +624,12 @@ function conectarSse() {
 atualizar("inicial");
 conectarSse();
 setInterval(() => atualizar("polling"), POLLING_MS);
+
+// Modo de teste da festa: ?festa=demo dispara uma matrícula e uma meta de
+// exemplo ao carregar — capivara, confete e som sem esperar venda real
+if (params.get("festa") === "demo") {
+  setTimeout(() => {
+    celebrar("🎉 MATRÍCULA NOVA 🎉", "TESTE · +1 matrícula · +R$ 2.980");
+    celebrar("🏆 META BATIDA 🏆", "TESTE · 225 ligações — meta da semana!");
+  }, 2500);
+}
