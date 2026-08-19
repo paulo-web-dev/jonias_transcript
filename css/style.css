@@ -1003,7 +1003,7 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
   transition: width 0.8s ease;
 }
 .tv-fill.fill-ok { background: linear-gradient(135deg, var(--verde), var(--acento-2)); }
-.tv-linha-detalhe { font-size: 1.05vw; color: var(--texto-suave); }
+.tv-linha-detalhe { font-size: 1.5vw; color: var(--texto-suave); }
 .tv-sem-dados .tv-trilha, .tv-sem-dados .tv-linha-valor { opacity: 0.35; }
 
 /* Selo do dia sem CDR (só aparece com ?dia=sempre) */

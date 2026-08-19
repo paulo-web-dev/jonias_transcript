@@ -10,7 +10,7 @@
 
 const params = new URLSearchParams(location.search);
 const token = params.get("token") || "";
-const GIRO_MS = Math.max(6, Number(params.get("giro")) || 20) * 1000;
+const GIRO_MS = Math.max(6, Number(params.get("giro")) || 45) * 1000;
 const FIXO = params.get("fixo"); // dia | semana | mes
 const DIA_SEMPRE = params.get("dia") === "sempre";
 // Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
@@ -29,6 +29,7 @@ const kReais = (c) => {
   return v >= 1000 ? `R$ ${(v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}k` : reais(c);
 };
 const num = (v) => (v ?? 0).toLocaleString("pt-BR");
+const metaFmt = (m) => (m == null ? "—" : m.toLocaleString("pt-BR"));
 const dataBr = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "—");
 const horaBr = (iso) => { const m = /T(\d{2}):(\d{2})/.exec(iso || ""); return m ? `${m[1]}h${m[2]}` : ""; };
 const dataHoraBr = (iso) => (iso ? `${dataBr(iso)} ${horaBr(iso)}`.trim() : "nunca");
@@ -350,13 +351,11 @@ function renderizar(d, origem) {
     if (!linha) continue;
     const semDados = !p.discadas.valor && !p.leads.valor && !p.matriculas.valor && !p.receitaCentavos;
     const rotulos = { adiantado: "↗ adiantado", no_ritmo: "→ no ritmo", atrasado: "↘ atrasado" };
+    // Legibilidade: só o comparativo do número principal (discadas); o resto
+    // do detalhe fino vive nos relatórios internos, não na tela exposta
     const sp = p.semanaPassada;
-    const partesPassado = [];
-    if (sp && c.temDiscadas) partesPassado.push(`📞 ${num(sp.discadas)}`);
-    if (sp && c.temLeads) partesPassado.push(`✨ ${num(sp.leads)}`);
-    if (sp && c.temMatriculas) partesPassado.push(`🎓 ${num(sp.matriculas)}`);
-    const comparTexto = partesPassado.length
-      ? ` · ${rotuloPassado}: ${partesPassado.join(" ")}`
+    const comparTexto = sp && c.temDiscadas
+      ? ` · ${rotuloPassado}: 📞 ${num(sp.discadas)}`
       : "";
     atualizarLinha(linha, {
       semDados,
@@ -367,8 +366,7 @@ function renderizar(d, origem) {
         ? `proj. ${num(p.discadas.projecao)} · ${rotulos[p.discadas.estado]}`
         : (p.discadas.valor ? "projeção em breve" : ""),
       statusClasse: p.discadas.estado ? "status-" + p.discadas.estado : "status-neutro",
-      detalhe: `✅ ${num(p.atendidas)} atend. (${p.taxaAtendimento ?? "—"}%) · ✨ ${num(p.leads.valor)} leads · ` +
-        `🎓 ${num(p.matriculas.valor)} matr. · 💰 ${kReais(p.receitaCentavos)}${comparTexto}`,
+      detalhe: `✨ ${num(p.leads.valor)} leads · 🎓 ${num(p.matriculas.valor)} matr.${comparTexto}`,
       mudou: mudancas[p.nome]?.mudou,
       cruzouMeta: mudancas[p.nome]?.cruzouDiscadas,
     });
@@ -377,7 +375,7 @@ function renderizar(d, origem) {
 
   // ---- SEMANA ----
   el("semana-titulo").textContent =
-    `SEMANA ${dataBr(d.semana.de)} → ${dataBr(d.semana.ate)} · ${d.semana.diasUteis} dia(s) útil(eis)`;
+    `SEMANA ${dataBr(d.semana.de)} → ${dataBr(d.semana.ate)} · dia ${d.semana.diasUteis} de 5`;
   for (const p of d.semana.porPessoa) {
     const linha = document.querySelector(`#semana-linhas [data-nome="${p.nome}"]`);
     if (!linha) continue;
@@ -390,9 +388,8 @@ function renderizar(d, origem) {
       pct: a,
       status: a == null ? "" : a >= 100 ? "✓ meta" : `${a.toLocaleString("pt-BR")}%`,
       statusClasse: a == null ? "status-neutro" : a >= 100 ? "status-adiantado" : a >= 70 ? "status-no_ritmo" : "status-atrasado",
-      detalhe: `✨ ${num(p.leads.valor)}/${p.leads.meta ?? "—"} leads · ` +
-        `🎓 ${num(p.matriculas.valor)}/${p.matriculas.meta ?? "—"} matr.${(p.matriculas.atingimento ?? 0) >= 100 ? " ✓" : ""} · ` +
-        `💰 ${kReais(p.receitaCentavos)} · taxa ${p.taxaAtendimento ?? "—"}%`,
+      detalhe: `✨ ${num(p.leads.valor)} / ${metaFmt(p.leads.meta)} leads · ` +
+        `🎓 ${num(p.matriculas.valor)} / ${metaFmt(p.matriculas.meta)} matr.${(p.matriculas.atingimento ?? 0) >= 100 ? " ✓" : ""}`,
       mudou: mudancas[p.nome]?.mudou,
       cruzouMeta: mudancas[p.nome]?.cruzouDiscadas || mudancas[p.nome]?.cruzouMatriculas,
     });

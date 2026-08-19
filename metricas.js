@@ -417,23 +417,26 @@ function dadosTvCompleto() {
       .sort((a, b) => b.valor - a.valor),
   };
 
-  // ---- Semana corrente (meta × dias úteis decorridos — o motor já escala) ----
+  // ---- Semana corrente (meta FECHADA: metaDia × 5, seja segunda ou sexta —
+  // decisão do usuário 2026-08-19: o alvo não muda de tamanho conforme a
+  // semana avança; o contexto temporal vem do "dia N de 5" no título) ----
   const mSemana = calcularMetricas(semanaDe, hoje);
+  const metaSemanaDe = (m) => (m.metaDia != null ? Math.round(m.metaDia * 5 * 10) / 10 : null);
+  const comMetaFechada = (m) => {
+    const meta = metaSemanaDe(m);
+    return { valor: m.valor, meta, atingimento: meta ? pct(m.valor, meta) : null };
+  };
   const semana = {
     de: semanaDe,
     ate: hoje,
-    diasUteis: mSemana.diasUteis,
+    diasUteis: mSemana.diasUteis, // decorridos — vira o "dia N de 5"
     porPessoa: doPainel(mSemana.porPessoa).map((p) => ({
       nome: p.nome,
-      discadas: {
-        valor: p.ligacoes.discadas.valor,
-        meta: p.ligacoes.discadas.meta,
-        atingimento: p.ligacoes.discadas.atingimento,
-      },
+      discadas: comMetaFechada(p.ligacoes.discadas),
       atendidas: p.ligacoes.atendidas,
       taxaAtendimento: p.ligacoes.taxaAtendimento,
-      leads: { valor: p.funil.leadsNovos.valor, meta: p.funil.leadsNovos.meta, atingimento: p.funil.leadsNovos.atingimento },
-      matriculas: { valor: p.matriculas.valor, meta: p.matriculas.meta, atingimento: p.matriculas.atingimento },
+      leads: comMetaFechada(p.funil.leadsNovos),
+      matriculas: comMetaFechada(p.matriculas),
       receitaCentavos: p.receitaCentavos,
     })),
     equipe: (() => {
@@ -441,11 +444,11 @@ function dadosTvCompleto() {
       const soma = (fn) => lista.reduce((s, p) => s + fn(p), 0);
       return {
         discadas: soma((p) => p.ligacoes.discadas.valor),
-        metaDiscadas: soma((p) => p.ligacoes.discadas.meta || 0),
+        metaDiscadas: soma((p) => metaSemanaDe(p.ligacoes.discadas) || 0),
         leadsNovos: soma((p) => p.funil.leadsNovos.valor),
-        metaLeads: soma((p) => p.funil.leadsNovos.meta || 0),
+        metaLeads: soma((p) => metaSemanaDe(p.funil.leadsNovos) || 0),
         matriculas: soma((p) => p.matriculas.valor),
-        metaMatriculas: Math.round(soma((p) => p.matriculas.meta || 0) * 10) / 10,
+        metaMatriculas: Math.round(soma((p) => metaSemanaDe(p.matriculas) || 0) * 10) / 10,
         vendas: soma((p) => p.funil.vendas),
         receitaCentavos: soma((p) => p.receitaCentavos),
       };
