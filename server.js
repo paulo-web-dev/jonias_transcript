@@ -164,11 +164,17 @@ app.get("/tv", (req, res) => {
   res.sendFile(path.join(__dirname, "tv.html"));
 });
 
+// Preferência global de som das TVs (configuracoes.tv_som): alterada pelas
+// telas autenticadas, lida aqui junto com o payload — a TV segue no próximo
+// refetch (SSE ou polling). `?som=` na URL da TV é override por dispositivo.
+const configSomTv = () =>
+  db.prepare("SELECT valor FROM configuracoes WHERE chave = 'tv_som'").get()?.valor === "1";
+
 app.get("/api/tv/dados", (req, res) => {
   const ok = tokenTvValido(req);
   if (ok === null) return res.status(503).json({ error: "Modo TV desabilitado." });
   if (!ok) return res.status(401).json({ error: "Token inválido." });
-  res.json(dadosTvCompleto());
+  res.json({ ...dadosTvCompleto(), som: configSomTv() });
 });
 
 // SSE: empurra "dados atualizados" para as TVs quando uma ingestão termina.
@@ -208,6 +214,19 @@ function emitirEventoTv(fonte) {
 
 // Todas as demais rotas /api/* exigem login
 app.use("/api", exigirLoginApi);
+
+// ---------- Configurações globais (só telas autenticadas) ----------
+
+app.get("/api/config/tv", (req, res) => res.json({ som: configSomTv() }));
+
+app.put("/api/config/tv", (req, res) => {
+  const { som } = req.body || {};
+  if (typeof som !== "boolean") {
+    return res.status(400).json({ error: "Informe { som: true|false }." });
+  }
+  db.prepare("UPDATE configuracoes SET valor = ? WHERE chave = 'tv_som'").run(som ? "1" : "0");
+  res.json({ som });
+});
 
 // ---------- Páginas internas ----------
 

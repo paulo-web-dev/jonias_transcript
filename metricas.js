@@ -348,10 +348,11 @@ function dadosTvCompleto() {
   };
 
   // Quem entra nas visões de prospecção (dia/semana): consultores com
-  // entra_painel = 1. A visão do mês (receita) usa todos os consultores.
+  // entra_painel = 1. entra_tv = 0 oculta de TODAS as visões da TV (mês
+  // incluído); os relatórios internos ignoram as duas flags.
   const nomesPainel = new Set(
     db.prepare(
-      "SELECT nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 AND entra_painel = 1"
+      "SELECT nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 AND entra_painel = 1 AND entra_tv = 1"
     ).all().map((p) => p.nome)
   );
   const doPainel = (lista) => lista.filter((p) => nomesPainel.has(p.nome));
@@ -468,7 +469,7 @@ function dadosTvCompleto() {
        AND pessoa_id IS NOT NULL GROUP BY pessoa_id`).all(mesDe, hoje + "T23:59:59")
     .map((r) => [r.pessoa_id, r.receita]));
   const consultores = db
-    .prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 ORDER BY nome")
+    .prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 AND entra_tv = 1 ORDER BY nome")
     .all();
   const decorridos = diasUteis(mesDe, hoje);
   const mes = {

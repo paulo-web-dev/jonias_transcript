@@ -1,7 +1,8 @@
 "use strict";
 
 // Painel de TV 2.0 — tempo real (SSE + polling de segurança), rotação entre
-// visões, contagem animada, celebração de matrícula e som com desbloqueio.
+// visões, contagem animada, pulso de borda + toast a cada ingestão, celebração
+// de matrícula e som opcional (preferência global no banco; override por URL).
 // Todos os números vêm prontos do motor SQL (/api/tv/dados); zero IA.
 // Higiene para dias de tela aberta: um EventSource, três intervals fixos,
 // animações por rAF com cancelamento, nós de overlay reutilizados e apenas o
@@ -12,7 +13,9 @@ const token = params.get("token") || "";
 const GIRO_MS = Math.max(6, Number(params.get("giro")) || 20) * 1000;
 const FIXO = params.get("fixo"); // dia | semana | mes
 const DIA_SEMPRE = params.get("dia") === "sempre";
-const SOM_ATIVO = params.get("som") !== "0";
+// Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
+// ?som=1 / ?som=0 é override por dispositivo. Silêncio é o padrão, não falha.
+const SOM_OVERRIDE = params.has("som") ? params.get("som") !== "0" : null;
 const VOLUME = Math.min(1, Math.max(0, Number(params.get("volume") ?? 0.5) || 0.5));
 const POLLING_MS = 60000;
 // Teto de segurança da celebração: um evento com mais de N matrículas novas
@@ -32,22 +35,37 @@ const dataHoraBr = (iso) => (iso ? `${dataBr(iso)} ${horaBr(iso)}`.trim() : "nun
 const el = (id) => document.getElementById(id);
 
 // ---------- Som (WebAudio sintetizado; um som por evento, nunca em loop) ----------
+// Sem overlay de desbloqueio: se o som está habilitado, tentamos armar direto
+// (funciona com --autoplay-policy=no-user-gesture-required); se o navegador
+// segurar, o 🔕 discreto do rodapé arma com um clique. Painel funciona igual mudo.
 
 let audioCtx = null;
+let somConfig = false; // preferência global, atualizada a cada payload
 
-function armarSom() {
-  if (!SOM_ATIVO || audioCtx) return;
+const somHabilitado = () => SOM_OVERRIDE ?? somConfig;
+const somPronto = () => somHabilitado() && !!audioCtx && audioCtx.state === "running";
+
+function atualizarIndicadorSom() {
+  const ind = el("tv-som");
+  ind.classList.toggle("oculto", !somHabilitado());
+  ind.textContent = somPronto() ? "🔔" : "🔕";
+  ind.title = somPronto() ? "som ativo" : "som ligado na configuração — toque para liberar o áudio";
+}
+
+function tentarArmarSom() {
+  if (!somHabilitado()) return atualizarIndicadorSom();
   try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    audioCtx.resume();
-    el("tv-som").textContent = "🔔";
-    el("tv-som").title = "som armado";
-  } catch (_) { /* sem áudio disponível */ }
-  el("audio-overlay").classList.add("oculto");
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state !== "running") {
+      audioCtx.resume().catch(() => {}).then(atualizarIndicadorSom);
+      return;
+    }
+  } catch (_) { /* sem áudio disponível — painel segue mudo */ }
+  atualizarIndicadorSom();
 }
 
 function tocarNotas(notas) {
-  if (!audioCtx || audioCtx.state !== "running") return;
+  if (!somPronto()) return;
   const t0 = audioCtx.currentTime;
   for (const { freq, inicio, dur } of notas) {
     const osc = audioCtx.createOscillator();
@@ -76,12 +94,15 @@ const somMatricula = () => tocarNotas([
   { freq: 1047, inicio: 0.42, dur: 0.45 },
 ]);
 
-if (SOM_ATIVO) {
-  document.addEventListener("pointerdown", armarSom, { once: true });
-  setTimeout(() => el("audio-overlay").classList.add("oculto"), 20000);
-} else {
-  el("audio-overlay").classList.add("oculto");
-  el("tv-som").classList.add("oculto");
+el("tv-som").addEventListener("click", tentarArmarSom);
+
+// ---------- Pulso de borda (aviso visual de dado novo — não depende de som) ----------
+
+function pulsarBorda() {
+  const borda = el("tv-borda-pulso");
+  borda.classList.remove("pulsando");
+  void borda.offsetWidth; // reinicia a animação CSS
+  borda.classList.add("pulsando");
 }
 
 // ---------- Contagem animada (rAF com cancelamento por elemento) ----------
@@ -257,6 +278,8 @@ function montar(d) {
 }
 
 function renderizar(d, origem) {
+  somConfig = !!d.som;
+  tentarArmarSom();
   if (!montado) montar(d);
   aplicarVisoes(d);
 
@@ -440,8 +463,9 @@ function notificarIngestao(fonte) {
   fontesPendentes.add(fonte);
   const agora = performance.now();
   if (agora >= alertaSuprimidoAte) {
-    somAlerta();
     alertaSuprimidoAte = agora + 3000;
+    pulsarBorda(); // aviso principal é visual; o som (se armado) reforça
+    somAlerta();
   }
   const toast = el("tv-toast");
   toast.textContent = [...fontesPendentes]

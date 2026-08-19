@@ -103,7 +103,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **11**.
+pelo mesmo caminho). Versão atual: **12**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -120,7 +120,10 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 - `pessoas(id, nome, ramal UNIQUE, crm_user_id UNIQUE, wallet_nome UNIQUE, ativo, entra_feedback, nomes_alternativos)`
   — unifica os identificadores dos consultores; `nomes_alternativos` é um JSON
   array com os nomes completos como aparecem no "Vendedor" do Omie; seed com os
-  6 atuais (Renato com `entra_feedback = 0` e `entra_painel = 0`; `crm_user_id` do Frederico pendente). `tipo`: consultor | canal; `entra_painel` controla as visões de prospecção da TV.
+  6 atuais (Renato com `entra_feedback = 0` e `entra_painel = 0`; `crm_user_id` do Frederico pendente). `tipo`: consultor | canal; `entra_painel` controla as visões de prospecção da TV (dia/semana/rankings); `entra_tv = 0` oculta de TODAS as visões da TV, mês incluído (Renato fica `entra_painel = 0` + `entra_tv = 1`: receita só no mês). As duas flags são só da TV — relatórios internos ignoram.
+- `configuracoes(chave PK, valor)` — chave→valor global; hoje só `tv_som`
+  ('0'/'1', nasce '0': silêncio é o padrão da TV), alterada pelo toggle da
+  /central via `GET/PUT /api/config/tv`.
 - `importacoes(id, tipo cdr|oportunidades|mysql, arquivo_nome, hash_sha256, linhas_*, registros_novos/atualizados/identicos, detalhes_json, status, erro, usuario_id, iniciado/concluido_em)`
   — auditoria de toda ingestão: cada número tem origem explicável.
 - `ligacoes(id, cdr_id UNIQUE, data_hora, ramal, pessoa_id, numero_a/b, sentido, fila, duracao_seg, atendida, eventos, gravacao, tem_evento_atendida, evento_falha, atendida_em, encerrada_em, tempo_toque_seg, tempo_conversa_seg, importacao_id)`
@@ -168,7 +171,8 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `GET /api/metricas?de=&ate=` | cálculo ao vivo do motor de métricas (preview) |
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
-| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20), `?fixo=dia\|semana\|mes`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=0`, `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console) |
+| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20), `?fixo=dia\|semana\|mes`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
+| `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -327,18 +331,24 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   × R$ 75.000). **Tempo real por SSE**: ingestão concluída → evento → refetch;
   polling de 60 s como rede de segurança; diff no cliente anima contagem, dá
   glow em quem mudou/cruzou meta e dispara **celebração de matrícula nova** — **somente matrícula com criada_em de HOJE** (delta do painel do dia: backfill/lote histórico muda números sem confete) e com teto de segurança
-  (overlay ~5 s com nome + valor, confete e som próprio). **Toda ingestão
-  concluída recebida por SSE** (nunca pelo polling) toca um alerta curto —
-  distinto do som de matrícula — e mostra um toast no canto com a fonte ("CDR
-  atualizado", "Omie atualizado", "Unyflex sincronizado"); rajada de eventos =
-  um som só, toast acumulando as fontes. Som via WebAudio
-  sintetizado, **desbloqueado por um toque** (overlay inicial; indicador 🔔/🔕)
-  — única interação permitida na tela. `pessoas.entra_painel = 0` fica
-  fora de dia/semana/rankings; a receita aparece só na visão do mês. Estado
-  atual da flag: Renato (decisão permanente) e, **temporariamente desde
-  2026-08-19, Hirlan e Douglas** — reverter com
-  `UPDATE pessoas SET entra_painel = 1 WHERE nome IN ('Hirlan','Douglas');`
-  (a flag só afeta a TV; /relatorios, /saude e feedback continuam com todos).
+  (overlay ~5 s com nome + valor, confete e som próprio — funciona sem som).
+  **Toda ingestão concluída recebida por SSE** (nunca pelo polling) dispara o
+  aviso: **pulso na borda da tela (~2,5 s)** + toast no canto com a fonte ("CDR
+  atualizado", "Omie atualizado", "Unyflex sincronizado") + alerta sonoro curto
+  se o som estiver armado; rajada de eventos = um aviso só (janela de 3 s),
+  toast acumulando as fontes. **Som: silêncio é o padrão, não falha** — sem
+  overlay de desbloqueio; a preferência global `tv_som` (toggle na /central)
+  vem no payload, `?som=1|0` é override por dispositivo. Com som habilitado o
+  cliente tenta armar o AudioContext direto (funciona com
+  `--autoplay-policy=no-user-gesture-required`); se o navegador segurar, um 🔕
+  discreto no rodapé arma com um clique (única interação da tela).
+  `pessoas.entra_painel = 0` fica fora de dia/semana/rankings (receita só no
+  mês); `entra_tv = 0` some da TV inteira, mês e "Equipe no mês" incluídos.
+  Estado atual: Renato `entra_painel = 0`/`entra_tv = 1` (permanente);
+  **Hirlan e Douglas `entra_tv = 0` temporariamente desde 2026-08-19** —
+  reverter com
+  `UPDATE pessoas SET entra_painel = 1, entra_tv = 1 WHERE nome IN ('Hirlan','Douglas');`
+  (as flags só afetam a TV; /relatorios, /saude e feedback continuam com todos).
   "Sem dados" (tudo zero) é neutro cinza — vermelho só para atrasado com dado
   real. **Decisão revogada em 2026-08-18**: receita por consultor e ranking de
   receita APARECEM na TV; continua fora qualquer texto avaliativo sobre pessoas

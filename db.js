@@ -407,6 +407,24 @@ const MIGRACOES = [
       UPDATE pessoas SET entra_painel = 0 WHERE nome = 'Renato';
     `);
   },
+
+  // 12 — Ocultação completa da TV e configurações globais.
+  // entra_tv = 0 tira a pessoa de TODAS as visões da TV (mês incluído);
+  // entra_painel continua sendo só as visões de prospecção (dia/semana) —
+  // Renato segue entra_painel = 0 / entra_tv = 1: receita visível no mês.
+  // Ocultações temporárias (ex.: Hirlan/Douglas) são UPDATE em runtime, não
+  // migração. `configuracoes` é chave→valor; tv_som nasce desligado — o
+  // silêncio é o padrão da TV, não uma falha.
+  () => {
+    db.exec(`
+      ALTER TABLE pessoas ADD COLUMN entra_tv INTEGER NOT NULL DEFAULT 1;
+      CREATE TABLE configuracoes (
+        chave TEXT PRIMARY KEY,
+        valor TEXT NOT NULL
+      );
+      INSERT INTO configuracoes (chave, valor) VALUES ('tv_som', '0');
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });

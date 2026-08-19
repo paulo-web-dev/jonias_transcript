@@ -15,6 +15,8 @@ const el = {
   vazio: document.getElementById("importacoes-vazio"),
   aviso: document.getElementById("aviso"),
   btnSair: document.getElementById("btn-sair"),
+  tvSomStatus: document.getElementById("tv-som-status"),
+  btnTvSom: document.getElementById("btn-tv-som"),
 };
 
 let avisoTimerId = null;
@@ -192,6 +194,42 @@ el.btnSincronizar.addEventListener("click", async () => {
   carregarImportacoes();
 });
 
+// ---------- Som do painel de TV (preferência global) ----------
+
+function mostrarSomTv(ligado) {
+  el.tvSomStatus.textContent = ligado
+    ? "Som LIGADO — as TVs tocam o alerta de dado novo e a celebração de matrícula."
+    : "Som DESLIGADO — as TVs avisam só pelo visual (pulso de borda e toast).";
+  el.btnTvSom.textContent = ligado ? "🔕 Desligar som das TVs" : "🔔 Ligar som das TVs";
+  el.btnTvSom.dataset.ligado = ligado ? "1" : "0";
+  el.btnTvSom.disabled = false;
+}
+
+async function carregarSomTv() {
+  try {
+    const { som } = await chamarApi("/api/config/tv");
+    mostrarSomTv(som);
+  } catch (_) {
+    el.tvSomStatus.textContent = "Não foi possível consultar a configuração de som.";
+  }
+}
+
+el.btnTvSom.addEventListener("click", async () => {
+  const novo = el.btnTvSom.dataset.ligado !== "1";
+  el.btnTvSom.disabled = true;
+  try {
+    const { som } = await chamarApi("/api/config/tv", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ som: novo }),
+    });
+    mostrarSomTv(som);
+  } catch (erro) {
+    el.btnTvSom.disabled = false;
+    mostrarAviso(`Não foi possível alterar o som das TVs. (${erro.message})`);
+  }
+});
+
 // ---------- Histórico ----------
 
 function chipStatus(imp) {
@@ -271,3 +309,4 @@ el.btnSair.addEventListener("click", async () => {
 
 carregarStatusMysql();
 carregarImportacoes();
+carregarSomTv();

@@ -14,7 +14,6 @@
       <span data-fonte="omie">🎯 —</span>
       <span data-fonte="mysql">🗄 —</span>
       <span id="tv-push" title="conexão de tempo real">⏱</span>
-      <span id="tv-som">🔕</span>
       <span class="tv-relogio" id="tv-relogio">carregando…</span>
     </div>
   </header>
@@ -50,7 +49,11 @@
 
   <footer class="tv-rodape">
     <div class="tv-indicador" id="tv-indicador"></div>
+    <span id="tv-som" class="oculto">🔕</span>
   </footer>
+
+  <!-- Pulso de borda: aviso visual de dado novo (não depende de som) -->
+  <div id="tv-borda-pulso"></div>
 
   <!-- Toast de ingestão concluída (nó único, reutilizado) -->
   <div class="tv-toast" id="tv-toast"></div>
@@ -61,15 +64,6 @@
     <div class="tv-celebracao-caixa">
       <div class="tv-celebracao-titulo">🎉 MATRÍCULA NOVA 🎉</div>
       <div class="tv-celebracao-info" id="celebracao-info">—</div>
-    </div>
-  </div>
-
-  <!-- Desbloqueio de áudio (o navegador exige um gesto) -->
-  <div class="tv-audio-overlay" id="audio-overlay">
-    <div class="tv-audio-caixa">
-      <div class="tv-audio-icone">🔔</div>
-      <div>Toque em qualquer lugar para <strong>ativar o som</strong> do painel</div>
-      <div class="texto-suave">sem toque, o painel continua funcionando — só fica mudo</div>
     </div>
   </div>
 
