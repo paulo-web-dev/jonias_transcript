@@ -69,6 +69,7 @@ aula-ai/
 ├── saude.html       # saúde dos dados            (rota /saude)
 ├── tv.html          # painel público da sala     (rota /tv?token=)
 ├── metricas.js      # motor de métricas em SQL puro + saúde + payload TV
+├── feedback.js      # Etapa 3: dossiê de fatos + prompt do feedback individual (IA)
 ├── css/style.css    # tema dark completo (robô, listas, modais, login, view, central)
 ├── js/
 │   ├── markdown.js  # conversor MD→HTML compartilhado (navegador + servidor/PDF)
@@ -103,7 +104,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **12**.
+pelo mesmo caminho). Versão atual: **13**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -152,6 +153,10 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   7.500.000 centavos (R$ 75.000/mês por consultor)**, todos vigentes desde
   2026-01-01; override por pessoa via `pessoa_id`.
 - `periodos(id, nome, data_inicio, data_fim)` — períodos de relatório (Etapa 2).
+- `feedbacks(id, periodo_id, snapshot_id, pessoa_id, modelo, fatos_json, texto_md, criado_em, usuario_id)`
+  — feedbacks individuais gerados por IA (migração 13). `fatos_json` guarda o
+  dossiê EXATO enviado ao modelo (texto sempre auditável contra números
+  congelados); gerar de novo insere nova linha — versões antigas ficam.
 
 ## Rotas
 
@@ -171,6 +176,7 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `GET /api/metricas?de=&ate=` | cálculo ao vivo do motor de métricas (preview) |
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
+| `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
 | `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 45), `?fixo=dia\|semana\|mes`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
@@ -377,9 +383,19 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - Validado contra a conferência da semana 10–14/08 (1.225+1 discadas, 723
   atendidas, taxas por consultor, 176 leads na janela, 4 vendas)
 
-### Etapa 3 (central de dados) — IA sobre as métricas (próxima)
-- Relatório de feedback individual (respeitando `entra_feedback`; Renato fora)
-- Camada de IA consumindo as métricas prontas do motor — nunca gerando números
+### ✅ Etapa 3 (central de dados) — IA sobre as métricas (feedback individual concluído)
+- `feedback.js` + migração 13: feedback individual por período congelado,
+  gerado na tela /relatorios (detalhe do consultor). A IA **consome as métricas
+  prontas do snapshot — nunca produz números**: o dossiê vai com tudo
+  pré-formatado (R$, %, tempos) e até as comparações "acima/abaixo da média" e
+  posições de ranking vêm calculadas em JS (deixar o modelo comparar decimais
+  produziu conclusão invertida em teste). Minimização de dados: nomes de
+  colegas nunca chegam ao modelo — só agregados da equipe e "Nº de M".
+- Respeita `entra_feedback` (Renato → 403); elegibilidade vem do GET.
+- Auditável: cada geração grava `fatos_json` (dossiê exato) + `snapshot_id`;
+  regerar cria nova versão, com seletor de versões na tela.
+- Pendente da etapa: outras aplicações de IA sobre as métricas (ex.: análise
+  do período para a equipe), a priorizar.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

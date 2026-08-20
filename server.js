@@ -23,6 +23,7 @@ const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
 const { importarCdr, importarOportunidadesOmie } = require("./importacao.js");
 const { sincronizarMysql, credenciaisMysql } = require("./sincronizacao.js");
 const { calcularMetricas, diasUteis, saudeDosDados, dadosTvCompleto } = require("./metricas.js");
+const { prepararFatosFeedback, gerarFeedbackMarkdown } = require("./feedback.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -739,6 +740,78 @@ app.delete("/api/periodos/:id", (req, res) => {
   const info = db.prepare("DELETE FROM periodos WHERE id = ?").run(req.params.id);
   if (!info.changes) return res.status(404).json({ error: "Período não encontrado." });
   res.json({ ok: true });
+});
+
+// ---------- Feedback individual com IA (Etapa 3) ----------
+// A IA consome as métricas prontas do snapshot congelado — nunca produz
+// números. Cada geração vira uma nova linha em `feedbacks` (trilha, como nos
+// snapshots), com o dossiê de fatos exato gravado em fatos_json.
+
+app.get("/api/periodos/:id/feedbacks", (req, res) => {
+  const periodo = db.prepare("SELECT id FROM periodos WHERE id = ?").get(req.params.id);
+  if (!periodo) return res.status(404).json({ error: "Período não encontrado." });
+  const feedbacks = db
+    .prepare(
+      `SELECT f.id, f.pessoa_id, p.nome AS pessoa, f.snapshot_id, f.modelo,
+              f.texto_md, f.criado_em, u.login AS usuario
+       FROM feedbacks f
+       JOIN pessoas p ON p.id = f.pessoa_id
+       JOIN usuarios u ON u.id = f.usuario_id
+       WHERE f.periodo_id = ? ORDER BY f.id DESC`
+    )
+    .all(periodo.id);
+  const elegiveis = db
+    .prepare(
+      `SELECT id, nome FROM pessoas
+       WHERE tipo = 'consultor' AND ativo = 1 AND entra_feedback = 1 ORDER BY nome`
+    )
+    .all();
+  res.json({ feedbacks, elegiveis });
+});
+
+app.post("/api/periodos/:id/feedbacks", async (req, res) => {
+  if (!verificarChave(res)) return;
+  const periodo = db.prepare("SELECT * FROM periodos WHERE id = ?").get(req.params.id);
+  if (!periodo) return res.status(404).json({ error: "Período não encontrado." });
+
+  const pessoaId = Number(req.body?.pessoaId);
+  const pessoa = Number.isInteger(pessoaId)
+    ? db.prepare("SELECT * FROM pessoas WHERE id = ? AND tipo = 'consultor' AND ativo = 1").get(pessoaId)
+    : null;
+  if (!pessoa) return res.status(404).json({ error: "Consultor não encontrado." });
+  if (!pessoa.entra_feedback) {
+    return res.status(403).json({
+      error: `${pessoa.nome} está fora do feedback individual (entra_feedback desativado).`,
+    });
+  }
+
+  // Sempre a versão mais recente do congelamento: o texto nasce amarrado a
+  // números defensáveis, nunca ao cálculo ao vivo.
+  const snapshot = db
+    .prepare("SELECT * FROM periodo_snapshots WHERE periodo_id = ? ORDER BY id DESC LIMIT 1")
+    .get(periodo.id);
+  if (!snapshot) return res.status(404).json({ error: "Período sem snapshot congelado." });
+
+  const fatos = prepararFatosFeedback(periodo, JSON.parse(snapshot.dados_json), pessoaId);
+  if (!fatos) {
+    return res.status(404).json({ error: "Consultor não aparece no snapshot deste período." });
+  }
+
+  try {
+    const textoMd = await gerarFeedbackMarkdown(anthropic, MODELO, fatos);
+    const criadoEm = new Date().toISOString();
+    const info = db
+      .prepare(
+        `INSERT INTO feedbacks (periodo_id, snapshot_id, pessoa_id, modelo, fatos_json,
+                                texto_md, criado_em, usuario_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(periodo.id, snapshot.id, pessoaId, MODELO, JSON.stringify(fatos), textoMd,
+        criadoEm, req.usuario.id);
+    res.status(201).json({ id: info.lastInsertRowid, textoMd, criadoEm, modelo: MODELO });
+  } catch (err) {
+    tratarErro("periodos/:id/feedbacks", err, res);
+  }
 });
 
 app.get("/api/saude", (req, res) => {

@@ -425,6 +425,27 @@ const MIGRACOES = [
       INSERT INTO configuracoes (chave, valor) VALUES ('tv_som', '0');
     `);
   },
+
+  // 13 — Feedback individual com IA (Etapa 3). Cada geração fica gravada com o
+  // dossiê de fatos EXATO enviado ao modelo (fatos_json) e o snapshot que o
+  // originou — o texto é sempre auditável contra números congelados. Gerações
+  // antigas nunca são sobrescritas (trilha de versões, como nos snapshots).
+  () => {
+    db.exec(`
+      CREATE TABLE feedbacks (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        periodo_id  INTEGER NOT NULL REFERENCES periodos(id) ON DELETE CASCADE,
+        snapshot_id INTEGER NOT NULL REFERENCES periodo_snapshots(id) ON DELETE CASCADE,
+        pessoa_id   INTEGER NOT NULL REFERENCES pessoas(id),
+        modelo      TEXT    NOT NULL,
+        fatos_json  TEXT    NOT NULL,
+        texto_md    TEXT    NOT NULL,
+        criado_em   TEXT    NOT NULL,
+        usuario_id  INTEGER NOT NULL REFERENCES usuarios(id)
+      );
+      CREATE INDEX idx_feedbacks_periodo ON feedbacks(periodo_id, pessoa_id, id);
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });

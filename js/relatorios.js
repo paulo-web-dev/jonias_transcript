@@ -25,6 +25,9 @@ const el = {
 
 let periodoAberto = null;
 let avisoTimerId = null;
+// Feedback individual (IA): estado do período aberto
+let feedbackInfo = { porPessoa: new Map(), elegiveis: new Set() };
+let versoesSnapshot = [];
 
 function escapeHtml(t) {
   const d = document.createElement("div");
@@ -96,6 +99,8 @@ async function abrirPeriodo(id, versao) {
   try {
     const r = await chamarApi(`/api/periodos/${id}${versao ? `?versao=${versao}` : ""}`);
     periodoAberto = id;
+    versoesSnapshot = r.versoes;
+    await carregarFeedbacks(id);
     renderizarPeriodo(r);
     el.painel.classList.remove("oculto");
     el.painel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -206,9 +211,76 @@ function mostrarDetalhe(p, d) {
     <ul>${fases}</ul>
     <ul>
       <li>Perdidas no período: <strong>${p.funil.perdidas}</strong>${p.funil.perdidasAproximadas ? ` (${p.funil.perdidasAproximadas} com data aproximada)` : ""}</li>
-    </ul>`;
+    </ul>
+    <h4>💬 Feedback individual (IA)</h4>
+    <div id="area-feedback"></div>`;
+  renderizarSecaoFeedback(p);
   el.detalhe.classList.remove("oculto");
   el.detalhe.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// ---------- Feedback individual (IA) ----------
+// Os números vêm do snapshot congelado; a IA só escreve o texto em volta
+// deles. Gerar de novo cria uma nova versão — as anteriores ficam guardadas.
+
+async function carregarFeedbacks(periodoId) {
+  const r = await chamarApi(`/api/periodos/${periodoId}/feedbacks`)
+    .catch(() => ({ feedbacks: [], elegiveis: [] }));
+  feedbackInfo = { porPessoa: new Map(), elegiveis: new Set(r.elegiveis.map((e) => e.id)) };
+  for (const f of r.feedbacks) {
+    (feedbackInfo.porPessoa.get(f.pessoa_id) ??
+      feedbackInfo.porPessoa.set(f.pessoa_id, []).get(f.pessoa_id)).push(f);
+  }
+}
+
+function renderizarSecaoFeedback(p, feedbackIdEscolhido) {
+  const area = document.getElementById("area-feedback");
+  if (!area) return;
+  if (!feedbackInfo.elegiveis.has(p.pessoaId)) {
+    area.innerHTML =
+      `<p class="texto-suave">Este consultor está fora do feedback individual (configuração da equipe).</p>`;
+    return;
+  }
+  const lista = feedbackInfo.porPessoa.get(p.pessoaId) || []; // mais recente primeiro
+  const escolhido = lista.find((f) => f.id === feedbackIdEscolhido) || lista[0];
+  if (!escolhido) {
+    area.innerHTML = `
+      <p class="texto-suave">Nenhum feedback gerado para este consultor neste período.</p>
+      <button id="btn-gerar-feedback" class="btn btn-primario btn-mini">💬 Gerar feedback com IA</button>`;
+  } else {
+    const versaoNum = (f) => lista.length - lista.indexOf(f);
+    const baseNum = versoesSnapshot.findIndex((v) => v.id === escolhido.snapshot_id) + 1;
+    const base = baseNum ? ` · números da v${baseNum} do congelamento` : "";
+    const seletor = lista.length > 1
+      ? `<select id="feedback-versao" class="campo-select">${lista
+          .map((f) => `<option value="${f.id}" ${f.id === escolhido.id ? "selected" : ""}>v${versaoNum(f)} — ${dataHoraBr(f.criado_em)} (${escapeHtml(f.usuario)})</option>`)
+          .join("")}</select>`
+      : `<span class="texto-suave">gerado em ${dataHoraBr(escolhido.criado_em)} por ${escapeHtml(escolhido.usuario)}</span>`;
+    area.innerHTML = `
+      <div class="painel-acoes feedback-meta">${seletor}
+        <button id="btn-gerar-feedback" class="btn btn-secundario btn-mini">⟳ Gerar novamente</button>
+        <span class="texto-suave">${escapeHtml(escolhido.modelo)}${base}</span>
+      </div>
+      <div class="modal-conteudo sem-padding">${MarkdownAula.renderizarMarkdown(escolhido.texto_md)}</div>`;
+    document.getElementById("feedback-versao")?.addEventListener("change", (e) =>
+      renderizarSecaoFeedback(p, Number(e.target.value)));
+  }
+  document.getElementById("btn-gerar-feedback").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "jonIAs está escrevendo o feedback…";
+    try {
+      await chamarApi(`/api/periodos/${periodoAberto}/feedbacks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pessoaId: p.pessoaId }),
+      });
+      await carregarFeedbacks(periodoAberto);
+    } catch (err) {
+      mostrarAviso(`Não foi possível gerar o feedback. (${err.message})`);
+    }
+    renderizarSecaoFeedback(p);
+  });
 }
 
 // ---------- Novo período ----------

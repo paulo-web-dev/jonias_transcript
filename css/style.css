@@ -843,6 +843,7 @@ body {
 
 .painel-cabecalho { margin-top: 2rem; }
 .painel-acoes { display: flex; gap: 0.5rem; align-items: center; }
+.feedback-meta { flex-wrap: wrap; margin: 0.6rem 0 0.8rem; }
 .campo-select {
   background: var(--fundo-painel);
   border: 1px solid var(--borda-painel);
