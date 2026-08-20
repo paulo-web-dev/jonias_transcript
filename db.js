@@ -456,4 +456,44 @@ for (; versao < MIGRACOES.length; versao++) {
   })();
 }
 
+// ---------- Ocultação padrão da TV (TEMPORÁRIO) ----------
+// Nomes desta lista ficam com entra_painel = 0 e entra_tv = 0 — fora de TODAS
+// as visões da TV — aplicado em TODO startup, DEPOIS das migrações. Assim a
+// ocultação sobrevive a banco recriado do zero (o seed roda antes disto) e a
+// qualquer UPDATE manual em sentido contrário. Só afeta a TV; /relatorios,
+// /saude e feedback continuam com todos.
+//
+// Para devolver alguém à TV: REMOVER o nome daqui e reiniciar o servidor — a
+// restauração para 1/1 é automática e atinge apenas quem foi ocultado por esta
+// lista (a chave tv_ocultos_aplicados em `configuracoes` guarda quem foi).
+// Renato (entra_painel = 0 permanente, via migração 11) não passa por aqui e
+// não é tocado.
+//
+// Decisão de 2026-08-19: Hirlan e Douglas fora da TV temporariamente.
+const OCULTOS_TEMPORARIOS_TV = ["Hirlan", "Douglas"];
+
+{
+  const CHAVE = "tv_ocultos_aplicados";
+  const aplicadosAntes = JSON.parse(
+    db.prepare("SELECT valor FROM configuracoes WHERE chave = ?").get(CHAVE)?.valor ?? "[]"
+  );
+  const restaurar = aplicadosAntes.filter((n) => !OCULTOS_TEMPORARIOS_TV.includes(n));
+  const mudarFlags = db.prepare(
+    "UPDATE pessoas SET entra_painel = ?, entra_tv = ? WHERE nome = ?"
+  );
+  db.transaction(() => {
+    for (const nome of restaurar) mudarFlags.run(1, 1, nome);
+    for (const nome of OCULTOS_TEMPORARIOS_TV) {
+      const info = mudarFlags.run(0, 0, nome);
+      if (!info.changes) {
+        console.warn(`⚠  OCULTOS_TEMPORARIOS_TV: "${nome}" não existe em pessoas — nada ocultado.`);
+      }
+    }
+    db.prepare(
+      `INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
+       ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`
+    ).run(CHAVE, JSON.stringify(OCULTOS_TEMPORARIOS_TV));
+  })();
+}
+
 module.exports = db;

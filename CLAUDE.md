@@ -122,9 +122,10 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   — unifica os identificadores dos consultores; `nomes_alternativos` é um JSON
   array com os nomes completos como aparecem no "Vendedor" do Omie; seed com os
   6 atuais (Renato com `entra_feedback = 0` e `entra_painel = 0`; `crm_user_id` do Frederico pendente). `tipo`: consultor | canal; `entra_painel` controla as visões de prospecção da TV (dia/semana/rankings); `entra_tv = 0` oculta de TODAS as visões da TV, mês incluído (Renato fica `entra_painel = 0` + `entra_tv = 1`: receita só no mês). As duas flags são só da TV — relatórios internos ignoram.
-- `configuracoes(chave PK, valor)` — chave→valor global; hoje só `tv_som`
-  ('0'/'1', nasce '0': silêncio é o padrão da TV), alterada pelo toggle da
-  /central via `GET/PUT /api/config/tv`.
+- `configuracoes(chave PK, valor)` — chave→valor global; `tv_som` ('0'/'1',
+  nasce '0': silêncio é o padrão da TV), alterada pelo toggle da /central via
+  `GET/PUT /api/config/tv`; `tv_ocultos_aplicados` (JSON) é escrita pelo
+  reforço de ocultação no boot (ver abaixo), não editar à mão.
 - `importacoes(id, tipo cdr|oportunidades|mysql, arquivo_nome, hash_sha256, linhas_*, registros_novos/atualizados/identicos, detalhes_json, status, erro, usuario_id, iniciado/concluido_em)`
   — auditoria de toda ingestão: cada número tem origem explicável.
 - `ligacoes(id, cdr_id UNIQUE, data_hora, ramal, pessoa_id, numero_a/b, sentido, fila, duracao_seg, atendida, eventos, gravacao, tem_evento_atendida, evento_falha, atendida_em, encerrada_em, tempo_toque_seg, tempo_conversa_seg, importacao_id)`
@@ -371,11 +372,17 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   discreto no rodapé arma com um clique (única interação da tela).
   `pessoas.entra_painel = 0` fica fora de dia/semana/rankings (receita só no
   mês); `entra_tv = 0` some da TV inteira, mês e "Equipe no mês" incluídos.
-  Estado atual: Renato `entra_painel = 0`/`entra_tv = 1` (permanente);
-  **Hirlan e Douglas `entra_tv = 0` temporariamente desde 2026-08-19** —
-  reverter com
-  `UPDATE pessoas SET entra_painel = 1, entra_tv = 1 WHERE nome IN ('Hirlan','Douglas');`
-  (as flags só afetam a TV; /relatorios, /saude e feedback continuam com todos).
+  Estado atual: Renato `entra_painel = 0`/`entra_tv = 1` (permanente, via
+  migração 11); **Hirlan e Douglas fora da TV temporariamente desde
+  2026-08-19, agora via `OCULTOS_TEMPORARIOS_TV` no fim do `db.js`** — lista
+  aplicada em TODO startup, depois das migrações, então sobrevive a banco
+  recriado do zero e a UPDATE manual em contrário. Reverter = remover o nome
+  da lista e reiniciar (a restauração para 1/1 é automática e atinge só quem
+  foi ocultado pela lista — rastreado em `configuracoes.tv_ocultos_aplicados`;
+  Renato não passa por ela). Nenhuma ingestão cria linha em `pessoas` (nome
+  sem match vira ressalva com `pessoa_id NULL`), então não há outro caminho de
+  "renascimento" além do seed — já coberto pelo reforço. (As flags só afetam a
+  TV; /relatorios, /saude e feedback continuam com todos.)
   "Sem dados" (tudo zero) é neutro cinza — vermelho só para atrasado com dado
   real. **Decisão revogada em 2026-08-18**: receita por consultor e ranking de
   receita APARECEM na TV; continua fora qualquer texto avaliativo sobre pessoas
