@@ -22,7 +22,10 @@ const {
 const { gerarPdf, gerarDocx, nomeDeArquivo } = require("./exportacao.js");
 const { importarCdr, importarOportunidadesOmie } = require("./importacao.js");
 const { sincronizarMysql, credenciaisMysql } = require("./sincronizacao.js");
-const { calcularMetricas, diasUteis, saudeDosDados, dadosTvCompleto } = require("./metricas.js");
+const {
+  calcularMetricas, diasUteis, saudeDosDados, dadosTvCompleto,
+  resumoMetas, gravarMetas, INDICADORES, INDICADORES_RECEITA, configBool,
+} = require("./metricas.js");
 const { prepararFatosFeedback, gerarFeedbackMarkdown } = require("./feedback.js");
 
 const app = express();
@@ -202,8 +205,10 @@ setInterval(() => {
   for (const res of conexoesTv) res.write(": ping\n\n");
 }, 25000).unref();
 
-function emitirEventoTv(fonte) {
-  const evento = `data: ${JSON.stringify({ tipo: "dados", fonte })}\n\n`;
+// tipo "dados" = ingestão concluída (a TV avisa com pulso/toast);
+// tipo "config" = metas/configuração mudaram (a TV só refaz o fetch, em silêncio)
+function emitirEventoTv(fonte, tipo = "dados") {
+  const evento = `data: ${JSON.stringify({ tipo, fonte })}\n\n`;
   for (const res of conexoesTv) {
     try {
       res.write(evento);
@@ -229,6 +234,74 @@ app.put("/api/config/tv", (req, res) => {
   res.json({ som });
 });
 
+// ---------- Metas (painel /metas) ----------
+// Editar NUNCA sobrescreve o passado: cria vigência nova a partir da data
+// escolhida e fecha a anterior no dia antes (ver gravarMetas em metricas.js).
+
+app.get("/api/metas", (req, res) => res.json(resumoMetas()));
+
+app.put("/api/metas", (req, res) => {
+  const { pessoaId = null, escopo, vigenteDesde, valores } = req.body || {};
+  const mapa = INDICADORES[escopo];
+  if (!mapa) return res.status(400).json({ error: "Escopo inválido — use dia, mes ou equipe." });
+  if (!RE_DATA.test(vigenteDesde || "") || isNaN(new Date(vigenteDesde + "T00:00:00Z"))) {
+    return res.status(400).json({ error: "Data de vigência inválida — use YYYY-MM-DD." });
+  }
+  let pessoa = null;
+  if (pessoaId !== null) {
+    if (escopo === "equipe") {
+      return res.status(400).json({ error: "A meta da equipe não é por pessoa." });
+    }
+    pessoa = Number.isInteger(pessoaId)
+      ? db.prepare("SELECT id, nome FROM pessoas WHERE id = ? AND tipo = 'consultor' AND ativo = 1").get(pessoaId)
+      : null;
+    if (!pessoa) return res.status(404).json({ error: "Consultor não encontrado." });
+  }
+  if (!valores || typeof valores !== "object") {
+    return res.status(400).json({ error: "Informe `valores` com os indicadores a alterar." });
+  }
+  // Campo ausente = não mexe; null/"" = sem meta (pessoa: volta a herdar o
+  // padrão); número em reais vira centavos nos indicadores de receita
+  const porIndicador = {};
+  for (const [campo, indicador] of Object.entries(mapa)) {
+    if (!(campo in valores)) continue;
+    const bruto = valores[campo];
+    if (bruto === null || bruto === "") {
+      porIndicador[indicador] = null;
+      continue;
+    }
+    const n = typeof bruto === "number" ? bruto : Number(String(bruto).replace(",", "."));
+    if (!Number.isFinite(n) || n < 0) {
+      return res.status(400).json({ error: `Valor inválido em "${campo}" — use um número ≥ 0.` });
+    }
+    porIndicador[indicador] = INDICADORES_RECEITA.has(indicador) ? Math.round(n * 100) : n;
+  }
+  if (!Object.keys(porIndicador).length) {
+    return res.status(400).json({ error: "Nenhum indicador informado." });
+  }
+  try {
+    const mudancas = gravarMetas({ pessoaId: pessoa?.id ?? null, vigenteDesde, valores: porIndicador });
+    if (mudancas.length) emitirEventoTv("metas", "config");
+    res.json({ mudancas, ...resumoMetas() });
+  } catch (erro) {
+    if (erro.status === 400) return res.status(400).json({ error: erro.message });
+    throw erro;
+  }
+});
+
+app.put("/api/metas/config", (req, res) => {
+  const { incluiGerencial } = req.body || {};
+  if (typeof incluiGerencial !== "boolean") {
+    return res.status(400).json({ error: "Informe { incluiGerencial: true|false }." });
+  }
+  db.prepare(
+    `INSERT INTO configuracoes (chave, valor) VALUES ('meta_equipe_inclui_gerencial', ?)
+     ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`
+  ).run(incluiGerencial ? "1" : "0");
+  emitirEventoTv("metas", "config");
+  res.json({ incluiGerencial: configBool("meta_equipe_inclui_gerencial") });
+});
+
 // ---------- Páginas internas ----------
 
 app.get("/", exigirLoginPagina, (req, res) => res.redirect("/aulas"));
@@ -249,6 +322,9 @@ app.get("/relatorios", exigirLoginPagina, (req, res) =>
 );
 app.get("/saude", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "saude.html"))
+);
+app.get("/metas", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "metas.html"))
 );
 
 // ---------- CRUD de aulas ----------

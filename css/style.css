@@ -897,6 +897,22 @@ body {
   letter-spacing: 0.5px;
 }
 .tabela-metricas tbody tr { cursor: pointer; }
+.tabela-metricas tbody tr.sem-clique, .tabela-metas tbody tr { cursor: default; }
+
+/* ============ Painel de metas ============ */
+.metas-intro { margin-top: 1rem; max-width: 900px; }
+.metas-toggle { margin-top: 0.4rem; max-width: 640px; }
+.metrica-acao { justify-content: center; align-items: flex-start; }
+.metas-pessoa { margin-bottom: 0.9rem; }
+.tabela-metas td { vertical-align: top; }
+.tabela-metas td.meta-celula { text-align: left; min-width: 130px; }
+.tabela-metas td.meta-celula strong { font-size: 1.05rem; }
+.tabela-metas small { font-size: 0.72rem; }
+.meta-celula-propria { background: rgba(108, 123, 255, 0.08); }
+.meta-propria { color: var(--acento-2); }
+.meta-futura { color: var(--amarelo); }
+.metas-historico { margin-top: 1.5rem; }
+.metas-historico summary { cursor: pointer; list-style: revert; }
 .tabela-metricas tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
 .tabela-metricas tfoot td { font-weight: 700; border-top: 2px solid var(--borda-painel); }
 .celula-nome { font-weight: 600; }
@@ -1072,6 +1088,31 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
 .tv-gauge-valor { font-size: 2.3vw; font-weight: 800; font-variant-numeric: tabular-nums; }
 .tv-gauge-extra { font-size: 1.1vw; color: var(--texto-suave); }
 .tv-mes-rodape { text-align: center; font-size: 1.5vw; font-weight: 700; padding-top: 0.8vw; }
+.tv-gauge-mensal { font-size: 1.05vw; color: var(--texto-suave); margin-top: 0.15vw; }
+.tv-gauge-mensal .ok { color: var(--verde); }
+/* Carteira Gerencial no mês: cartão de receita sem gauge e sem meta */
+.tv-gauge-canal { display: flex; flex-direction: column; justify-content: center; min-height: 10vw; }
+.tv-gauge-canal .tv-gauge-nome { margin-top: 0; }
+
+/* Cartão de destaque: falta para a meta da semana (R$) — o número mais alto da tela */
+.tv-destaque { align-items: center; justify-content: center; }
+.tv-destaque-caixa { text-align: center; width: 70vw; }
+.tv-destaque-titulo { font-size: 2.2vw; font-weight: 800; letter-spacing: 4px; color: var(--texto-suave); }
+.tv-destaque-valor {
+  font-size: 9vw;
+  font-weight: 900;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin: 0.4vw 0 1vw;
+}
+.tv-destaque-valor.tv-destaque-ok { background: linear-gradient(135deg, var(--verde), var(--acento-2)); -webkit-background-clip: text; background-clip: text; }
+.tv-destaque .tv-trilha-grande { height: 3vw; margin: 0 0 1.2vw; }
+.tv-destaque-linha { font-size: 2.4vw; font-weight: 800; }
+.tv-destaque-rodape { font-size: 1.5vw; color: var(--texto-suave); margin-top: 1vw; }
 
 /* Destaques ao mudar */
 @keyframes tv-brilho { 0% { box-shadow: 0 0 0 rgba(108,123,255,0); } 20% { box-shadow: 0 0 2vw rgba(108,123,255,0.7); } 100% { box-shadow: 0 0 0 rgba(108,123,255,0); } }

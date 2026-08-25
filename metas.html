@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Metas — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">metas</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <a href="/relatorios" class="btn-topo">📊 Relatórios</a>
+      <a href="/saude" class="btn-topo">🩺 Saúde dos dados</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista">
+    <p class="texto-suave metas-intro">Editar uma meta <strong>nunca sobrescreve o passado</strong>: a alteração vale a partir
+      da data escolhida e a meta anterior fica valendo até o dia anterior — relatórios de períodos antigos continuam
+      usando a meta que valia na época. Quem não tem meta própria herda o padrão da equipe.</p>
+
+    <h2 class="secao-titulo">Meta da equipe (R$)</h2>
+    <p class="texto-suave">Alvo próprio da equipe — não é a soma das individuais (a soma aparece ao lado, só para comparar).
+      A meta da semana é o cartão de destaque da TV.</p>
+    <div class="grade-metricas" id="cards-equipe"></div>
+
+    <div class="fonte-card metas-toggle">
+      <div class="fonte-cabecalho">
+        <h3>Carteira Gerencial na meta da equipe</h3>
+        <span class="texto-suave">Matrículas de wallet "Gerencial" e oportunidades de Paulo/Gustavo. Fica fora de ranking de ligações; na TV aparece só em receita.</span>
+      </div>
+      <p id="gerencial-status" class="fonte-status texto-suave">Carregando…</p>
+      <button id="btn-gerencial" class="btn btn-secundario" disabled>…</button>
+    </div>
+
+    <h2 class="secao-titulo">Padrão da equipe</h2>
+    <p class="texto-suave">Herdado por todo consultor que não tiver meta própria no indicador.</p>
+    <div class="tabela-scroll">
+      <table class="tabela-metricas tabela-metas" id="tabela-padrao">
+        <thead>
+          <tr><th>Escopo</th><th>📞 Ligações</th><th>✨ Leads</th><th>🎓 Matrículas</th><th>💰 Receita</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h2 class="secao-titulo">Por consultor</h2>
+    <div id="blocos-pessoas"></div>
+
+    <details class="metas-historico">
+      <summary class="secao-titulo">Histórico completo de vigências</summary>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-historico">
+          <thead>
+            <tr><th>Quem</th><th>Indicador</th><th>Valor</th><th>Vigente desde</th><th>Até</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+  </main>
+
+  <!-- Modal: editar metas de um escopo (diária / mensal / equipe) -->
+  <div id="modal-meta" class="modal oculto">
+    <div class="modal-caixa modal-pequena">
+      <div class="modal-cabecalho">
+        <h2 id="modal-meta-titulo">Editar metas</h2>
+        <button class="btn-fechar" data-fechar="modal-meta" title="Fechar">✕</button>
+      </div>
+      <div class="modal-conteudo">
+        <p id="modal-meta-ajuda" class="texto-suave"></p>
+        <div id="modal-meta-campos"></div>
+        <label class="campo"><span>Vigente a partir de</span><input type="date" id="campo-meta-desde" /></label>
+        <p class="texto-suave">A meta anterior fica valendo até o dia anterior a essa data. Só é possível escolher uma data
+          igual ou posterior à última vigência já cadastrada.</p>
+        <p id="modal-meta-erro" class="login-erro oculto"></p>
+      </div>
+      <div class="modal-rodape">
+        <button id="btn-confirmar-meta" class="btn btn-primario">Salvar nova vigência</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/metas.js"></script>
+</body>
+</html>

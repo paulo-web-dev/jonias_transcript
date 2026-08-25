@@ -138,10 +138,20 @@ async function sincronizarMysql(usuarioId) {
       pessoaPorNome.set(normalizarNome(alt), p.id);
     }
   }
+  // Exceção única à regra do match exato (decisão do usuário, 2026-08-25):
+  // wallet que CONTÉM "gere" (Gerencial, Gerência…) cai na carteira Gerencial
+  // (tipo canal). Só vale se a carteira existir; contada à parte no relatório.
+  const gerencialId = pessoas.find((p) => p.nome === "Gerencial")?.id ?? null;
   const walletsSemMatch = new Map();
+  const walletsGerencialPorPadrao = new Map();
   function resolverWallet(wallet) {
     if (!wallet || !String(wallet).trim()) return null;
-    const id = pessoaPorNome.get(normalizarNome(wallet)) ?? null;
+    const normalizado = normalizarNome(wallet);
+    let id = pessoaPorNome.get(normalizado) ?? null;
+    if (id === null && gerencialId !== null && normalizado.includes("gere")) {
+      id = gerencialId;
+      walletsGerencialPorPadrao.set(wallet, (walletsGerencialPorPadrao.get(wallet) || 0) + 1);
+    }
     if (id === null) walletsSemMatch.set(wallet, (walletsSemMatch.get(wallet) || 0) + 1);
     return id;
   }
@@ -220,6 +230,13 @@ async function sincronizarMysql(usuarioId) {
           ? [["wallet_sem_match", {
               qtde: [...walletsSemMatch.values()].reduce((a, b) => a + b, 0),
               amostras: [...walletsSemMatch.entries()].slice(0, 20).map(([w, n]) => `"${w}" (${n}x)`),
+            }]]
+          : []),
+        ...(walletsGerencialPorPadrao.size
+          ? [["wallet_gerencial_por_padrao", {
+              qtde: [...walletsGerencialPorPadrao.values()].reduce((a, b) => a + b, 0),
+              amostras: [...walletsGerencialPorPadrao.entries()].slice(0, 20)
+                .map(([w, n]) => `"${w}" (${n}x) → Gerencial por conter "gere"`),
             }]]
           : []),
         ...(semAluno

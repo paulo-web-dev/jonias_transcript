@@ -68,6 +68,7 @@ aula-ai/
 ├── relatorios.html  # períodos e métricas        (rota /relatorios)
 ├── saude.html       # saúde dos dados            (rota /saude)
 ├── tv.html          # painel público da sala     (rota /tv?token=)
+├── metas.html       # painel de metas            (rota /metas)
 ├── metricas.js      # motor de métricas em SQL puro + saúde + payload TV
 ├── feedback.js      # Etapa 3: dossiê de fatos + prompt do feedback individual (IA)
 ├── css/style.css    # tema dark completo (robô, listas, modais, login, view, central)
@@ -104,7 +105,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **13**.
+pelo mesmo caminho). Versão atual: **14**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -121,11 +122,24 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 - `pessoas(id, nome, ramal UNIQUE, crm_user_id UNIQUE, wallet_nome UNIQUE, ativo, entra_feedback, nomes_alternativos)`
   — unifica os identificadores dos consultores; `nomes_alternativos` é um JSON
   array com os nomes completos como aparecem no "Vendedor" do Omie; seed com os
-  6 atuais (Renato com `entra_feedback = 0` e `entra_painel = 0`; `crm_user_id` do Frederico pendente). `tipo`: consultor | canal; `entra_painel` controla as visões de prospecção da TV (dia/semana/rankings); `entra_tv = 0` oculta de TODAS as visões da TV, mês incluído (Renato fica `entra_painel = 0` + `entra_tv = 1`: receita só no mês). As duas flags são só da TV — relatórios internos ignoram.
+  6 atuais (`crm_user_id` do Frederico pendente; **Renato voltou a rankings,
+  metas e feedback na migração 14** — flags 1/1/1). `tipo`: consultor | canal;
+  `entra_painel` controla as visões de prospecção da TV (dia/semana/rankings);
+  `entra_tv = 0` oculta de TODAS as visões da TV, mês incluído. As duas flags
+  são só da TV — relatórios internos ignoram. Canais: **Unyflex** (balcão) e
+  **Gerencial** (migração 14; wallet `Gerencial` + qualquer wallet contendo
+  "gere", regra explícita em `resolverWallet`; oportunidades do Omie com
+  vendedor Paulo/Gustavo via `nomes_alternativos` = Paulo, Gustavo, Paulo
+  Orfanelli). Canal nunca entra em ranking de ligações/leads, metas ou
+  feedback; Gerencial aparece na TV só em receita (cartão no MÊS + pódio de
+  receita da semana) e conta para a meta da equipe se
+  `meta_equipe_inclui_gerencial = '1'`.
 - `configuracoes(chave PK, valor)` — chave→valor global; `tv_som` ('0'/'1',
   nasce '0': silêncio é o padrão da TV), alterada pelo toggle da /central via
   `GET/PUT /api/config/tv`; `tv_ocultos_aplicados` (JSON) é escrita pelo
-  reforço de ocultação no boot (ver abaixo), não editar à mão.
+  reforço de ocultação no boot (ver abaixo), não editar à mão;
+  `meta_equipe_inclui_gerencial` ('0'/'1', nasce '0') — toggle na /metas via
+  `PUT /api/metas/config`.
 - `importacoes(id, tipo cdr|oportunidades|mysql, arquivo_nome, hash_sha256, linhas_*, registros_novos/atualizados/identicos, detalhes_json, status, erro, usuario_id, iniciado/concluido_em)`
   — auditoria de toda ingestão: cada número tem origem explicável.
 - `ligacoes(id, cdr_id UNIQUE, data_hora, ramal, pessoa_id, numero_a/b, sentido, fila, duracao_seg, atendida, eventos, gravacao, tem_evento_atendida, evento_falha, atendida_em, encerrada_em, tempo_toque_seg, tempo_conversa_seg, importacao_id)`
@@ -149,10 +163,22 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   desde o último sync, margem de 3 dias; primeiro sync completo; nunca DELETE).
   `status = 'canceled'` **não conta como receita**; matrícula com aluno órfão na
   origem é mantida com dados em branco (nunca descartada em silêncio).
-- `metas(id, pessoa_id NULL=todos, indicador ligacoes_dia|leads_dia|matriculas_dia|receita_mes, valor, vigente_desde/ate)`
-  — seed: 45 ligações/dia, 14 leads/dia, 1.3 matrículas/dia e **receita_mes =
-  7.500.000 centavos (R$ 75.000/mês por consultor)**, todos vigentes desde
-  2026-01-01; override por pessoa via `pessoa_id`.
+- `metas(id, pessoa_id NULL=padrão, indicador, valor, vigente_desde/ate)` —
+  indicadores (CHECK, migração 14): diários `ligacoes_dia|leads_dia|
+  matriculas_dia|receita_dia` (mandam em HOJE/SEMANA da TV e nos relatórios,
+  × dias úteis), mensais `ligacoes_mes|leads_mes|matriculas_mes|receita_mes`
+  (visão MÊS da TV) e da EQUIPE `receita_semana_equipe|receita_mes_equipe`
+  (sempre `pessoa_id NULL`; alvo próprio, **não** a soma das individuais).
+  Receita sempre em centavos. Seed: 45/14/1,3 por dia e receita_mes =
+  7.500.000 (R$ 75.000/mês por consultor) desde 2026-01-01; os demais nascem
+  vazios e são definidos no painel `/metas`. `pessoa_id NULL` = padrão herdado
+  por quem não tem meta própria. **Vigência**: editar cria linha nova a partir
+  da data escolhida e fecha a aberta anterior em `vigente_ate = data − 1`
+  (`gravarMetas` em `metricas.js`); nada é apagado (exceção: linha da MESMA
+  data é corrigida/removida — nunca valeu para dia anterior); data anterior à
+  última vigência → 400. `metasVigentes(de, ate)` é intersecção (a de
+  `vigente_desde` mais recente vence o período inteiro — sem rateio quando a
+  meta troca no meio do período; limitação documentada).
 - `periodos(id, nome, data_inicio, data_fim)` — períodos de relatório (Etapa 2).
 - `feedbacks(id, periodo_id, snapshot_id, pessoa_id, modelo, fatos_json, texto_md, criado_em, usuario_id)`
   — feedbacks individuais gerados por IA (migração 13). `fatos_json` guarda o
@@ -180,6 +206,7 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
 | `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 45), `?fixo=dia\|semana\|mes`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
+| `GET /api/metas`, `PUT /api/metas`, `PUT /api/metas/config` | painel `/metas` (`resumoMetas()`): padrão vigente, valor efetivo por consultor (própria ou herdada, com "desde" e vigência futura), meta da equipe + soma das individuais, receita do mês com/sem Gerencial, histórico. PUT `{pessoaId: null\|id, escopo: dia\|mes\|equipe, vigenteDesde, valores: {ligacoes, leads, matriculas, receita \| semana, mes}}` — campo ausente não mexe, `null`/"" = sem meta (pessoa: volta a herdar), reais → centavos; data inválida/retroativa, escopo equipe com pessoa, consultor inexistente → 400/404. `/config` `{incluiGerencial: bool}`. Ambos emitem SSE `{tipo:"config"}` — a TV refaz o fetch em silêncio (sem pulso/toast) |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -372,8 +399,8 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   discreto no rodapé arma com um clique (única interação da tela).
   `pessoas.entra_painel = 0` fica fora de dia/semana/rankings (receita só no
   mês); `entra_tv = 0` some da TV inteira, mês e "Equipe no mês" incluídos.
-  Estado atual: Renato `entra_painel = 0`/`entra_tv = 1` (permanente, via
-  migração 11); **Hirlan e Douglas fora da TV temporariamente desde
+  Estado atual: Renato de volta a tudo (migração 14, 2026-08-25);
+  **Hirlan e Douglas fora da TV temporariamente desde
   2026-08-19, agora via `OCULTOS_TEMPORARIOS_TV` no fim do `db.js`** — lista
   aplicada em TODO startup, depois das migrações, então sobrevive a banco
   recriado do zero e a UPDATE manual em contrário. Reverter = remover o nome
@@ -389,6 +416,27 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   — só número, tudo do motor SQL, zero IA
 - Validado contra a conferência da semana 10–14/08 (1.225+1 discadas, 723
   atendidas, taxas por consultor, 176 leads na janela, 4 vendas)
+- **Painel de metas `/metas` e meta da equipe (2026-08-25, migração 14)**:
+  tela autenticada para editar, sem SQL, o padrão da equipe e a meta própria
+  de cada consultor (diária e mensal: ligações, leads, matrículas, R$) com
+  vigência por data (histórico preservado), mais a meta da EQUIPE em R$
+  (semana e mês — número próprio, soma das individuais mostrada ao lado só
+  para comparar) e o toggle da Gerencial. Na TV: **cartão de destaque "FALTA
+  PARA A META DA SEMANA"** (R$ gigante + barra `.tv-trilha-grande` + "R$ feito
+  de R$ meta · % · dia N de 5" + linha do mês) **intercalado entre CADA tela da
+  rotação** (HOJE → cartão → SEMANA → cartão → MÊS → cartão), com duração
+  própria `?destaque=N` s (padrão 12; as telas seguem com `?giro`), `?fixo=
+  destaque` para fixar; sem meta da semana cadastrada o cartão sai da rotação
+  (log no console). Receita da equipe para a meta = TODOS os consultores
+  ativos, independente das flags de TV (quem está oculto continua vendendo) +
+  Gerencial se o toggle estiver ligado. Visão MÊS: título sem valor único
+  (meta de receita pode ser por pessoa), 2ª linha "📞 N/meta · ✨ N/meta · 🎓
+  N/meta" só com metas mensais cadastradas, cartão Gerencial (valor, sem
+  gauge/meta) e rodapé "Equipe no mês: R$ X de R$ Y (N%)" vindo de
+  `mes.equipe` (não mais soma no cliente). Curva acumulada da SEMANA usa a
+  soma das metas diárias de quem está no painel (respeita meta própria).
+  `/relatorios` ganhou "Meta R$" e "%" por consultor (`receita_dia` × dias
+  úteis; "—" em snapshot antigo).
 
 ### ✅ Etapa 3 (central de dados) — IA sobre as métricas (feedback individual concluído)
 - `feedback.js` + migração 13: feedback individual por período congelado,

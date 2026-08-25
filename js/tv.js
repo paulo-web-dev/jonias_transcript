@@ -11,7 +11,10 @@
 const params = new URLSearchParams(location.search);
 const token = params.get("token") || "";
 const GIRO_MS = Math.max(6, Number(params.get("giro")) || 45) * 1000;
-const FIXO = params.get("fixo"); // dia | semana | mes
+// Cartão de destaque (falta para a meta da semana): entra ENTRE cada tela da
+// rotação, com duração própria — ?destaque=N segundos (padrão 12, mín. 4)
+const DESTAQUE_MS = Math.max(4, Number(params.get("destaque")) || 12) * 1000;
+const FIXO = params.get("fixo"); // dia | semana | mes | destaque
 const DIA_SEMPRE = params.get("dia") === "sempre";
 // Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
 // ?som=1 / ?som=0 é override por dispositivo. Silêncio é o padrão, não falha.
@@ -331,38 +334,56 @@ function proximaCelebracao() {
 
 // ---------- Rotação entre visões ----------
 
+const VISOES = ["dia", "destaque", "semana", "mes"];
 let visoesAtivas = [];
 let visaoAtual = 0;
+let destaqueAvisado = false;
 
 function aplicarVisoes(d) {
   const mostrarDia = d.dia.emCurso && (d.dia.temDadoHoje || DIA_SEMPRE);
-  const novas = [];
-  if (mostrarDia) novas.push("dia");
-  novas.push("semana", "mes");
+  // O cartão só entra com meta da semana cadastrada (painel /metas)
+  const temDestaque = d.semana.equipe.receita?.metaCentavos != null;
+  if (!temDestaque && !destaqueAvisado) {
+    destaqueAvisado = true;
+    console.log("[tv] cartão 'falta para a meta da semana' fora da rotação: meta da equipe (semana) não cadastrada em /metas");
+  }
+  const telas = [];
+  if (mostrarDia) telas.push("dia");
+  telas.push("semana", "mes");
+  // destaque intercalado: HOJE → cartão → SEMANA → cartão → MÊS → cartão
+  const novas = temDestaque ? telas.flatMap((t) => [t, "destaque"]) : telas;
   const fixoValido = FIXO && novas.includes(FIXO) ? FIXO : null;
   visoesAtivas = fixoValido ? [fixoValido] : novas;
   if (visaoAtual >= visoesAtivas.length) visaoAtual = 0;
-  ["dia", "semana", "mes"].forEach((v) =>
-    el("visao-" + v).classList.toggle("tv-fora", !visoesAtivas.includes(v)));
-  mostrarVisao(visoesAtivas[visaoAtual], true);
+  VISOES.forEach((v) => el("visao-" + v).classList.toggle("tv-fora", !visoesAtivas.includes(v)));
+  mostrarVisao(visoesAtivas[visaoAtual]);
 }
 
-const NOMES_VISAO = { dia: "HOJE", semana: "SEMANA", mes: "MÊS" };
+const NOMES_VISAO = { dia: "HOJE", semana: "SEMANA", mes: "MÊS", destaque: "META DA SEMANA" };
 
-function mostrarVisao(nome, imediato) {
-  for (const v of ["dia", "semana", "mes"]) {
-    el("visao-" + v).classList.toggle("tv-ativa", v === nome);
-  }
-  el("tv-indicador").innerHTML = visoesAtivas
+function mostrarVisao(nome) {
+  for (const v of VISOES) el("visao-" + v).classList.toggle("tv-ativa", v === nome);
+  // Pontos = só as telas (o cartão intercalado não ganha ponto próprio)
+  const pontos = [...new Set(visoesAtivas.filter((v) => v !== "destaque"))];
+  el("tv-indicador").innerHTML = pontos
     .map((v) => `<span class="${v === nome ? "ponto-ativo" : ""}">●</span>`)
     .join(" ") + `<b>${NOMES_VISAO[nome] || ""}</b>`;
 }
 
-setInterval(() => {
-  if (visoesAtivas.length < 2) return;
-  visaoAtual = (visaoAtual + 1) % visoesAtivas.length;
-  mostrarVisao(visoesAtivas[visaoAtual]);
-}, GIRO_MS);
+// Giro com duração por tela (cadeia de timeouts: o cartão fica menos tempo)
+let giroTimer = null;
+function agendarGiro() {
+  clearTimeout(giroTimer);
+  const duracao = visoesAtivas[visaoAtual] === "destaque" ? DESTAQUE_MS : GIRO_MS;
+  giroTimer = setTimeout(() => {
+    if (visoesAtivas.length >= 2) {
+      visaoAtual = (visaoAtual + 1) % visoesAtivas.length;
+      mostrarVisao(visoesAtivas[visaoAtual]);
+    }
+    agendarGiro();
+  }, duracao);
+}
+agendarGiro();
 
 // ---------- Render ----------
 
@@ -379,7 +400,13 @@ function montar(d) {
       <div class="tv-gauge-nome">${p.nome}</div>
       <div class="tv-gauge-valor" data-campo="valor" data-v="0">—</div>
       <div class="tv-gauge-extra" data-campo="extra"></div>
-    </div>`).join("");
+      <div class="tv-gauge-mensal" data-campo="mensal"></div>
+    </div>`).join("") + (d.mes.gerencial ? `
+    <div class="tv-gauge tv-gauge-canal" data-nome="Gerencial">
+      <div class="tv-gauge-nome">Gerencial</div>
+      <div class="tv-gauge-valor" data-campo="valor" data-v="0">—</div>
+      <div class="tv-gauge-extra" data-campo="extra">carteira gerencial · sem meta</div>
+    </div>` : "");
   montado = true;
 }
 
@@ -528,12 +555,12 @@ function renderizar(d, origem) {
   trocarSvg(el("semana-acumulado"), svgAcumulado(d.semana.acumulado));
 
   // ---- MÊS ----
+  // Metas de receita podem ser por pessoa (painel /metas): o título não cita
+  // um valor único; cada gauge traz a sua
   el("mes-titulo").textContent =
-    `MÊS ${d.mes.mes.slice(5)}/${d.mes.mes.slice(0, 4)} — RECEITA × ${reais(d.mes.porPessoa[0]?.metaCentavos)} · ` +
+    `MÊS ${d.mes.mes.slice(5)}/${d.mes.mes.slice(0, 4)} — RECEITA × META INDIVIDUAL · ` +
     `${d.mes.diasUteisDecorridos} útil(eis) passados · ${d.mes.diasUteisRestantes} restantes`;
-  let totalMes = 0;
   for (const p of d.mes.porPessoa) {
-    totalMes += p.receitaCentavos;
     const card = document.querySelector(`#mes-barras [data-nome="${p.nome}"]`);
     if (!card) continue;
     const fracao = Math.min(1, (p.atingimento ?? 0) / 100);
@@ -543,11 +570,58 @@ function renderizar(d, origem) {
     card.querySelector('[data-campo="pct"]').textContent =
       p.atingimento == null ? "—" : `${Math.round(p.atingimento)}%`;
     animarNumero(card.querySelector('[data-campo="valor"]'), p.receitaCentavos, kReais);
-    card.querySelector('[data-campo="extra"]').textContent =
-      `meta ${kReais(p.metaCentavos)} · faltam ${kReais(p.faltaCentavos)}`;
+    card.querySelector('[data-campo="extra"]').textContent = p.metaCentavos
+      ? `meta ${kReais(p.metaCentavos)} · faltam ${kReais(p.faltaCentavos)}`
+      : "sem meta de receita";
+    // Metas MENSAIS de ligações/leads/matrículas — só o que estiver cadastrado
+    const mensal = [["📞", p.discadas], ["✨", p.leads], ["🎓", p.matriculas]]
+      .filter(([, m]) => m && m.meta != null)
+      .map(([ic, m]) => `<span class="${(m.atingimento ?? 0) >= 100 ? "ok" : ""}">${ic} ${num(m.valor)}/${metaFmt(m.meta)}</span>`)
+      .join(" · ");
+    const alvoMensal = card.querySelector('[data-campo="mensal"]');
+    if (alvoMensal && alvoMensal.dataset.h !== mensal) { alvoMensal.innerHTML = mensal; alvoMensal.dataset.h = mensal; }
   }
-  el("mes-rodape").textContent = `Equipe no mês: ${reais(totalMes)}`;
+  if (d.mes.gerencial) {
+    const card = document.querySelector('#mes-barras [data-nome="Gerencial"]');
+    if (card) {
+      animarNumero(card.querySelector('[data-campo="valor"]'), d.mes.gerencial.receitaCentavos, kReais);
+      card.querySelector('[data-campo="extra"]').textContent =
+        `carteira gerencial · ${num(d.mes.gerencial.matriculas)} matr. · sem meta`;
+    }
+  }
+  const eqMes = d.mes.equipe;
+  el("mes-rodape").textContent = eqMes.metaCentavos
+    ? `Equipe no mês: ${reais(eqMes.receitaCentavos)} de ${reais(eqMes.metaCentavos)} (${Math.round(eqMes.atingimento)}%)` +
+      (eqMes.incluiGerencial ? " · inclui Gerencial" : "")
+    : `Equipe no mês: ${reais(eqMes.receitaCentavos)}` + (eqMes.incluiGerencial ? " · inclui Gerencial" : "");
+
+  // ---- DESTAQUE: falta para a meta da SEMANA (equipe, R$) ----
+  const eq = d.semana.equipe.receita;
+  if (eq && eq.metaCentavos != null) {
+    const bateu = eq.receitaCentavos >= eq.metaCentavos;
+    const valorEl = el("destaque-valor");
+    el("destaque-titulo").textContent = bateu ? "🏆 META DA SEMANA BATIDA 🏆" : "FALTA PARA A META DA SEMANA";
+    animarNumero(valorEl, bateu ? eq.receitaCentavos - eq.metaCentavos : eq.faltaCentavos,
+      (v) => (bateu ? "+" : "") + reais(v));
+    valorEl.classList.toggle("tv-destaque-ok", bateu);
+    const barra = el("destaque-barra");
+    barra.style.width = Math.min(100, eq.atingimento ?? 0) + "%";
+    barra.classList.toggle("fill-ok", bateu);
+    el("destaque-linha").textContent =
+      `${reais(eq.receitaCentavos)} de ${reais(eq.metaCentavos)} · ${Math.round(eq.atingimento ?? 0)}% · dia ${d.semana.diasUteis} de 5`;
+    el("destaque-rodape").textContent = eqMes.metaCentavos
+      ? `Mês: ${reais(eqMes.receitaCentavos)} de ${reais(eqMes.metaCentavos)} · faltam ${reais(eqMes.faltaCentavos)}` +
+        (eq.incluiGerencial ? " · inclui Gerencial" : "")
+      : (eq.incluiGerencial ? "inclui a carteira Gerencial" : "");
+    // (`anterior` já é o payload atual aqui — o cartão guarda o seu próprio)
+    if (destaqueAnterior && destaqueAnterior.de === d.semana.de) {
+      if ((destaqueAnterior.atingimento ?? 0) < 100 && (eq.atingimento ?? 0) >= 100) brilhar(el("visao-destaque"), "tv-glow-meta");
+      else if (destaqueAnterior.receitaCentavos !== eq.receitaCentavos) brilhar(el("visao-destaque"));
+    }
+    destaqueAnterior = { de: d.semana.de, atingimento: eq.atingimento, receitaCentavos: eq.receitaCentavos };
+  }
 }
+let destaqueAnterior = null;
 
 // ---------- Relógio / status ----------
 
@@ -614,8 +688,10 @@ function conectarSse() {
   fonte.onerror = () => { el("tv-push").textContent = "⏱"; el("tv-push").title = "reconectando — polling ativo"; };
   fonte.onmessage = (ev) => {
     let f = null;
-    try { f = JSON.parse(ev.data).fonte; } catch (_) { /* payload inesperado: toast genérico */ }
-    notificarIngestao(f);
+    let tipo = "dados";
+    try { ({ fonte: f = null, tipo = "dados" } = JSON.parse(ev.data)); } catch (_) { /* payload inesperado: toast genérico */ }
+    // "config" (metas/configuração mudaram): só refaz o fetch, sem pulso/toast
+    if (tipo !== "config") notificarIngestao(f);
     atualizar("sse");
   };
   return fonte; // EventSource reconecta sozinho; mantemos uma única instância

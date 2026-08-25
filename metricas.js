@@ -158,6 +158,8 @@ function calcularMetricas(de, ate) {
       },
       matriculas: comMeta(mat.n, metaDe("matriculas_dia")),
       receitaCentavos: mat.receita_centavos,
+      // Meta de receita diária (centavos) × dias úteis — só existe se cadastrada
+      receita: comMeta(mat.receita_centavos, metaDe("receita_dia")),
       conflitosAtribuicao: conflitos.get(p.id)?.n || 0,
     };
   });
@@ -176,6 +178,7 @@ function calcularMetricas(de, ate) {
     matriculas: soma((p) => p.matriculas.valor),
     metaMatriculas: Math.round(soma((p) => p.matriculas.meta || 0) * 10) / 10,
     receitaCentavos: soma((p) => p.receitaCentavos),
+    metaReceitaCentavos: soma((p) => p.receita.meta || 0) || null,
   };
   equipe.taxaAtendimento = equipe.discadas ? pct(equipe.atendidas, equipe.discadas) : null;
   equipe.tmaSeg = equipe.atendidas ? Math.round(equipe.conversaSeg / equipe.atendidas) : null;
@@ -357,6 +360,28 @@ function dadosTvCompleto() {
   );
   const doPainel = (lista) => lista.filter((p) => nomesPainel.has(p.nome));
 
+  // Meta da EQUIPE em R$ (número próprio, cadastrado no painel /metas — não é
+  // a soma das individuais). A receita da equipe soma TODOS os consultores
+  // ativos, independente das flags de TV (quem está oculto continua vendendo;
+  // o número da empresa não pode mentir) + a carteira Gerencial se a
+  // configuração meta_equipe_inclui_gerencial estiver ligada.
+  const incluiGerencial = configBool("meta_equipe_inclui_gerencial");
+  const gerencial = db
+    .prepare("SELECT id, nome FROM pessoas WHERE nome = 'Gerencial' AND tipo = 'canal'")
+    .get() ?? null;
+  const receitaEquipeDe = (porPessoa, canais) =>
+    porPessoa.reduce((s, p) => s + p.receitaCentavos, 0) +
+    (incluiGerencial && gerencial
+      ? canais.find((c) => c.nome === gerencial.nome)?.receita_centavos || 0
+      : 0);
+  const metaEquipe = (valor, receita) => ({
+    metaCentavos: valor ?? null,
+    receitaCentavos: receita,
+    faltaCentavos: valor ? Math.max(0, valor - receita) : null,
+    atingimento: valor ? pct(receita, valor) : null,
+    incluiGerencial,
+  });
+
   // ---- Dia (parcial, com ritmo) ----
   const mDia = calcularMetricas(hoje, hoje);
   const ultimoDadoHoje = db
@@ -459,6 +484,11 @@ function dadosTvCompleto() {
     const meta = metaSemanaDe(m);
     return { valor: m.valor, meta, atingimento: meta ? pct(m.valor, meta) : null };
   };
+  const painelSemana = doPainel(mSemana.porPessoa);
+  const somaPainelSemana = (fn) => painelSemana.reduce((s, p) => s + fn(p), 0);
+  const metaDiscadasSemana = somaPainelSemana((p) => metaSemanaDe(p.ligacoes.discadas) || 0);
+  const gerencialSemana = gerencial
+    ? mSemana.canais.find((c) => c.nome === gerencial.nome) : null;
   const semana = {
     de: semanaDe,
     ate: hoje,
@@ -472,38 +502,44 @@ function dadosTvCompleto() {
       matriculas: comMetaFechada(p.matriculas),
       receitaCentavos: p.receitaCentavos,
     })),
-    equipe: (() => {
-      const lista = doPainel(mSemana.porPessoa);
-      const soma = (fn) => lista.reduce((s, p) => s + fn(p), 0);
-      return {
-        discadas: soma((p) => p.ligacoes.discadas.valor),
-        metaDiscadas: soma((p) => metaSemanaDe(p.ligacoes.discadas) || 0),
-        leadsNovos: soma((p) => p.funil.leadsNovos.valor),
-        metaLeads: soma((p) => metaSemanaDe(p.funil.leadsNovos) || 0),
-        matriculas: soma((p) => p.matriculas.valor),
-        metaMatriculas: Math.round(soma((p) => metaSemanaDe(p.matriculas) || 0) * 10) / 10,
-        vendas: soma((p) => p.funil.vendas),
-        receitaCentavos: soma((p) => p.receitaCentavos),
-      };
-    })(),
+    equipe: {
+      discadas: somaPainelSemana((p) => p.ligacoes.discadas.valor),
+      metaDiscadas: metaDiscadasSemana,
+      leadsNovos: somaPainelSemana((p) => p.funil.leadsNovos.valor),
+      metaLeads: somaPainelSemana((p) => metaSemanaDe(p.funil.leadsNovos) || 0),
+      matriculas: somaPainelSemana((p) => p.matriculas.valor),
+      metaMatriculas: Math.round(somaPainelSemana((p) => metaSemanaDe(p.matriculas) || 0) * 10) / 10,
+      vendas: somaPainelSemana((p) => p.funil.vendas),
+      receitaCentavos: somaPainelSemana((p) => p.receitaCentavos),
+      // Meta da equipe em R$ na semana (cartão de destaque da TV): receita de
+      // TODOS os consultores ativos (+ Gerencial se configurado) × meta própria
+      receita: metaEquipe(
+        metasVigentes(hoje, hoje).padrao.receita_semana_equipe,
+        receitaEquipeDe(mSemana.porPessoa, mSemana.canais)
+      ),
+    },
     rankingLigacoes: doPainel(mSemana.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.ligacoes.discadas.valor }))
       .sort((a, b) => b.valor - a.valor),
     rankingLeads: doPainel(mSemana.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.funil.leadsNovos.valor }))
       .sort((a, b) => b.valor - a.valor),
-    rankingReceita: doPainel(mSemana.porPessoa)
-      .map((p) => ({ nome: p.nome, valor: p.receitaCentavos }))
-      .sort((a, b) => b.valor - a.valor),
-    // Curva acumulada da semana × traçado ideal (45/dia até 225 na sexta);
-    // valores só para os dias já decorridos, ideal desenhado no cliente
+    // Pódio de receita: a carteira Gerencial concorre aqui (só em receita —
+    // nunca em ligações/leads), decisão do usuário 2026-08-25
+    rankingReceita: [
+      ...painelSemana.map((p) => ({ nome: p.nome, valor: p.receitaCentavos })),
+      ...(gerencial ? [{ nome: gerencial.nome, valor: gerencialSemana?.receita_centavos || 0 }] : []),
+    ].sort((a, b) => b.valor - a.valor),
+    // Curva acumulada da semana × traçado ideal (soma das metas diárias de quem
+    // está no painel, até a meta fechada na sexta); valores só para os dias já
+    // decorridos, ideal desenhado no cliente
     acumulado: (() => {
       const decorridos = diasSemanaCheia.filter((di) => di <= hoje);
-      const metaDia = metasVigentes(hoje, hoje).padrao.ligacoes_dia ?? null;
+      const metaSemana = metaDiscadasSemana || null;
       return {
         dias: diasSemanaCheia,
-        metaDia,
-        metaSemana: metaDia != null ? metaDia * 5 : null,
+        metaDia: metaSemana != null ? metaSemana / 5 : null,
+        metaSemana,
         porPessoa: doPainel(mSemana.porPessoa).map((p) => {
           let soma = 0;
           return { nome: p.nome, valores: decorridos.map((di) => (soma += discadasEm(p.nome, di))) };
@@ -529,24 +565,187 @@ function dadosTvCompleto() {
     .prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 AND entra_tv = 1 ORDER BY nome")
     .all();
   const decorridos = diasUteis(mesDe, hoje);
+  // Contagens do mês (ligações/leads/matrículas) × metas MENSAIS próprias
+  // (ligacoes_mes etc.) — independentes das diárias, cadastradas no painel
+  const mMes = calcularMetricas(mesDe, hoje);
+  const mesPorId = new Map(mMes.porPessoa.map((p) => [p.pessoaId, p]));
+  const metaMesDe = (id, ind) => metasMes.porPessoa[id]?.[ind] ?? metasMes.padrao[ind] ?? null;
+  const comMetaMes = (valor, meta) => ({ valor, meta, atingimento: meta ? pct(valor, meta) : null });
   const mes = {
     mes: hoje.slice(0, 7),
     diasUteisDecorridos: decorridos,
     diasUteisRestantes: diasUteis(mesDe, mesFim) - decorridos,
     porPessoa: consultores.map((c) => {
-      const meta = metasMes.porPessoa[c.id]?.receita_mes ?? metasMes.padrao.receita_mes ?? null;
+      const meta = metaMesDe(c.id, "receita_mes");
       const receita = receitaMes.get(c.id) || 0;
+      const m = mesPorId.get(c.id);
       return {
         nome: c.nome,
         receitaCentavos: receita,
         metaCentavos: meta,
         atingimento: meta ? pct(receita, meta) : null,
         faltaCentavos: meta ? Math.max(0, meta - receita) : null,
+        discadas: comMetaMes(m?.ligacoes.discadas.valor || 0, metaMesDe(c.id, "ligacoes_mes")),
+        leads: comMetaMes(m?.funil.leadsNovos.valor || 0, metaMesDe(c.id, "leads_mes")),
+        matriculas: comMetaMes(m?.matriculas.valor || 0, metaMesDe(c.id, "matriculas_mes")),
       };
     }),
+    // Equipe no mês × meta da equipe (todos os consultores ativos + Gerencial
+    // se configurado) e a carteira Gerencial à parte (cartão sem meta)
+    equipe: metaEquipe(metasMes.padrao.receita_mes_equipe, receitaEquipeDe(mMes.porPessoa, mMes.canais)),
+    gerencial: gerencial
+      ? (() => {
+          const g = mMes.canais.find((c) => c.nome === gerencial.nome);
+          return { receitaCentavos: g?.receita_centavos || 0, matriculas: g?.matriculas || 0 };
+        })()
+      : null,
   };
 
   return { atualizadoEm: new Date().toISOString(), jornada: JORNADA, frescor, dia, semana, mes, funil };
 }
 
-module.exports = { diasUteis, metasVigentes, calcularMetricas, saudeDosDados, dadosTvCompleto };
+// ---------- Metas: leitura estruturada para o painel /metas ----------
+// Indicadores por escopo. Os "_dia" mandam em HOJE/SEMANA/relatórios
+// (× dias úteis), os "_mes" na visão MÊS da TV; os "_equipe" são o alvo
+// próprio da equipe em R$ (nunca a soma das individuais).
+const INDICADORES = {
+  dia: { ligacoes: "ligacoes_dia", leads: "leads_dia", matriculas: "matriculas_dia", receita: "receita_dia" },
+  mes: { ligacoes: "ligacoes_mes", leads: "leads_mes", matriculas: "matriculas_mes", receita: "receita_mes" },
+  equipe: { semana: "receita_semana_equipe", mes: "receita_mes_equipe" },
+};
+const INDICADORES_RECEITA = new Set(["receita_dia", "receita_mes", "receita_semana_equipe", "receita_mes_equipe"]);
+
+function configBool(chave) {
+  return db.prepare("SELECT valor FROM configuracoes WHERE chave = ?").get(chave)?.valor === "1";
+}
+
+function resumoMetas() {
+  const hoje = isoDia(new Date());
+  const mesDe = hoje.slice(0, 8) + "01";
+  const pessoas = db
+    .prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 ORDER BY nome")
+    .all();
+  const historico = db
+    .prepare(
+      `SELECT m.id, m.pessoa_id, p.nome AS pessoa, m.indicador, m.valor, m.vigente_desde, m.vigente_ate
+       FROM metas m LEFT JOIN pessoas p ON p.id = m.pessoa_id
+       ORDER BY m.vigente_desde DESC, m.id DESC`
+    )
+    .all();
+
+  // Vigente HOJE por (pessoa, indicador): a de vigente_desde mais recente que
+  // cobre a data; "futura" = já cadastrada, começa depois de hoje
+  const vigentes = new Map(); // chave "pessoaId|indicador" → linha
+  const futuras = new Map();
+  for (const m of historico) {
+    const chave = `${m.pessoa_id ?? "padrao"}|${m.indicador}`;
+    if (m.vigente_desde > hoje) {
+      if (!futuras.has(chave) || futuras.get(chave).vigente_desde > m.vigente_desde) futuras.set(chave, m);
+    } else if (m.vigente_ate === null || m.vigente_ate >= hoje) {
+      if (!vigentes.has(chave)) vigentes.set(chave, m); // ordenado DESC: a primeira é a mais recente
+    }
+  }
+  const linha = (m) => (m ? { valor: m.valor, desde: m.vigente_desde, id: m.id } : null);
+  const padrao = {};
+  for (const escopo of ["dia", "mes"]) {
+    for (const ind of Object.values(INDICADORES[escopo])) {
+      padrao[ind] = { vigente: linha(vigentes.get(`padrao|${ind}`)), futura: linha(futuras.get(`padrao|${ind}`)) };
+    }
+  }
+  const porPessoa = {};
+  for (const p of pessoas) {
+    porPessoa[p.id] = {};
+    for (const escopo of ["dia", "mes"]) {
+      for (const ind of Object.values(INDICADORES[escopo])) {
+        const propria = vigentes.get(`${p.id}|${ind}`);
+        porPessoa[p.id][ind] = {
+          valor: propria ? propria.valor : padrao[ind].vigente?.valor ?? null,
+          propria: !!propria,
+          desde: propria ? propria.vigente_desde : padrao[ind].vigente?.desde ?? null,
+          futura: linha(futuras.get(`${p.id}|${ind}`)),
+        };
+      }
+    }
+  }
+  const equipe = {};
+  for (const ind of Object.values(INDICADORES.equipe)) {
+    equipe[ind] = { vigente: linha(vigentes.get(`padrao|${ind}`)), futura: linha(futuras.get(`padrao|${ind}`)) };
+  }
+  // Soma das individuais, para comparar com o alvo da equipe (que é próprio)
+  const somaEfetiva = (ind) => pessoas.reduce((s, p) => s + (porPessoa[p.id][ind].valor || 0), 0);
+  equipe.somaIndividuais = {
+    semanaCentavos: somaEfetiva("receita_dia") * 5,
+    mesCentavos: somaEfetiva("receita_mes"),
+  };
+
+  // Impacto da Gerencial no número da equipe (mês corrente)
+  const mMes = calcularMetricas(mesDe, hoje);
+  const gerencial = mMes.canais.find((c) => c.nome === "Gerencial") || null;
+  const receitaMes = {
+    mes: hoje.slice(0, 7),
+    consultoresCentavos: mMes.equipe.receitaCentavos,
+    gerencialCentavos: gerencial?.receita_centavos || 0,
+    gerencialMatriculas: gerencial?.matriculas || 0,
+    incluiGerencial: configBool("meta_equipe_inclui_gerencial"),
+  };
+
+  return { hoje, indicadores: INDICADORES, receitaIndicadores: [...INDICADORES_RECEITA], pessoas, padrao, porPessoa, equipe, receitaMes, historico };
+}
+
+// Grava uma alteração de metas preservando o histórico: a linha aberta
+// anterior do mesmo (pessoa, indicador) é fechada no dia anterior à nova
+// vigência; nada é apagado (exceção: linha criada com a MESMA data é
+// corrigida/removida — nunca valeu para nenhum dia anterior).
+// `valores`: { indicador → número | null }; null = "sem meta / herdar o
+// padrão a partir da data" (só fecha a linha própria).
+function gravarMetas({ pessoaId, vigenteDesde, valores }) {
+  const diaAnterior = (iso) => {
+    const d = new Date(iso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  };
+  const ultimaDe = db.prepare(
+    `SELECT * FROM metas WHERE indicador = ? AND pessoa_id IS ? ORDER BY vigente_desde DESC, id DESC LIMIT 1`
+  );
+  const fechar = db.prepare("UPDATE metas SET vigente_ate = ? WHERE id = ?");
+  const corrigir = db.prepare("UPDATE metas SET valor = ?, vigente_ate = NULL WHERE id = ?");
+  const apagar = db.prepare("DELETE FROM metas WHERE id = ?");
+  const inserir = db.prepare(
+    "INSERT INTO metas (pessoa_id, indicador, valor, vigente_desde) VALUES (?, ?, ?, ?)"
+  );
+  const mudancas = [];
+  db.transaction(() => {
+    for (const [indicador, valor] of Object.entries(valores)) {
+      const ultima = ultimaDe.get(indicador, pessoaId);
+      if (ultima && ultima.vigente_desde > vigenteDesde) {
+        const erro = new Error(
+          `${indicador}: já existe vigência a partir de ${ultima.vigente_desde} — escolha essa data ou uma posterior.`
+        );
+        erro.status = 400;
+        throw erro;
+      }
+      const aberta = ultima && (ultima.vigente_ate === null || ultima.vigente_ate >= vigenteDesde);
+      if (valor === null) {
+        if (!aberta) continue; // já não há meta valendo nessa data
+        if (ultima.vigente_desde === vigenteDesde) apagar.run(ultima.id);
+        else fechar.run(diaAnterior(vigenteDesde), ultima.id);
+        mudancas.push({ indicador, de: ultima.valor, para: null });
+        continue;
+      }
+      if (aberta && ultima.valor === valor && ultima.vigente_ate === null) continue; // nada muda
+      if (ultima && ultima.vigente_desde === vigenteDesde) {
+        corrigir.run(valor, ultima.id);
+      } else {
+        if (aberta) fechar.run(diaAnterior(vigenteDesde), ultima.id);
+        inserir.run(pessoaId, indicador, valor, vigenteDesde);
+      }
+      mudancas.push({ indicador, de: aberta ? ultima.valor : null, para: valor });
+    }
+  })();
+  return mudancas;
+}
+
+module.exports = {
+  diasUteis, metasVigentes, calcularMetricas, saudeDosDados, dadosTvCompleto,
+  resumoMetas, gravarMetas, INDICADORES, INDICADORES_RECEITA, configBool,
+};

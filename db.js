@@ -446,6 +446,62 @@ const MIGRACOES = [
       CREATE INDEX idx_feedbacks_periodo ON feedbacks(periodo_id, pessoa_id, id);
     `);
   },
+
+  // 14 — Painel de metas, meta da equipe, Renato de volta e carteira Gerencial
+  // (decisões do usuário, 2026-08-25).
+  // - Renato volta a rankings, metas e feedback (entra_painel = 1,
+  //   entra_feedback = 1). Hirlan/Douglas seguem em OCULTOS_TEMPORARIOS_TV.
+  // - `metas` é recriada com o CHECK ampliado (o SQLite não altera CHECK):
+  //   diário (ligacoes/leads/matriculas/receita _dia), mensal (_mes) e os
+  //   indicadores próprios da EQUIPE em R$ (receita_semana_equipe /
+  //   receita_mes_equipe, sempre pessoa_id NULL — número próprio, não a soma).
+  //   Nenhum valor novo é semeado: quem define é o painel /metas.
+  // - "Gerencial": carteira tipo 'canal' (fora de ranking/metas de ligação).
+  //   Recebe matrículas com wallet contendo "gere" (única grafia real hoje:
+  //   'Gerencial') e oportunidades do Omie cujo vendedor é Paulo ou Gustavo;
+  //   variações de nome completo entram em nomes_alternativos quando surgirem.
+  //   Backfill só onde pessoa_id ainda é NULL (nunca reatribui).
+  // - meta_equipe_inclui_gerencial: se a carteira conta para a meta da equipe
+  //   em R$ (nasce '0'; o painel mostra o impacto e liga sem deploy).
+  () => {
+    db.exec(`
+      UPDATE pessoas SET entra_painel = 1, entra_feedback = 1 WHERE nome = 'Renato';
+
+      CREATE TABLE metas_nova (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        pessoa_id     INTEGER REFERENCES pessoas(id),
+        indicador     TEXT    NOT NULL CHECK (indicador IN (
+                        'ligacoes_dia', 'leads_dia', 'matriculas_dia', 'receita_dia',
+                        'ligacoes_mes', 'leads_mes', 'matriculas_mes', 'receita_mes',
+                        'receita_semana_equipe', 'receita_mes_equipe')),
+        valor         REAL    NOT NULL,
+        vigente_desde TEXT    NOT NULL,
+        vigente_ate   TEXT,
+        UNIQUE (indicador, pessoa_id, vigente_desde)
+      );
+      INSERT INTO metas_nova (id, pessoa_id, indicador, valor, vigente_desde, vigente_ate)
+        SELECT id, pessoa_id, indicador, valor, vigente_desde, vigente_ate FROM metas;
+      DROP TABLE metas;
+      ALTER TABLE metas_nova RENAME TO metas;
+
+      INSERT INTO pessoas (nome, wallet_nome, ativo, entra_feedback, tipo, entra_painel, entra_tv, nomes_alternativos)
+      VALUES ('Gerencial', 'Gerencial', 1, 0, 'canal', 0, 1,
+              json_array('Paulo', 'Gustavo', 'Paulo Orfanelli'));
+
+      UPDATE matriculas
+         SET pessoa_id = (SELECT id FROM pessoas WHERE nome = 'Gerencial' AND tipo = 'canal')
+       WHERE pessoa_id IS NULL
+         AND (lower(wallet) LIKE '%gere%'
+              OR lower(trim(wallet)) IN ('paulo', 'gustavo', 'paulo orfanelli'));
+
+      UPDATE oportunidades
+         SET pessoa_id = (SELECT id FROM pessoas WHERE nome = 'Gerencial' AND tipo = 'canal')
+       WHERE pessoa_id IS NULL
+         AND lower(trim(vendedor)) IN ('paulo', 'gustavo', 'paulo orfanelli');
+
+      INSERT INTO configuracoes (chave, valor) VALUES ('meta_equipe_inclui_gerencial', '0');
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
@@ -466,8 +522,7 @@ for (; versao < MIGRACOES.length; versao++) {
 // Para devolver alguém à TV: REMOVER o nome daqui e reiniciar o servidor — a
 // restauração para 1/1 é automática e atinge apenas quem foi ocultado por esta
 // lista (a chave tv_ocultos_aplicados em `configuracoes` guarda quem foi).
-// Renato (entra_painel = 0 permanente, via migração 11) não passa por aqui e
-// não é tocado.
+// Renato não passa por aqui (voltou ao painel na migração 14) e não é tocado.
 //
 // Decisão de 2026-08-19: Hirlan e Douglas fora da TV temporariamente.
 const OCULTOS_TEMPORARIOS_TV = ["Hirlan", "Douglas"];

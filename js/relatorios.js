@@ -135,7 +135,8 @@ function renderizarPeriodo(r) {
   el.cardsEquipe.innerHTML =
     card("Matrículas (equipe)", eq.matriculas, `meta ${eq.metaMatriculas}`) +
     card("Vendas (oportunidades ganhas)", eq.vendas, "") +
-    card("Receita (equipe)", reais(eq.receitaCentavos), "") +
+    card("Receita (equipe)", reais(eq.receitaCentavos),
+      eq.metaReceitaCentavos ? `meta ${reais(eq.metaReceitaCentavos)} (soma das metas diárias × dias úteis)` : "") +
     card("Ligações discadas", eq.discadas, `meta ${eq.metaDiscadas} · ${eq.atendidas} atendidas (${pctTexto(eq.taxaAtendimento)})`) +
     card("Leads novos", eq.leadsNovos, `meta ${eq.metaLeads}`) +
     card("TMA da equipe", segundos(eq.tmaSeg), "sobre tempo de conversa") +
@@ -164,7 +165,9 @@ function renderizarPeriodo(r) {
       <td>${perdidas}</td><td>${p.funil.vendas}</td>
       <td>${p.matriculas.valor}</td><td>${p.matriculas.meta ?? "—"}</td>
       <td class="${pctClasse(p.matriculas.atingimento)}">${pctTexto(p.matriculas.atingimento)}</td>
-      <td>${reais(p.receitaCentavos)}</td>`;
+      <td>${reais(p.receitaCentavos)}</td>
+      <td>${p.receita?.meta != null ? reais(p.receita.meta) : "—"}</td>
+      <td class="${pctClasse(p.receita?.atingimento)}">${pctTexto(p.receita?.atingimento)}</td>`;
     tr.addEventListener("click", () => mostrarDetalhe(p, d));
     corpo.appendChild(tr);
   }
@@ -175,7 +178,8 @@ function renderizarPeriodo(r) {
     <td>${eq.leadsNovos}</td><td>${eq.metaLeads}</td><td></td>
     <td>${eq.perdidas}</td><td>${eq.vendas}</td>
     <td>${eq.matriculas}</td><td>${eq.metaMatriculas}</td><td></td>
-    <td>${reais(eq.receitaCentavos)}</td></tr>`;
+    <td>${reais(eq.receitaCentavos)}</td>
+    <td>${eq.metaReceitaCentavos ? reais(eq.metaReceitaCentavos) : "—"}</td><td></td></tr>`;
   el.detalhe.classList.add("oculto");
 }
 
