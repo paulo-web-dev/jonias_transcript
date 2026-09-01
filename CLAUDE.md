@@ -105,7 +105,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **14**.
+pelo mesmo caminho). Versão atual: **15**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -157,10 +157,14 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   dígitos (futura chave de cruzamento com matrículas); dinheiro em centavos.
 - `oportunidade_mudancas(id, oportunidade_id, campo fase_atual|status|motivo_conclusao|ticket_centavos, valor_anterior, valor_novo, observado_em, importacao_id)`
   — histórico de mudanças entre importações ("ficou N dias em Qualificação").
-- `turmas(id = classes.id, nome = title, subtitulo = subtitle, start_date, end_date, sincronizado_em)` e
+- `turmas(id = classes.id, nome = title, subtitulo = subtitle, start_date, end_date, unyflex, sincronizado_em)` e
   `matriculas(id = enrollments.id, turma_id, student_id, aluno_* normalizados, wallet, pessoa_id, status, valor_centavos, oportunidade_id, match_metodo, match_confianca, criada_em, sincronizado_em)`
   — cópia local do MySQL por **upsert incremental** (`enrollments.updated_at`
-  desde o último sync, margem de 3 dias; primeiro sync completo; nunca DELETE).
+  desde o último sync, margem de 3 dias; primeiro sync completo; nunca DELETE;
+  **turma que ainda não existe na cópia local recebe todas as matrículas,
+  sem corte incremental** — é assim que uma mudança de filtro traz histórico
+  sem recriar o banco). `turmas.unyflex` (migração 15) é a flag da origem,
+  para separar por SQL a receita das turmas `unyflex = 1`.
   `status = 'canceled'` **não conta como receita**; matrícula com aluno órfão na
   origem é mantida com dados em branco (nunca descartada em silêncio).
 - `metas(id, pessoa_id NULL=padrão, indicador, valor, vigente_desde/ate)` —
@@ -294,6 +298,19 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   `classes.title`/`subtitle` (não "name"); cancelamento é
   `enrollments.status = 'canceled'` (sem `deleted_at`). Timeout de 10s na
   conexão e 30s por query — falha explícita na tela, nunca trava o app.
+  **Filtro de curso válido** (`sincronizacao.js`): turmas `id > 1200 AND
+  status = 'able'`; matrículas de turma `unyflex = 0` entram todas, de turma
+  `unyflex = 1` só com `final_value > 1000` (decisão do usuário, 2026-09-01 —
+  o corte exclui minissérie e assinatura de ticket baixo; na origem o maior
+  valor abaixo do corte é R$ 998 e o menor acima é R$ 1.068, sem matrícula na
+  fronteira). Turma com `unyflex NULL` fica em `turmas` mas sem matrículas.
+  ⚠ **Quebra de comparabilidade (2026-09-01)**: até essa data só entravam
+  turmas `unyflex = 0`. Relatórios e snapshots congelados antes de 2026-09-01
+  **não incluem** as matrículas das turmas `unyflex = 1` e **não são
+  comparáveis** com os gerados depois (impacto medido na origem em
+  2026-09-01: +9 matrículas/R$ 22.450 em jun/26, +3/R$ 4.968 em jul/26,
+  +3/R$ 6.690 em ago/26; recongelar um período recalcula com a regra nova).
+  `turmas.unyflex = 1` permite isolar essa receita por SQL.
 - **Cruzamento matrícula ↔ vendedor/oportunidade** (roda ao fim de cada sync,
   só no SQLite): (a) direta — `wallet` → `pessoas` por nome normalizado exato
   contra `nome` + `nomes_alternativos` (formatos reais do wallet incluídos na
@@ -337,6 +354,9 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   `oportunidades`, `turmas`, `matriculas`, `metas`, `periodos`, `importacoes`
 - Importadores idempotentes com relatório e auditoria; CDR (CSV) e oportunidades
 - Sincronização snapshot do MySQL Unyflex (somente leitura, cópia local)
+- Migração 15 (2026-09-01): turmas `unyflex = 1` entram com matrículas
+  `final_value > 1000`; `turmas.unyflex`; turma nova na cópia local recebe
+  histórico completo no sync (quebra de comparabilidade registrada acima)
 - Tela `/central` (uploads, sync, histórico de ingestões)
 - Migração 5: fonte de oportunidades trocada do Ramper para o **Omie** (.xlsx) —
   modelo fase × status, datas de entrada por fase, `oportunidade_mudancas`,

@@ -18,8 +18,18 @@ const mysql = require("mysql2/promise");
 const db = require("./db.js");
 const { normalizarNome, normalizarTelefone } = require("./importacao.js");
 
-// Filtro de curso válido definido pelo negócio
-const FILTRO_CLASSES = "unyflex = 0 AND id > 1200 AND status = 'able'";
+// Filtro de curso válido definido pelo negócio (turmas: corte de id + status).
+// Até 2026-09-01 só entravam turmas com unyflex = 0. Decisão do usuário nessa
+// data: turmas unyflex = 1 também entram, mas SÓ as matrículas com
+// enrollments.final_value > VALOR_MINIMO_UNYFLEX — o corte de valor exclui
+// minissérie e assinatura de ticket baixo (na origem, o maior valor abaixo do
+// corte era R$ 998 e o menor acima, R$ 1.068 — não há matrícula na fronteira).
+// Isto QUEBRA a comparabilidade com relatórios anteriores (ver CLAUDE.md).
+const FILTRO_TURMAS = "id > 1200 AND status = 'able'";
+const VALOR_MINIMO_UNYFLEX = 1000; // em reais, estrito (> 1000)
+const FILTRO_MATRICULAS =
+  `c.id > 1200 AND c.status = 'able'
+   AND (c.unyflex = 0 OR (c.unyflex = 1 AND e.final_value > ${VALOR_MINIMO_UNYFLEX}))`;
 
 const TIMEOUT_QUERY_MS = 30000; // consulta que passar disso falha explícito, sem travar o app
 const MARGEM_INCREMENTAL_DIAS = 3;
@@ -91,28 +101,41 @@ async function sincronizarMysql(usuarioId) {
   }
 
   const corte = corteIncremental();
+  // Turmas que ainda não existem na cópia local recebem TODAS as matrículas,
+  // ignorando o corte incremental — é o que faz uma mudança de filtro (como a
+  // inclusão das turmas unyflex = 1 em 2026-09-01) trazer o histórico dessas
+  // turmas no primeiro sync após o deploy, sem apagar o banco.
+  const turmasLocais = new Set(db.prepare("SELECT id FROM turmas").all().map((t) => t.id));
   let conexao;
   let turmas;
   let matriculas;
+  let turmasNovas = [];
   try {
     conexao = await mysql.createConnection(cred);
     try {
       [turmas] = await conexao.query({
-        sql: `SELECT id, title, subtitle, start_date, end_date
-              FROM classes WHERE ${FILTRO_CLASSES}`,
+        sql: `SELECT id, title, subtitle, start_date, end_date, unyflex
+              FROM classes WHERE ${FILTRO_TURMAS}`,
         timeout: TIMEOUT_QUERY_MS,
       });
+      turmasNovas = turmas.map((t) => t.id).filter((id) => !turmasLocais.has(id));
+      const clausulaIncremental = !corte
+        ? ""
+        : turmasNovas.length
+          ? `AND (e.updated_at >= ? OR e.classes_id IN (${turmasNovas.map(() => "?").join(",")}))`
+          : "AND e.updated_at >= ?";
       [matriculas] = await conexao.query({
         sql: `SELECT e.id, e.classes_id, e.student_id, e.wallet, e.status,
-                     e.final_value, e.created_at,
+                     e.final_value, e.created_at, c.unyflex AS turma_unyflex,
                      s.name AS aluno_nome, s.email AS aluno_email,
                      s.phone AS aluno_telefone, s.city AS aluno_cidade
               FROM enrollments e
+              JOIN classes c ON c.id = e.classes_id
               LEFT JOIN students s ON s.id = e.student_id
-              WHERE e.classes_id IN (SELECT id FROM classes WHERE ${FILTRO_CLASSES})
-              ${corte ? "AND e.updated_at >= ?" : ""}`,
+              WHERE ${FILTRO_MATRICULAS}
+              ${clausulaIncremental}`,
         timeout: TIMEOUT_QUERY_MS,
-        values: corte ? [corte] : [],
+        values: corte ? [corte, ...turmasNovas] : [],
       });
     } catch (err) {
       throw await enriquecerErroDeColuna(conexao, err);
@@ -158,11 +181,11 @@ async function sincronizarMysql(usuarioId) {
 
   const agora = new Date().toISOString();
   const upsertTurma = db.prepare(
-    `INSERT INTO turmas (id, nome, subtitulo, start_date, end_date, sincronizado_em)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO turmas (id, nome, subtitulo, start_date, end_date, unyflex, sincronizado_em)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET nome = excluded.nome, subtitulo = excluded.subtitulo,
        start_date = excluded.start_date, end_date = excluded.end_date,
-       sincronizado_em = excluded.sincronizado_em`
+       unyflex = excluded.unyflex, sincronizado_em = excluded.sincronizado_em`
   );
   // Upsert que NÃO toca oportunidade_id/match_* — o cruzamento é recalculado
   // depois, mas nunca se perde por causa da cópia.
@@ -188,13 +211,16 @@ async function sincronizarMysql(usuarioId) {
   const resultado = db.transaction(() => {
     for (const t of turmas) {
       upsertTurma.run(t.id, t.title ?? null, t.subtitle ?? null,
-        dataMysqlIso(t.start_date), dataMysqlIso(t.end_date), agora);
+        dataMysqlIso(t.start_date), dataMysqlIso(t.end_date),
+        t.unyflex === null || t.unyflex === undefined ? null : Number(t.unyflex), agora);
     }
     let novas = 0;
     let atualizadas = 0;
     let semAluno = 0;
+    let deTurmasUnyflex = 0; // matrículas do lote vindas de turmas unyflex = 1 (só > corte de valor)
     for (const m of matriculas) {
       if (m.student_id !== null && m.aluno_nome === null) semAluno++; // student_id órfão na origem
+      if (Number(m.turma_unyflex) === 1) deTurmasUnyflex++;
       const criadaEm = dataMysqlIso(m.created_at);
       if (criadaEm) {
         if (!periodoDe || criadaEm < periodoDe) periodoDe = criadaEm;
@@ -250,6 +276,11 @@ async function sincronizarMysql(usuarioId) {
         corte
           ? `Sync incremental: matrículas com updated_at >= ${corte} (último sync menos ${MARGEM_INCREMENTAL_DIAS} dias de margem).`
           : "Primeiro sync: cópia completa das matrículas de turmas válidas.",
+        ...(corte && turmasNovas.length
+          ? [`${turmasNovas.length} turma(s) ainda não existiam na cópia local: matrículas trazidas completas, sem corte incremental.`]
+          : []),
+        `Turmas unyflex = 1 entram só com matrículas de valor > R$ ${VALOR_MINIMO_UNYFLEX} ` +
+          `(regra desde 2026-09-01): ${deTurmasUnyflex} matrícula(s) dessas turmas neste lote.`,
         periodoDe
           ? `Período coberto neste lote (created_at): ${periodoDe} a ${periodoAte}.`
           : "Nenhuma matrícula nova ou alterada neste lote.",

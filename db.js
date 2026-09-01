@@ -502,6 +502,17 @@ const MIGRACOES = [
       INSERT INTO configuracoes (chave, valor) VALUES ('meta_equipe_inclui_gerencial', '0');
     `);
   },
+
+  // 15 — Turmas unyflex = 1 passam a entrar na cópia local (decisão do
+  // usuário, 2026-09-01), só com matrículas de final_value > R$ 1.000 (o
+  // corte fica em sincronizacao.js). A coluna guarda a flag da origem para
+  // que a receita nova seja separável por SQL ("de onde veio este número");
+  // nasce NULL e é preenchida no próximo sync (as turmas vêm inteiras sempre).
+  // QUEBRA DE COMPARABILIDADE: relatórios/snapshots anteriores a esta data não
+  // incluem essas matrículas — ver CLAUDE.md.
+  () => {
+    db.exec("ALTER TABLE turmas ADD COLUMN unyflex INTEGER;");
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
