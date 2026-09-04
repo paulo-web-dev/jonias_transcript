@@ -911,6 +911,9 @@ body {
 .meta-celula-propria { background: rgba(108, 123, 255, 0.08); }
 .meta-propria { color: var(--acento-2); }
 .meta-futura { color: var(--amarelo); }
+.meta-projecao { color: var(--amarelo); display: block; margin-top: 0.15rem; }
+.tabela-metas td.meta-celula-vazia { text-align: center; }
+.campo .meta-projecao { font-size: 0.78rem; }
 .metas-historico { margin-top: 1.5rem; }
 .metas-historico summary { cursor: pointer; list-style: revert; }
 .tabela-metricas tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
@@ -1036,6 +1039,19 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
 }
 .tv-fill.fill-ok { background: linear-gradient(135deg, var(--verde), var(--acento-2)); }
 .tv-linha-detalhe { font-size: 1.5vw; color: var(--texto-suave); }
+/* RECEITA DA SEMANA: uma coluna só, linhas mais altas e barra na largura toda */
+.tv-linhas-largas { gap: 1.3vw; }
+.tv-linhas-largas .tv-linha-nome { font-size: 2.3vw; min-width: 14vw; }
+.tv-linhas-largas .tv-linha-valor b { font-size: 2.9vw; }
+.tv-linhas-largas .tv-linha-valor i { font-size: 1.6vw; }
+.tv-linhas-largas .tv-linha-status { font-size: 1.8vw; }
+.tv-linhas-largas .tv-trilha { height: 2.2vw; }
+.tv-linhas-largas .tv-linha-detalhe { font-size: 1.6vw; }
+/* mais de 5 vendedores: compacta para caber sem rolagem */
+.tv-linhas-largas.tv-linhas-compactas { gap: 0.8vw; }
+.tv-linhas-largas.tv-linhas-compactas .tv-linha-valor b { font-size: 2.4vw; }
+.tv-linhas-largas.tv-linhas-compactas .tv-trilha { height: 1.6vw; margin: 0.2vw 0; }
+.tv-linhas-largas.tv-linhas-compactas .tv-linha-detalhe { font-size: 1.3vw; }
 .tv-sem-dados .tv-trilha, .tv-sem-dados .tv-linha-valor { opacity: 0.35; }
 
 /* Selo do dia sem CDR (só aparece com ?dia=sempre) */

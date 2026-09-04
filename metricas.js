@@ -486,6 +486,21 @@ function dadosTvCompleto() {
   };
   const painelSemana = doPainel(mSemana.porPessoa);
   const somaPainelSemana = (fn) => painelSemana.reduce((s, p) => s + fn(p), 0);
+  // Meta de RECEITA POR SEMANA de cada vendedor (receita_semana, própria ou
+  // padrão) — visão RECEITA DA SEMANA da TV. Número próprio (não é
+  // receita_dia × 5) — migração 16, decisão do usuário 2026-09-04.
+  const metasSemana = metasVigentes(semanaDe, hoje);
+  const metaReceitaSemanaDe = (id) =>
+    metasSemana.porPessoa[id]?.receita_semana ?? metasSemana.padrao.receita_semana ?? null;
+  const receitaComMeta = (p) => {
+    const meta = metaReceitaSemanaDe(p.pessoaId);
+    return {
+      valor: p.receitaCentavos,
+      meta,
+      atingimento: meta ? pct(p.receitaCentavos, meta) : null,
+      faltaCentavos: meta ? Math.max(0, meta - p.receitaCentavos) : null,
+    };
+  };
   const metaDiscadasSemana = somaPainelSemana((p) => metaSemanaDe(p.ligacoes.discadas) || 0);
   const gerencialSemana = gerencial
     ? mSemana.canais.find((c) => c.nome === gerencial.nome) : null;
@@ -501,7 +516,9 @@ function dadosTvCompleto() {
       leads: comMetaFechada(p.funil.leadsNovos),
       matriculas: comMetaFechada(p.matriculas),
       receitaCentavos: p.receitaCentavos,
+      receita: receitaComMeta(p),
     })),
+    metaReceitaPadraoCentavos: metasSemana.padrao.receita_semana ?? null,
     equipe: {
       discadas: somaPainelSemana((p) => p.ligacoes.discadas.valor),
       metaDiscadas: metaDiscadasSemana,
@@ -610,10 +627,14 @@ function dadosTvCompleto() {
 // próprio da equipe em R$ (nunca a soma das individuais).
 const INDICADORES = {
   dia: { ligacoes: "ligacoes_dia", leads: "leads_dia", matriculas: "matriculas_dia", receita: "receita_dia" },
+  semana: { receita: "receita_semana" },
   mes: { ligacoes: "ligacoes_mes", leads: "leads_mes", matriculas: "matriculas_mes", receita: "receita_mes" },
   equipe: { semana: "receita_semana_equipe", mes: "receita_mes_equipe" },
 };
-const INDICADORES_RECEITA = new Set(["receita_dia", "receita_mes", "receita_semana_equipe", "receita_mes_equipe"]);
+const ESCOPOS_PESSOA = ["dia", "semana", "mes"];
+const INDICADORES_RECEITA = new Set([
+  "receita_dia", "receita_semana", "receita_mes", "receita_semana_equipe", "receita_mes_equipe",
+]);
 
 function configBool(chave) {
   return db.prepare("SELECT valor FROM configuracoes WHERE chave = ?").get(chave)?.valor === "1";
@@ -647,7 +668,7 @@ function resumoMetas() {
   }
   const linha = (m) => (m ? { valor: m.valor, desde: m.vigente_desde, id: m.id } : null);
   const padrao = {};
-  for (const escopo of ["dia", "mes"]) {
+  for (const escopo of ESCOPOS_PESSOA) {
     for (const ind of Object.values(INDICADORES[escopo])) {
       padrao[ind] = { vigente: linha(vigentes.get(`padrao|${ind}`)), futura: linha(futuras.get(`padrao|${ind}`)) };
     }
@@ -655,7 +676,7 @@ function resumoMetas() {
   const porPessoa = {};
   for (const p of pessoas) {
     porPessoa[p.id] = {};
-    for (const escopo of ["dia", "mes"]) {
+    for (const escopo of ESCOPOS_PESSOA) {
       for (const ind of Object.values(INDICADORES[escopo])) {
         const propria = vigentes.get(`${p.id}|${ind}`);
         porPessoa[p.id][ind] = {
@@ -671,10 +692,11 @@ function resumoMetas() {
   for (const ind of Object.values(INDICADORES.equipe)) {
     equipe[ind] = { vigente: linha(vigentes.get(`padrao|${ind}`)), futura: linha(futuras.get(`padrao|${ind}`)) };
   }
-  // Soma das individuais, para comparar com o alvo da equipe (que é próprio)
+  // Soma das individuais, para comparar com o alvo da equipe (que é próprio):
+  // semana = Σ receita_semana efetiva de cada consultor; mês = Σ receita_mes
   const somaEfetiva = (ind) => pessoas.reduce((s, p) => s + (porPessoa[p.id][ind].valor || 0), 0);
   equipe.somaIndividuais = {
-    semanaCentavos: somaEfetiva("receita_dia") * 5,
+    semanaCentavos: somaEfetiva("receita_semana"),
     mesCentavos: somaEfetiva("receita_mes"),
   };
 

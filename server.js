@@ -243,7 +243,7 @@ app.get("/api/metas", (req, res) => res.json(resumoMetas()));
 app.put("/api/metas", (req, res) => {
   const { pessoaId = null, escopo, vigenteDesde, valores } = req.body || {};
   const mapa = INDICADORES[escopo];
-  if (!mapa) return res.status(400).json({ error: "Escopo inválido — use dia, mes ou equipe." });
+  if (!mapa) return res.status(400).json({ error: "Escopo inválido — use dia, semana, mes ou equipe." });
   if (!RE_DATA.test(vigenteDesde || "") || isNaN(new Date(vigenteDesde + "T00:00:00Z"))) {
     return res.status(400).json({ error: "Data de vigência inválida — use YYYY-MM-DD." });
   }

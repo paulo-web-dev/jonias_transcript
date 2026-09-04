@@ -1,8 +1,10 @@
 "use strict";
 
-// Painel de metas: padrão da equipe, metas próprias por consultor (diárias e
-// mensais) e meta da EQUIPE em R$ (semana/mês). Toda edição cria uma vigência
-// nova a partir da data escolhida — o passado nunca é sobrescrito.
+// Painel de metas: padrão da equipe, metas próprias por consultor (diárias,
+// semanais — só receita — e mensais) e meta da EQUIPE em R$ (semana/mês). Toda
+// edição cria uma vigência nova a partir da data escolhida — o passado nunca é
+// sobrescrito. A meta semanal de receita mostra ao lado quanto projeta no mês
+// (× 52 ÷ 12) frente à meta mensal — só informação; nada é ajustado sozinho.
 
 const el = {
   cardsEquipe: document.getElementById("cards-equipe"),
@@ -56,11 +58,16 @@ const hojeIso = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-const ROTULO_ESCOPO = { dia: "Diária", mes: "Mensal" };
+const ROTULO_ESCOPO = { dia: "Diária", semana: "Semanal", mes: "Mensal" };
+const ESCOPOS_PESSOA = ["dia", "semana", "mes"];
+// Semanas por mês (52 ÷ 12) — projeção informativa da meta semanal de receita
+const SEMANAS_POR_MES = 52 / 12;
+const projecaoMes = (semanaCentavos) => Math.round(semanaCentavos * SEMANAS_POR_MES);
 const ROTULO_CAMPO = { ligacoes: "📞 Ligações", leads: "✨ Leads", matriculas: "🎓 Matrículas", receita: "💰 Receita (R$)",
   semana: "💰 Meta da SEMANA (R$)", mes: "💰 Meta do MÊS (R$)" };
 const ROTULO_INDICADOR = {
   ligacoes_dia: "Ligações/dia", leads_dia: "Leads/dia", matriculas_dia: "Matrículas/dia", receita_dia: "Receita/dia",
+  receita_semana: "Receita/semana",
   ligacoes_mes: "Ligações/mês", leads_mes: "Leads/mês", matriculas_mes: "Matrículas/mês", receita_mes: "Receita/mês",
   receita_semana_equipe: "EQUIPE — receita/semana", receita_mes_equipe: "EQUIPE — receita/mês",
 };
@@ -81,10 +88,32 @@ function celulaMeta(ind, info, comHeranca) {
   return `<td class="${classe}"><strong>${valorFmt(ind, valor)}</strong><br>${sub}</td>`;
 }
 
+// Valor efetivo (centavos) de um indicador de receita na fonte (pessoa ou padrão)
+const valorEfetivo = (fonte, ind, comHeranca) =>
+  (comHeranca ? fonte[ind]?.valor : fonte[ind]?.vigente?.valor) ?? null;
+
+// Texto da projeção mensal da meta semanal de receita × meta mensal vigente
+function textoProjecao(semanaCentavos, mesCentavos) {
+  if (semanaCentavos == null) return "";
+  const proj = projecaoMes(semanaCentavos);
+  const mes = mesCentavos == null
+    ? "meta mensal não definida"
+    : `meta mensal: ${reais(mesCentavos)} (${proj > mesCentavos ? "+" : ""}${reais(proj - mesCentavos)})`;
+  return `projeta ≈ ${reais(proj)}/mês (× 52 ÷ 12) · ${mes}`;
+}
+
 function linhaEscopo(escopo, fonte, comHeranca, pessoaId, nome) {
   const inds = dados.indicadores[escopo];
-  const celulas = ["ligacoes", "leads", "matriculas", "receita"]
-    .map((campo) => celulaMeta(inds[campo], fonte[inds[campo]], comHeranca)).join("");
+  const celulas = ["ligacoes", "leads", "matriculas", "receita"].map((campo) => {
+    if (!inds[campo]) return `<td class="texto-suave meta-celula meta-celula-vazia">—</td>`;
+    let celula = celulaMeta(inds[campo], fonte[inds[campo]], comHeranca);
+    if (escopo === "semana" && campo === "receita") {
+      const proj = textoProjecao(valorEfetivo(fonte, "receita_semana", comHeranca),
+        valorEfetivo(fonte, "receita_mes", comHeranca));
+      if (proj) celula = celula.replace(/<\/td>$/, `<br><small class="meta-projecao">${proj}</small></td>`);
+    }
+    return celula;
+  }).join("");
   return `<tr>
     <td class="celula-nome">${ROTULO_ESCOPO[escopo]}</td>${celulas}
     <td><button class="btn btn-secundario btn-mini" data-editar="${escopo}" data-pessoa="${pessoaId ?? ""}"
@@ -107,7 +136,7 @@ function render() {
   };
   const rm = dados.receitaMes;
   el.cardsEquipe.innerHTML =
-    equipeCard("receita_semana_equipe", "Meta da equipe — SEMANA", eq.somaIndividuais.semanaCentavos, "receita/dia × 5") +
+    equipeCard("receita_semana_equipe", "Meta da equipe — SEMANA", eq.somaIndividuais.semanaCentavos, "receita/semana de cada um") +
     equipeCard("receita_mes_equipe", "Meta da equipe — MÊS", eq.somaIndividuais.mesCentavos, "receita/mês de cada um") +
     card(`Equipe em ${rm.mes.slice(5)}/${rm.mes.slice(0, 4)} (realizado)`,
       reais(rm.consultoresCentavos + (rm.incluiGerencial ? rm.gerencialCentavos : 0)),
@@ -124,16 +153,15 @@ function render() {
   el.btnGerencial.dataset.inclui = rm.incluiGerencial ? "1" : "0";
   el.btnGerencial.disabled = false;
 
-  el.tabelaPadrao.querySelector("tbody").innerHTML =
-    linhaEscopo("dia", dados.padrao, false, null, "Padrão da equipe") +
-    linhaEscopo("mes", dados.padrao, false, null, "Padrão da equipe");
+  el.tabelaPadrao.querySelector("tbody").innerHTML = ESCOPOS_PESSOA
+    .map((escopo) => linhaEscopo(escopo, dados.padrao, false, null, "Padrão da equipe")).join("");
 
   el.blocosPessoas.innerHTML = dados.pessoas.map((p) => `
     <div class="fonte-card metas-pessoa">
       <div class="fonte-cabecalho"><h3>${escapeHtml(p.nome)}</h3></div>
       <div class="tabela-scroll"><table class="tabela-metricas tabela-metas">
         <thead><tr><th>Escopo</th><th>📞 Ligações</th><th>✨ Leads</th><th>🎓 Matrículas</th><th>💰 Receita</th><th></th></tr></thead>
-        <tbody>${linhaEscopo("dia", dados.porPessoa[p.id], true, p.id, p.nome)}${linhaEscopo("mes", dados.porPessoa[p.id], true, p.id, p.nome)}</tbody>
+        <tbody>${ESCOPOS_PESSOA.map((escopo) => linhaEscopo(escopo, dados.porPessoa[p.id], true, p.id, p.nome)).join("")}</tbody>
       </table></div>
     </div>`).join("");
 
@@ -180,9 +208,12 @@ function abrirModal(escopo, pessoaId, nome) {
       placeholder = padrao != null ? `padrão: ${ehReceita(ind) ? padrao / 100 : padrao}` : "sem padrão";
     } else atual = dados.padrao[ind].vigente?.valor ?? null;
     const valorInput = atual == null ? "" : ehReceita(ind) ? atual / 100 : atual;
+    const projecao = escopo === "semana" && campo === "receita"
+      ? `<small class="meta-projecao" id="projecao-semana"></small>` : "";
     return `<label class="campo"><span>${ROTULO_CAMPO[campo]}</span>
-      <input type="number" min="0" step="any" data-campo="${campo}" value="${valorInput}" placeholder="${placeholder}" /></label>`;
+      <input type="number" min="0" step="any" data-campo="${campo}" value="${valorInput}" placeholder="${placeholder}" />${projecao}</label>`;
   }).join("");
+  atualizarProjecaoModal();
   el.campoDesde.value = hojeIso();
   el.modalErro.classList.add("oculto");
   el.modal.classList.remove("oculto");
@@ -192,6 +223,29 @@ function abrirModal(escopo, pessoaId, nome) {
 function fecharModal() {
   el.modal.classList.add("oculto");
   edicao = null;
+}
+
+// Projeção ao vivo no modal da meta semanal: o valor digitado (ou o herdado,
+// se em branco) × 52 ÷ 12 frente à meta mensal efetiva da pessoa/padrão
+function atualizarProjecaoModal() {
+  const alvo = document.getElementById("projecao-semana");
+  if (!alvo || !edicao) return;
+  const input = el.modalCampos.querySelector('input[data-campo="receita"]');
+  if (!input) return;
+  const digitado = input.value.trim();
+  let semanaCentavos;
+  if (digitado === "") {
+    semanaCentavos = edicao.pessoaId !== null ? dados.padrao.receita_semana.vigente?.valor ?? null : null;
+  } else {
+    const n = Number(digitado.replace(",", "."));
+    semanaCentavos = Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
+  }
+  const mesCentavos = edicao.pessoaId !== null
+    ? dados.porPessoa[edicao.pessoaId].receita_mes.valor
+    : dados.padrao.receita_mes.vigente?.valor ?? null;
+  alvo.textContent = semanaCentavos == null
+    ? "Sem valor: nada a projetar."
+    : (digitado === "" ? "herdando o padrão — " : "") + textoProjecao(semanaCentavos, mesCentavos);
 }
 
 async function confirmar() {
@@ -242,6 +296,7 @@ el.modal.addEventListener("click", (ev) => { if (ev.target === el.modal) fecharM
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && edicao) fecharModal(); });
 el.btnConfirmar.addEventListener("click", confirmar);
 el.modalCampos.addEventListener("keydown", (ev) => { if (ev.key === "Enter") confirmar(); });
+el.modalCampos.addEventListener("input", atualizarProjecaoModal);
 
 el.btnGerencial.addEventListener("click", async () => {
   const novo = el.btnGerencial.dataset.inclui !== "1";

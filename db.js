@@ -513,6 +513,40 @@ const MIGRACOES = [
   () => {
     db.exec("ALTER TABLE turmas ADD COLUMN unyflex INTEGER;");
   },
+
+  // 16 — Meta de RECEITA POR SEMANA por vendedor (decisão do usuário,
+  // 2026-09-04): indicador `receita_semana` (centavos, pessoa_id NULL =
+  // padrão herdado), mesma vigência das outras metas, editável em /metas
+  // (escopo "semana") e base da visão RECEITA DA SEMANA da TV. `metas` é
+  // recriada porque o SQLite não altera CHECK.
+  // Seed: R$ 20.000/semana para todos desde a data da decisão.
+  // INCONSISTÊNCIA CONHECIDA (não corrigir aqui): R$ 20.000 × 52 ÷ 12 ≈
+  // R$ 86.667/mês, acima da meta mensal vigente de R$ 75.000. O painel
+  // /metas mostra a projeção ao lado do campo; a decisão é do usuário.
+  () => {
+    db.exec(`
+      CREATE TABLE metas_nova (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        pessoa_id     INTEGER REFERENCES pessoas(id),
+        indicador     TEXT    NOT NULL CHECK (indicador IN (
+                        'ligacoes_dia', 'leads_dia', 'matriculas_dia', 'receita_dia',
+                        'receita_semana',
+                        'ligacoes_mes', 'leads_mes', 'matriculas_mes', 'receita_mes',
+                        'receita_semana_equipe', 'receita_mes_equipe')),
+        valor         REAL    NOT NULL,
+        vigente_desde TEXT    NOT NULL,
+        vigente_ate   TEXT,
+        UNIQUE (indicador, pessoa_id, vigente_desde)
+      );
+      INSERT INTO metas_nova (id, pessoa_id, indicador, valor, vigente_desde, vigente_ate)
+        SELECT id, pessoa_id, indicador, valor, vigente_desde, vigente_ate FROM metas;
+      DROP TABLE metas;
+      ALTER TABLE metas_nova RENAME TO metas;
+
+      INSERT INTO metas (pessoa_id, indicador, valor, vigente_desde)
+        VALUES (NULL, 'receita_semana', 2000000, '2026-09-04');
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });

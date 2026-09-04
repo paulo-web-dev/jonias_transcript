@@ -334,7 +334,8 @@ function proximaCelebracao() {
 
 // ---------- Rotação entre visões ----------
 
-const VISOES = ["dia", "destaque", "semana", "mes"];
+const VISOES = ["dia", "destaque", "semana", "receita", "mes"];
+let receitaAvisada = false;
 let visoesAtivas = [];
 let visaoAtual = 0;
 let destaqueAvisado = false;
@@ -347,10 +348,19 @@ function aplicarVisoes(d) {
     destaqueAvisado = true;
     console.log("[tv] cartão 'falta para a meta da semana' fora da rotação: meta da equipe (semana) não cadastrada em /metas");
   }
+  // RECEITA DA SEMANA (% e falta por vendedor) só entra com meta de receita
+  // semanal cadastrada para alguém do painel (receita_semana, painel /metas)
+  const temReceita = d.semana.porPessoa.some((p) => p.receita?.meta != null);
+  if (!temReceita && !receitaAvisada) {
+    receitaAvisada = true;
+    console.log("[tv] visão RECEITA DA SEMANA fora da rotação: nenhuma meta de receita semanal (receita_semana) cadastrada em /metas");
+  }
   const telas = [];
   if (mostrarDia) telas.push("dia");
-  telas.push("semana", "mes");
-  // destaque intercalado: HOJE → cartão → SEMANA → cartão → MÊS → cartão
+  telas.push("semana");
+  if (temReceita) telas.push("receita");
+  telas.push("mes");
+  // destaque intercalado: HOJE → cartão → SEMANA → cartão → RECEITA → cartão → MÊS → cartão
   const novas = temDestaque ? telas.flatMap((t) => [t, "destaque"]) : telas;
   const fixoValido = FIXO && novas.includes(FIXO) ? FIXO : null;
   visoesAtivas = fixoValido ? [fixoValido] : novas;
@@ -359,7 +369,7 @@ function aplicarVisoes(d) {
   mostrarVisao(visoesAtivas[visaoAtual]);
 }
 
-const NOMES_VISAO = { dia: "HOJE", semana: "SEMANA", mes: "MÊS", destaque: "META DA SEMANA" };
+const NOMES_VISAO = { dia: "HOJE", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", destaque: "META DA SEMANA" };
 
 function mostrarVisao(nome) {
   for (const v of VISOES) el("visao-" + v).classList.toggle("tv-ativa", v === nome);
@@ -394,6 +404,8 @@ let ultimaAtualizacao = null;
 function montar(d) {
   montarLinhas(el("dia-linhas"), d.dia.porPessoa.map((p) => p.nome), true);
   montarLinhas(el("semana-linhas"), d.semana.porPessoa.map((p) => p.nome), false);
+  montarLinhas(el("receita-linhas"), d.semana.porPessoa.map((p) => p.nome), false);
+  el("receita-linhas").classList.toggle("tv-linhas-compactas", d.semana.porPessoa.length > 5);
   el("mes-barras").innerHTML = d.mes.porPessoa.map((p) => `
     <div class="tv-gauge" data-nome="${p.nome}">
       ${svgGauge()}
@@ -468,16 +480,19 @@ function renderizar(d, origem) {
       const antes = anterior.semana.porPessoa.find((a) => a.nome === p.nome);
       if (!antes) continue;
       if (JSON.stringify(antes) !== JSON.stringify(p)) mudancas.houve = true;
-      const cruzou = (m) => (antes[m].atingimento ?? 0) < 100 && (p[m].atingimento ?? 0) >= 100;
+      const cruzou = (m) => ((antes[m]?.atingimento ?? 0) < 100) && ((p[m]?.atingimento ?? 0) >= 100);
       mudancas[p.nome] = {
         cruzouDiscadas: cruzou("discadas"),
         cruzouMatriculas: cruzou("matriculas"),
+        cruzouReceita: cruzou("receita"),
         mudou: JSON.stringify(antes) !== JSON.stringify(p),
+        mudouReceita: JSON.stringify(antes.receita) !== JSON.stringify(p.receita),
       };
       if (mesmaSemana) {
         if (cruzou("discadas")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.discadas.valor)} ligações — meta da semana!`);
         if (cruzou("leads")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.leads.valor)} leads — meta da semana!`);
         if (cruzou("matriculas")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.matriculas.valor)} matrículas — meta da semana!`);
+        if (cruzou("receita")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${reais(p.receita.valor)} — meta de receita da semana!`);
       }
     }
   }
@@ -553,6 +568,37 @@ function renderizar(d, origem) {
   atualizarPodio(el("podio-leads"), d.semana.rankingLeads, num);
   atualizarPodio(el("podio-rec"), d.semana.rankingReceita, kReais);
   trocarSvg(el("semana-acumulado"), svgAcumulado(d.semana.acumulado));
+
+  // ---- RECEITA DA SEMANA: % atingido e falta para a meta semanal de cada
+  // vendedor (receita_semana própria ou padrão; número grande, barra longa) ----
+  {
+    const metas = d.semana.porPessoa.map((p) => p.receita?.meta).filter((m) => m != null);
+    const todasIguais = metas.length && metas.every((m) => m === metas[0]);
+    el("receita-titulo").textContent =
+      `RECEITA DA SEMANA · ${todasIguais ? `meta ${reais(metas[0])} por vendedor` : "meta própria por vendedor"}` +
+      ` · dia ${d.semana.diasUteis} de 5`;
+    for (const p of d.semana.porPessoa) {
+      const linha = document.querySelector(`#receita-linhas [data-nome="${p.nome}"]`);
+      if (!linha || !p.receita) continue;
+      const r = p.receita;
+      const a = r.atingimento;
+      const semMeta = r.meta == null;
+      atualizarLinha(linha, {
+        semDados: false,
+        principal: r.valor,
+        formatar: reais,
+        meta: semMeta ? null : reais(r.meta),
+        pct: a,
+        status: semMeta ? "sem meta" : a >= 100 ? "✓ meta" : `${Math.round(a)}%`,
+        statusClasse: semMeta || !r.valor ? "status-neutro"
+          : a >= 100 ? "status-adiantado" : a >= 70 ? "status-no_ritmo" : "status-atrasado",
+        detalhe: semMeta ? "meta de receita semanal não cadastrada"
+          : a >= 100 ? `✓ ${reais(r.valor - r.meta)} acima da meta` : `faltam ${reais(r.faltaCentavos)}`,
+        mudou: mudancas[p.nome]?.mudouReceita,
+        cruzouMeta: mudancas[p.nome]?.cruzouReceita,
+      });
+    }
+  }
 
   // ---- MÊS ----
   // Metas de receita podem ser por pessoa (painel /metas): o título não cita
