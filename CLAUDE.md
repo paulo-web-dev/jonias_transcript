@@ -105,7 +105,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **15**.
+pelo mesmo caminho). Versão atual: **17**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -122,8 +122,18 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 - `pessoas(id, nome, ramal UNIQUE, crm_user_id UNIQUE, wallet_nome UNIQUE, ativo, entra_feedback, nomes_alternativos)`
   — unifica os identificadores dos consultores; `nomes_alternativos` é um JSON
   array com os nomes completos como aparecem no "Vendedor" do Omie; seed com os
-  6 atuais (`crm_user_id` do Frederico pendente; **Renato voltou a rankings,
-  metas e feedback na migração 14** — flags 1/1/1). `tipo`: consultor | canal;
+  6 originais + **Eduardo (migração 17, 2026-09-04)** — "Andrey Eduardo Dudek"
+  no wallet/Vendedor, exibido como Eduardo, ramal 2001, flags 1/1/1, metas
+  padrão (`crm_user_id` do Eduardo e do Frederico pendentes; **Renato voltou a
+  rankings, metas e feedback na migração 14** — flags 1/1/1). ⚠ **Ramal 2001 consolidado no Eduardo SEM vigência
+  (2026-09-04)**: o ramal era do Hirlan (que ficou sem ramal e segue em
+  `OCULTOS_TEMPORARIOS_TV`); a migração 17 reatribuiu TODO o histórico de
+  `ligacoes.ramal = '2001'` ao Eduardo, inclusive as ligações de agosto que
+  apareciam como do Hirlan (250 no banco local; o número de produção sai no log
+  do deploy). Relatórios/snapshots congelados antes dessa data guardam essas
+  ligações no Hirlan e **não batem** com um recálculo — terceira quebra de
+  comparabilidade, ao lado da taxa de atendimento e das turmas `unyflex = 1`.
+  `tipo`: consultor | canal;
   `entra_painel` controla as visões de prospecção da TV (dia/semana/rankings);
   `entra_tv = 0` oculta de TODAS as visões da TV, mês incluído. As duas flags
   são só da TV — relatórios internos ignoram. Canais: **Unyflex** (balcão) e
@@ -168,15 +178,21 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   `status = 'canceled'` **não conta como receita**; matrícula com aluno órfão na
   origem é mantida com dados em branco (nunca descartada em silêncio).
 - `metas(id, pessoa_id NULL=padrão, indicador, valor, vigente_desde/ate)` —
-  indicadores (CHECK, migração 14): diários `ligacoes_dia|leads_dia|
+  indicadores (CHECK, migração 16): diários `ligacoes_dia|leads_dia|
   matriculas_dia|receita_dia` (mandam em HOJE/SEMANA da TV e nos relatórios,
-  × dias úteis), mensais `ligacoes_mes|leads_mes|matriculas_mes|receita_mes`
+  × dias úteis), **semanal `receita_semana`** (por vendedor, número próprio —
+  não é receita_dia × 5; visão RECEITA DA SEMANA da TV, escopo `semana` em
+  `/metas`), mensais `ligacoes_mes|leads_mes|matriculas_mes|receita_mes`
   (visão MÊS da TV) e da EQUIPE `receita_semana_equipe|receita_mes_equipe`
   (sempre `pessoa_id NULL`; alvo próprio, **não** a soma das individuais).
   Receita sempre em centavos. Seed: 45/14/1,3 por dia e receita_mes =
-  7.500.000 (R$ 75.000/mês por consultor) desde 2026-01-01; os demais nascem
-  vazios e são definidos no painel `/metas`. `pessoa_id NULL` = padrão herdado
-  por quem não tem meta própria. **Vigência**: editar cria linha nova a partir
+  7.500.000 (R$ 75.000/mês por consultor) desde 2026-01-01, receita_semana =
+  2.000.000 (R$ 20.000/semana) desde 2026-09-04; os demais nascem vazios e
+  são definidos no painel `/metas`. ⚠ **Inconsistência conhecida e
+  deliberadamente não corrigida (2026-09-04)**: R$ 20.000/semana × 52 ÷ 12 ≈
+  R$ 86.667/mês, acima da meta mensal de R$ 75.000 — `/metas` mostra essa
+  projeção ao lado do campo (célula e modal, ao vivo); a decisão é do usuário.
+  `pessoa_id NULL` = padrão herdado por quem não tem meta própria. **Vigência**: editar cria linha nova a partir
   da data escolhida e fecha a aberta anterior em `vigente_ate = data − 1`
   (`gravarMetas` em `metricas.js`); nada é apagado (exceção: linha da MESMA
   data é corrigida/removida — nunca valeu para dia anterior); data anterior à
@@ -208,9 +224,9 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
 | `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
-| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 45), `?fixo=dia\|semana\|mes`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
+| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 45), `?fixo=dia\|semana\|receita\|mes\|destaque`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
-| `GET /api/metas`, `PUT /api/metas`, `PUT /api/metas/config` | painel `/metas` (`resumoMetas()`): padrão vigente, valor efetivo por consultor (própria ou herdada, com "desde" e vigência futura), meta da equipe + soma das individuais, receita do mês com/sem Gerencial, histórico. PUT `{pessoaId: null\|id, escopo: dia\|mes\|equipe, vigenteDesde, valores: {ligacoes, leads, matriculas, receita \| semana, mes}}` — campo ausente não mexe, `null`/"" = sem meta (pessoa: volta a herdar), reais → centavos; data inválida/retroativa, escopo equipe com pessoa, consultor inexistente → 400/404. `/config` `{incluiGerencial: bool}`. Ambos emitem SSE `{tipo:"config"}` — a TV refaz o fetch em silêncio (sem pulso/toast) |
+| `GET /api/metas`, `PUT /api/metas`, `PUT /api/metas/config` | painel `/metas` (`resumoMetas()`): padrão vigente, valor efetivo por consultor (própria ou herdada, com "desde" e vigência futura), meta da equipe + soma das individuais, receita do mês com/sem Gerencial, histórico. PUT `{pessoaId: null\|id, escopo: dia\|semana\|mes\|equipe, vigenteDesde, valores: {ligacoes, leads, matriculas, receita \| receita (semana) \| semana, mes}}` — campo ausente não mexe, `null`/"" = sem meta (pessoa: volta a herdar), reais → centavos; data inválida/retroativa, escopo equipe com pessoa, consultor inexistente → 400/404. `/config` `{incluiGerencial: bool}`. Ambos emitem SSE `{tipo:"config"}` — a TV refaz o fetch em silêncio (sem pulso/toast) |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -357,6 +373,9 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - Migração 15 (2026-09-01): turmas `unyflex = 1` entram com matrículas
   `final_value > 1000`; `turmas.unyflex`; turma nova na cópia local recebe
   histórico completo no sync (quebra de comparabilidade registrada acima)
+- Migração 16 (2026-09-04): indicador `receita_semana` (R$ 20.000/semana por
+  vendedor) — ver `metas`. Migração 17 (2026-09-04): vendedor Eduardo e ramal
+  2001 consolidado nele sem vigência (quebra de comparabilidade em `pessoas`)
 - Tela `/central` (uploads, sync, histórico de ingestões)
 - Migração 5: fonte de oportunidades trocada do Ramper para o **Omie** (.xlsx) —
   modelo fase × status, datas de entrada por fase, `oportunidade_mudancas`,
@@ -376,8 +395,14 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - Períodos congelados com versões (`periodo_snapshots`) — tela `/relatorios`
 - Tela `/saude` (frescor, wallets/vendedores sem match, matrículas sem
   oportunidade, conquistadas sem matrícula, conflitos, alunos órfãos)
-- Painel de TV 2.0 `/tv?token=` — **rotação automática** entre três visões
-  (crossfade + indicador): **HOJE** (barras discadas × meta com ritmo projetado
+- Painel de TV 2.0 `/tv?token=` — **rotação automática** entre quatro visões
+  (crossfade + indicador; a quarta, **RECEITA DA SEMANA**, entrou em
+  2026-09-04 entre SEMANA e MÊS — por vendedor, R$ feito em número grande
+  "/ R$ 20.000", barra na largura toda, % e "faltam R$ X"; meta =
+  `receita_semana` própria ou padrão; sai da rotação sem meta cadastrada;
+  `?fixo=receita`; cruzar a meta entra no mesmo tratamento de celebração das
+  metas da semana; `.tv-linhas-compactas` automático com mais de 5 nomes):
+  **HOJE** (barras discadas × meta com ritmo projetado
   pela hora do último dado do CDR, jornada 09:00–18:00; comparativo "terça passada: N" por consultor para discadas/leads/matrículas — métrica sem dado no mesmo dia da semana anterior é omitida em silêncio; a visão **sai da
   rotação** quando não há CDR do dia — `?dia=sempre` força com selo), **SEMANA**
   (**meta FECHADA — decisão de 2026-08-19**: 225 ligações, 70 leads e 6,5
@@ -419,7 +444,9 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   discreto no rodapé arma com um clique (única interação da tela).
   `pessoas.entra_painel = 0` fica fora de dia/semana/rankings (receita só no
   mês); `entra_tv = 0` some da TV inteira, mês e "Equipe no mês" incluídos.
-  Estado atual: Renato de volta a tudo (migração 14, 2026-08-25);
+  Estado atual: Renato de volta a tudo (migração 14, 2026-08-25); Eduardo
+  desde a migração 17 (2026-09-04), herdeiro do ramal 2001 e de todo o seu
+  histórico;
   **Hirlan e Douglas fora da TV temporariamente desde
   2026-08-19, agora via `OCULTOS_TEMPORARIOS_TV` no fim do `db.js`** — lista
   aplicada em TODO startup, depois das migrações, então sobrevive a banco
@@ -438,13 +465,16 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   atendidas, taxas por consultor, 176 leads na janela, 4 vendas)
 - **Painel de metas `/metas` e meta da equipe (2026-08-25, migração 14)**:
   tela autenticada para editar, sem SQL, o padrão da equipe e a meta própria
-  de cada consultor (diária e mensal: ligações, leads, matrículas, R$) com
+  de cada consultor (diária e mensal: ligações, leads, matrículas, R$;
+  semanal: só receita, desde 2026-09-04, com projeção mensal × 52 ÷ 12 ao lado
+  para comparar com a meta mensal — informação, nunca ajuste automático) com
   vigência por data (histórico preservado), mais a meta da EQUIPE em R$
   (semana e mês — número próprio, soma das individuais mostrada ao lado só
   para comparar) e o toggle da Gerencial. Na TV: **cartão de destaque "FALTA
   PARA A META DA SEMANA"** (R$ gigante + barra `.tv-trilha-grande` + "R$ feito
   de R$ meta · % · dia N de 5" + linha do mês) **intercalado entre CADA tela da
-  rotação** (HOJE → cartão → SEMANA → cartão → MÊS → cartão), com duração
+  rotação** (HOJE → cartão → SEMANA → cartão → RECEITA → cartão → MÊS →
+  cartão), com duração
   própria `?destaque=N` s (padrão 12; as telas seguem com `?giro`), `?fixo=
   destaque` para fixar; sem meta da semana cadastrada o cartão sai da rotação
   (log no console). Receita da equipe para a meta = TODOS os consultores

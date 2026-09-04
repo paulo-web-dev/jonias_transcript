@@ -547,6 +547,42 @@ const MIGRACOES = [
         VALUES (NULL, 'receita_semana', 2000000, '2026-09-04');
     `);
   },
+
+  // 17 — Vendedor novo Eduardo e ramal 2001 consolidado nele (decisão do
+  // usuário, 2026-09-04).
+  // - "Andrey Eduardo Dudek" no wallet das matrículas e no Vendedor do Omie;
+  //   exibido como "Eduardo". Metas: herda o padrão. Flags 1/1/1.
+  // - O ramal 2001 era do Hirlan. SEM vigência por data (decisão explícita):
+  //   TODO o histórico de ligações do 2001 passa a ser do Eduardo, inclusive
+  //   as ligações antigas que apareciam como do Hirlan. Hirlan fica sem ramal
+  //   e continua em OCULTOS_TEMPORARIOS_TV.
+  // QUEBRA DE COMPARABILIDADE: snapshots congelados antes desta data guardam
+  // as ligações do 2001 no Hirlan; um recálculo/recongelamento as põe no
+  // Eduardo — ver CLAUDE.md. O número de ligações reatribuídas sai no log.
+  () => {
+    db.exec(`
+      UPDATE pessoas SET ramal = NULL WHERE nome = 'Hirlan';
+      INSERT INTO pessoas (nome, ramal, crm_user_id, wallet_nome, ativo, entra_feedback,
+                           tipo, entra_painel, entra_tv, nomes_alternativos)
+      VALUES ('Eduardo', '2001', NULL, 'Eduardo', 1, 1, 'consultor', 1, 1,
+              json_array('Andrey Eduardo Dudek', 'Andrey Eduardo', 'Eduardo Dudek', 'Andrey Dudek'));
+    `);
+    const eduardo = db.prepare("SELECT id FROM pessoas WHERE nome = 'Eduardo' AND tipo = 'consultor'").get().id;
+    const ligacoes = db
+      .prepare("UPDATE ligacoes SET pessoa_id = ? WHERE ramal = '2001' AND (pessoa_id IS NULL OR pessoa_id != ?)")
+      .run(eduardo, eduardo).changes;
+    console.log(`migração 17: ${ligacoes} ligação(ões) do ramal 2001 reatribuída(s) ao Eduardo (histórico consolidado, sem vigência).`);
+    // Backfill idempotente só onde ainda não há atribuição (mesmo padrão da Gerencial)
+    const nomes = ["andrey eduardo dudek", "andrey eduardo", "eduardo dudek", "andrey dudek", "eduardo"];
+    const marcadores = nomes.map(() => "?").join(", ");
+    const mat = db
+      .prepare(`UPDATE matriculas SET pessoa_id = ? WHERE pessoa_id IS NULL AND lower(trim(wallet)) IN (${marcadores})`)
+      .run(eduardo, ...nomes).changes;
+    const opo = db
+      .prepare(`UPDATE oportunidades SET pessoa_id = ? WHERE pessoa_id IS NULL AND lower(trim(vendedor)) IN (${marcadores})`)
+      .run(eduardo, ...nomes).changes;
+    if (mat || opo) console.log(`migração 17: backfill Eduardo — ${mat} matrícula(s), ${opo} oportunidade(s).`);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });
