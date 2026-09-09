@@ -21,7 +21,8 @@ form.addEventListener("submit", async (evento) => {
     });
 
     if (resposta.ok) {
-      location.href = "/aulas";
+      const dados = await resposta.json().catch(() => ({}));
+      location.href = dados.destino || "/aulas"; // vendedor → /prospeccao; senha temporária → /trocar-senha
       return;
     }
     const corpo = await resposta.json().catch(() => ({}));

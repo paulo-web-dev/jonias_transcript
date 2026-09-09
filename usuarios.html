@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Usuários — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">usuários e carteiras</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <a href="/relatorios" class="btn-topo">📊 Relatórios</a>
+      <a href="/metas" class="btn-topo">🎯 Metas</a>
+      <a href="/territorio" class="btn-topo">🗺 Território</a>
+      <a href="/prospeccao" class="btn-topo">📇 Prospecção</a>
+      <a href="/saude" class="btn-topo">🩺 Saúde dos dados</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista territorio-pagina">
+    <h2 class="secao-titulo">Usuários <span class="chip" id="chip-usuarios">—</span></h2>
+    <p class="texto-suave">Admin vê tudo. Vendedor é ligado a um consultor e vê só as regionais da carteira dele — o corte é no
+      servidor. A senha inicial é gerada aqui, mostrada uma única vez, e o usuário é obrigado a trocá-la no primeiro
+      acesso. Rate limit, argon2id e sessão de 12 h valem para todos.</p>
+    <div class="lista-controles usuarios-novo">
+      <input type="text" id="u-login" class="campo-select" placeholder="login (minúsculas, sem espaço)" autocomplete="off" />
+      <input type="text" id="u-nome" class="campo-select" placeholder="nome" />
+      <select id="u-papel" class="campo-select"><option value="vendedor">vendedor</option><option value="admin">admin</option></select>
+      <select id="u-pessoa" class="campo-select"><option value="">consultor (pessoas)…</option></select>
+      <button type="button" class="btn-mini btn-primario" id="btn-criar-usuario">+ Criar usuário</button>
+    </div>
+    <div id="senha-inicial" class="conflito-aviso oculto"></div>
+    <div class="tabela-scroll">
+      <table class="tabela-metricas" id="tabela-usuarios">
+        <thead><tr><th style="text-align:left">Login</th><th style="text-align:left">Nome</th><th>Papel</th><th style="text-align:left">Consultor</th><th>Ativo</th><th>Senha</th><th>Último acesso</th><th style="text-align:left">Ações</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h2 class="secao-titulo">Carteiras por regional</h2>
+    <p class="texto-suave">Cada regional tem no máximo um <strong>titular</strong> e quantos <strong>apoios</strong> quiser; todos veem e
+      editam a regional inteira. Ao definir o titular, os contatos <em>sem consultor</em> da regional passam para ele
+      (com histórico); quem já tinha consultor não muda. Salva ao alterar.</p>
+    <div class="tabela-scroll">
+      <table class="tabela-metricas" id="tabela-carteiras">
+        <thead><tr><th>UF</th><th style="text-align:left">Regional</th><th>Contatos</th><th>Sem consultor</th><th style="text-align:left">Titular</th><th style="text-align:left">Apoios</th><th style="text-align:left">Resultado</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/usuarios.js"></script>
+</body>
+</html>

@@ -398,7 +398,7 @@ function renderizarEstado(a) {
   lateral.innerHTML = cardsForaDoMapa(a);
   grade.appendChild(lateral);
   area.appendChild(grade);
-  const pr = a.estados.find((e) => e.uf === "PR"), sc = a.estados.find((e) => e.uf === "SC");
+  const pr = a.estados?.find((e) => e.uf === "PR"), sc = a.estados?.find((e) => e.uf === "SC");
   const clientesPr = a.municipios.filter((m) => m.uf === "PR" && m.temHistorico).length;
   const clientesSc = a.municipios.filter((m) => m.uf === "SC" && m.temHistorico).length;
   const comparacao = `<p class="mapa-comparacao">PR: ${pr.municipiosComDado} municípios com dado no período (${clientesPr} clientes de ${a.municipios.filter((m) => m.uf === "PR").length}) ·
@@ -443,6 +443,59 @@ function cardsForaDoMapa(a) {
       <ul class="lista-simples territorio-lista-uf">${listaUf || "<li><span class='texto-suave'>nenhuma</span></li>"}</ul></div>
     ${card("Sem município", reais(sem.receitaCentavos), `${inteiro(sem.matriculas)} matrículas: ` + (sem.porGrupo.map((g) => `${inteiro(g.matriculas)} ${rotuloGrupo[g.grupo] || g.grupo}`).join(" · ") || "nenhuma"))}
     ${card("Total do período", reais(a.total.receitaCentavos), `${inteiro(a.total.matriculas)} matrículas — mesmo filtro de /relatorios`)}`;
+}
+
+// ---- nível CARTEIRA (vendedor): só as regionais dele, resto do estado esmaecido ----
+function renderizarCarteira(a) {
+  breadcrumb([{ rotulo: "Minhas regionais" }]);
+  const municipioDe = new Map(a.municipios.map((m) => [m.codigo, m]));
+  const regionalDe = new Map(a.regionais.map((r) => [r.id, r]));
+  const escala = escalaQuantis(a.regionais.map(valorDoModo));
+  const estilo = (codigo) => {
+    const m = municipioDe.get(codigo);
+    if (!m) return { cor: COR_FORA, opacidade: 0.35, classe: "mapa-fora" };
+    if (modo === "prospeccao") return { cor: m.temHistorico ? COR_CLIENTE : COR_NUNCA, opacidade: m.temHistorico ? 0.9 : 0.75 };
+    const r = regionalDe.get(m.regionalPrincipalId);
+    return r ? { cor: escala.cor(valorDoModo(r)), classe: "mapa-regional-" + r.id } : { cor: COR_NEUTRA };
+  };
+  const area = document.getElementById("mapa-area");
+  area.innerHTML = "";
+  const grade = document.createElement("div");
+  grade.className = "mapa-grade mapa-grade-estado";
+  for (const uf of a.escopo.ufs) {
+    const codigos = a.municipios.filter((m) => m.uf === uf).map((m) => m.codigo);
+    if (!codigos.length || !malha.grupos[uf]) continue;
+    const rotulos = a.regionais.filter((r) => r.uf === uf).map((r) => {
+      const b = bboxDe(a.municipios.filter((m) => m.regionalPrincipalId === r.id).map((m) => m.codigo));
+      return b ? { x: b.x + b.w / 2, y: b.y + b.h / 2, texto: r.sigla, classe: "mapa-rotulo-regional", tamanho: 0.02 } : null;
+    }).filter(Boolean);
+    const svg = montarSvg(uf, viewBoxTexto(bboxDe(codigos), 0.35), estilo, { rotulos });
+    const bloco = document.createElement("div");
+    bloco.className = "mapa-bloco";
+    const soma = a.regionais.filter((r) => r.uf === uf).reduce((s, r) => ({ receitaCentavos: s.receitaCentavos + r.receitaCentavos, matriculas: s.matriculas + r.matriculas }), { receitaCentavos: 0, matriculas: 0 });
+    bloco.innerHTML = `<div class="mapa-titulo"><strong>${uf === "PR" ? "Paraná" : uf === "SC" ? "Santa Catarina" : uf}</strong><span>${reais(soma.receitaCentavos)} · ${inteiro(soma.matriculas)} matrículas nas suas regionais</span></div>`;
+    bloco.appendChild(svg);
+    grade.appendChild(bloco);
+  }
+  const lateral = document.createElement("div");
+  lateral.className = "mapa-lateral";
+  lateral.innerHTML = a.regionais.map((r) => card(`${r.uf} · ${r.sigla}`, reais(r.receitaCentavos),
+    `${inteiro(r.matriculas)} matrículas · ${inteiro(r.alunos)} alunos · ${r.municipiosComDado}/${r.municipios} municípios com dado · <a href="${hashDe("regional", r.id)}">abrir</a>`)).join("") ||
+    `<div class="metrica-card"><span class="metrica-rotulo">Sem regional</span><span class="metrica-extra">Seu usuário ainda não tem carteira atribuída — peça ao administrador.</span></div>`;
+  grade.appendChild(lateral);
+  area.appendChild(grade);
+  area.insertAdjacentHTML("beforeend", modo === "prospeccao"
+    ? legendaHtml([{ cor: COR_CLIENTE, texto: "já cliente" }, { cor: COR_NUNCA, texto: "nunca comprou" }])
+    : legendaEscala(escala, formatarModo, "zero"));
+  ligarInteracaoMapa(area, (codigo) => {
+    const m = municipioDe.get(codigo);
+    const r = m && regionalDe.get(m.regionalPrincipalId);
+    return m ? { html: r ? `<strong>${escapeHtml(r.sigla)}</strong><br>${tooltipMunicipio(m)}` : tooltipMunicipio(m), destaque: r ? `.mapa-regional-${r.id}` : null, clique: () => (r ? irPara("regional", r.id) : irPara("municipio", codigo)) } : null;
+  });
+  const linhas = a.regionais.map((r) => `<tr data-ir="regional" data-id="${r.id}"><td>${escapeHtml(r.uf)}</td><td class="celula-nome">${escapeHtml(r.sigla)}<div class="texto-suave territorio-descricao">${escapeHtml(r.nome || "")}</div></td>
+    <td>${r.municipiosComDado}/${r.municipios}</td><td>${inteiro(r.matriculas)}</td><td>${inteiro(r.alunos)}</td><td>${reais(r.receitaCentavos)}</td><td>${ticket(r.receitaCentavos, r.matriculas)}</td></tr>`).join("");
+  document.getElementById("nivel-conteudo").innerHTML = `<h2 class="secao-titulo">Minhas regionais <span class="texto-suave territorio-dica">clique para abrir</span></h2>
+    ${tabela([{ t: "UF" }, { t: "Regional", esq: true }, { t: "Mun. c/ dado" }, { t: "Matrículas" }, { t: "Alunos" }, { t: "Receita" }, { t: "Ticket" }], linhas || semDado("Nenhuma regional atribuída."))}`;
 }
 
 // ---- nível REGIONAL (também usado como pano de fundo do MUNICÍPIO) ----
@@ -494,7 +547,7 @@ function renderizarRegional(a, id) {
   lateral.className = "mapa-lateral";
   const nunca = proprios.filter((m) => !m.temHistorico);
   lateral.innerHTML = `
-    ${card("Receita", reais(r.receitaCentavos), `${pctDe(r.receitaCentavos, a.estados.find((e) => e.uf === r.uf)?.receitaCentavos)} do ${r.uf} · ${inteiro(r.matriculas)} matrículas · ${inteiro(r.alunos)} alunos · ticket ${ticket(r.receitaCentavos, r.matriculas)}`)}
+    ${card("Receita", reais(r.receitaCentavos), `${pctDe(r.receitaCentavos, a.estados?.find((e) => e.uf === r.uf)?.receitaCentavos)} do ${r.uf} · ${inteiro(r.matriculas)} matrículas · ${inteiro(r.alunos)} alunos · ticket ${ticket(r.receitaCentavos, r.matriculas)}`)}
     ${card("Municípios", `${r.municipiosComDado}/${r.municipios}`, `com dado no período / na regional (principal) · <strong>${proprios.filter((m) => m.temHistorico).length} já compraram</strong>`)}
     <div class="metrica-card territorio-card-lista mapa-card-vazio"><span class="metrica-rotulo">Nunca compraram — o próximo cliente</span>
       <span class="metrica-valor">${inteiro(nunca.length)}</span>
@@ -648,8 +701,16 @@ async function renderizarRota() {
   el.classList.add("territorio-carregando");
   try {
     const [a] = await Promise.all([agregado(), carregarMalha()]);
-    renderizarConferencia(a.conferencia);
     esconderTooltip();
+    if (a.escopo) {
+      // Vendedor: o servidor mandou só as regionais dele — sem estados, totais ou conferência
+      document.getElementById("conferencia").innerHTML = "";
+      if (rota.nivel === "regional" && a.regionais.some((r) => r.id === rota.id)) renderizarRegional(a, rota.id);
+      else if (rota.nivel === "municipio") await renderizarMunicipio(a, rota.id);
+      else renderizarCarteira(a);
+      return;
+    }
+    renderizarConferencia(a.conferencia);
     if (rota.nivel === "regional") renderizarRegional(a, rota.id);
     else if (rota.nivel === "municipio") await renderizarMunicipio(a, rota.id);
     else renderizarEstado(a);
@@ -1014,7 +1075,8 @@ document.getElementById("btn-sair").addEventListener("click", async () => {
 (async () => {
   try {
     await carregarReferencia();
-    await Promise.all([renderizarRota(), carregarPendencias()]);
+    // pendências/cobertura são do admin: para o vendedor o servidor responde 403 e a seção fica oculta
+    await Promise.all([renderizarRota(), carregarPendencias().catch(() => {})]);
   } catch (e) {
     avisar("⚠ Não foi possível carregar. (" + e.message + ")", true);
   }

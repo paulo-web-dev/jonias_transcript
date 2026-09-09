@@ -27,9 +27,27 @@
   <main class="pagina-lista territorio-pagina prospeccao-pagina">
     <nav class="prospeccao-abas" role="tablist">
       <button type="button" class="aba-btn ativo" data-aba="trabalho">Trabalho</button>
-      <button type="button" class="aba-btn" data-aba="cores">Cores e status <span class="chip" id="chip-cores">—</span></button>
-      <button type="button" class="aba-btn" data-aba="cobertura">Cobertura da carga</button>
+      <button type="button" class="aba-btn so-admin" data-aba="gerencial">Gerencial</button>
+      <button type="button" class="aba-btn so-admin" data-aba="cores">Cores e status <span class="chip" id="chip-cores">—</span></button>
+      <button type="button" class="aba-btn so-admin" data-aba="cobertura">Cobertura da carga</button>
     </nav>
+    <p id="aviso-escopo" class="conflito-aviso oculto"></p>
+
+    <!-- ===================== GERENCIAL (admin) ===================== -->
+    <section id="aba-gerencial" class="aba-painel oculto">
+      <h2 class="secao-titulo">Drill down por regional</h2>
+      <p class="texto-suave">Quem é o responsável, quantos contatos existem, quantos foram trabalhados (têm data de contato ou registro
+        no histórico), quantos nunca foram tocados e a data do último contato. Clique na regional para abrir a carteira
+        na aba Trabalho. Carteiras são definidas em <a href="/usuarios">/usuarios</a>.</p>
+      <div class="grade-metricas" id="gerencial-cards"></div>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-gerencial">
+          <thead><tr><th>UF</th><th style="text-align:left">Regional</th><th style="text-align:left">Titular</th><th style="text-align:left">Apoios</th><th>Contatos</th><th>Tel. válido</th><th>Sem consultor</th><th>Trabalhados</th><th>%</th><th>Nunca tocados</th><th>Inexistentes</th><th>Último contato</th><th>Editados</th></tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+    </section>
 
     <!-- ===================== TRABALHO ===================== -->
     <section id="aba-trabalho" class="aba-painel">
@@ -179,6 +197,7 @@
   </main>
 
   <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/nav.js"></script>
   <script src="/js/prospeccao.js"></script>
 </body>
 </html>

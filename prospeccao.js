@@ -23,6 +23,7 @@ const {
   registrarOcorrencia, registrarImportacaoErro, avisarSeReimportacao,
 } = require("./importacao.js");
 const { cruzarMunicipios, normalizarCidade, indiceMunicipios } = require("./territorio.js");
+const { clausulaMunicipios, dentroDoEscopo } = require("./escopo.js");
 
 const UFS_ACEITAS = ["PR", "SC", "SP", "RS", "MS", "MG", "RJ", "ES", "GO", "MT", "DF", "BA"];
 const MAX_LINHAS_CABECALHO = 5;
@@ -1113,11 +1114,131 @@ async function exportarXlsx(uf, ids, escopo = null) {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+// ======================================================================
+// Fase 3 — papel vendedor: lista enxuta de status, carteiras por regional
+// (titular + apoios) e drill down gerencial do admin
+// ======================================================================
+
+// Para o vendedor: só o que a tela de trabalho precisa (hex, nome, significado)
+function listarCoresEnxuto() {
+  return db.prepare(
+    `SELECT cor_hex hex, status_nome statusNome, significado, origem, ignorar FROM cores_prospeccao
+     WHERE status_nome IS NOT NULL AND ignorar = 0 ORDER BY ordem, linhas DESC`
+  ).all().map((c) => ({ ...c, ignorar: false }));
+}
+
+function listarCarteiras() {
+  const regionais = db.prepare(
+    `SELECT r.id, r.uf, r.sigla, r.nome,
+            (SELECT COUNT(*) FROM contatos_ativo c JOIN municipios m ON m.codigo_ibge = c.codigo_ibge WHERE m.regional_principal_id = r.id) contatos,
+            (SELECT COUNT(*) FROM contatos_ativo c JOIN municipios m ON m.codigo_ibge = c.codigo_ibge WHERE m.regional_principal_id = r.id AND c.pessoa_id IS NULL) semConsultor
+     FROM regionais r ORDER BY r.uf, r.sigla`
+  ).all();
+  const vinculos = db.prepare(
+    `SELECT ca.regional_id regionalId, ca.pessoa_id pessoaId, ca.papel, p.nome FROM carteiras ca JOIN pessoas p ON p.id = ca.pessoa_id ORDER BY ca.papel, p.nome`
+  ).all();
+  for (const r of regionais) {
+    r.titular = vinculos.find((v) => v.regionalId === r.id && v.papel === "titular") || null;
+    r.apoios = vinculos.filter((v) => v.regionalId === r.id && v.papel === "apoio");
+  }
+  // Pessoas elegíveis: consultores ligados a um usuário vendedor ativo, mais a equipe atual
+  const pessoas = db.prepare(
+    `SELECT DISTINCT p.id, p.nome, (u.id IS NOT NULL) temUsuario FROM pessoas p
+     LEFT JOIN usuarios u ON u.pessoa_id = p.id AND u.papel = 'vendedor' AND u.ativo = 1
+     WHERE p.tipo = 'consultor' AND (u.id IS NOT NULL OR p.nome IN (${CONSULTORES_ATUAIS.map(() => "?").join(",")}))
+     ORDER BY p.nome`
+  ).all(...CONSULTORES_ATUAIS);
+  return { regionais, pessoas };
+}
+
+// Grava titular + apoios de uma regional. Ao definir/trocar o titular, os
+// contatos SEM consultor da regional passam para ele (decisão do usuário) —
+// com uma linha de histórico por contato; nada que já tinha dono muda.
+function gravarCarteira(regionalId, { titularPessoaId, apoios }, usuarioId) {
+  const regional = db.prepare("SELECT id, sigla FROM regionais WHERE id = ?").get(Number(regionalId));
+  if (!regional) throw erro("Regional inexistente.");
+  const titular = titularPessoaId === null || titularPessoaId === undefined || titularPessoaId === "" ? null : Number(titularPessoaId);
+  const listaApoios = [...new Set((Array.isArray(apoios) ? apoios : []).map(Number).filter((n) => Number.isInteger(n) && n !== titular))];
+  for (const id of [titular, ...listaApoios].filter((x) => x !== null)) {
+    if (!db.prepare("SELECT 1 FROM pessoas WHERE id = ? AND tipo = 'consultor'").get(id)) throw erro(`Pessoa ${id} não é um consultor.`);
+  }
+  const agora = new Date().toISOString();
+  let atribuidos = 0;
+  db.transaction(() => {
+    db.prepare("DELETE FROM carteiras WHERE regional_id = ?").run(regional.id);
+    const inserir = db.prepare("INSERT INTO carteiras (regional_id, pessoa_id, papel, criado_em, usuario_id) VALUES (?, ?, ?, ?, ?)");
+    if (titular !== null) inserir.run(regional.id, titular, "titular", agora, usuarioId);
+    for (const id of listaApoios) inserir.run(regional.id, id, "apoio", agora, usuarioId);
+    if (titular !== null) {
+      const semDono = db.prepare(
+        `SELECT c.id FROM contatos_ativo c JOIN municipios m ON m.codigo_ibge = c.codigo_ibge
+         WHERE m.regional_principal_id = ? AND c.pessoa_id IS NULL`
+      ).all(regional.id);
+      // Atribuição em massa NÃO marca editado_em: não é edição de conteúdo, e
+      // marcar bloquearia a reimportação de todas as abas da UF
+      const atualizar = db.prepare("UPDATE contatos_ativo SET pessoa_id = ?, atualizado_em = ? WHERE id = ?");
+      for (const { id } of semDono) {
+        atualizar.run(titular, agora, id);
+        inserirHistorico.run({ contato_id: id, tipo: "edicao", canal: null, campo: "pessoa_id", valor_anterior: null,
+          valor_novo: String(titular), observacao: `atribuído pela carteira da regional ${regional.sigla}`, usuario_id: usuarioId, registrado_em: agora });
+        atribuidos++;
+      }
+    }
+  })();
+  return { atribuidos, carteiras: listarCarteiras() };
+}
+
+// Drill down gerencial (admin): por regional, quem é responsável, quantos
+// contatos existem, quantos foram trabalhados, quantos nunca foram tocados e
+// a data do último contato. "Trabalhado" = tem data de último contato ou
+// registro de contato no histórico.
+function gerencial() {
+  const regionais = db.prepare(
+    `SELECT r.id, r.uf, r.sigla, r.nome,
+            COUNT(c.id) contatos,
+            SUM(c.linha_oculta = 0) visiveis,
+            SUM(c.telefone_valido = 1) telefonesValidos,
+            SUM(c.pessoa_id IS NULL) semConsultor,
+            SUM(c.data_ultimo_contato IS NOT NULL OR EXISTS (SELECT 1 FROM contatos_ativo_historico h WHERE h.contato_id = c.id AND h.tipo = 'contato')) trabalhados,
+            SUM(c.data_ultimo_contato IS NULL AND NOT EXISTS (SELECT 1 FROM contatos_ativo_historico h WHERE h.contato_id = c.id AND h.tipo = 'contato')) nuncaTocados,
+            SUM(c.contato_inexistente = 1) inexistentes,
+            MAX(c.data_ultimo_contato) ultimoContato,
+            SUM(c.editado_em IS NOT NULL) editados
+     FROM regionais r
+     LEFT JOIN municipios m ON m.regional_principal_id = r.id
+     LEFT JOIN contatos_ativo c ON c.codigo_ibge = m.codigo_ibge
+     GROUP BY r.id ORDER BY r.uf, r.sigla`
+  ).all();
+  const vinculos = db.prepare(
+    `SELECT ca.regional_id regionalId, ca.papel, p.nome FROM carteiras ca JOIN pessoas p ON p.id = ca.pessoa_id ORDER BY ca.papel, p.nome`
+  ).all();
+  for (const r of regionais) {
+    r.titular = vinculos.find((v) => v.regionalId === r.id && v.papel === "titular")?.nome || null;
+    r.apoios = vinculos.filter((v) => v.regionalId === r.id && v.papel === "apoio").map((v) => v.nome);
+  }
+  const semRegional = db.prepare(
+    `SELECT uf, COUNT(*) contatos, SUM(pessoa_id IS NULL) semConsultor FROM contatos_ativo
+     WHERE codigo_ibge IS NULL OR codigo_ibge NOT IN (SELECT codigo_ibge FROM municipios WHERE regional_principal_id IS NOT NULL)
+     GROUP BY uf`
+  ).all();
+  const porUf = db.prepare(
+    `SELECT uf, COUNT(*) contatos, SUM(pessoa_id IS NULL) semConsultor,
+            SUM(data_ultimo_contato IS NULL AND NOT EXISTS (SELECT 1 FROM contatos_ativo_historico h WHERE h.contato_id = contatos_ativo.id AND h.tipo = 'contato')) nuncaTocados
+     FROM contatos_ativo GROUP BY uf`
+  ).all();
+  return { regionais, semRegional, porUf, geradoEm: new Date().toISOString() };
+}
+
 module.exports = {
   importarProspeccao,
   coberturaProspeccao,
   listarCores,
   definirStatusCor,
+  // Fase 3
+  listarCoresEnxuto,
+  listarCarteiras,
+  gravarCarteira,
+  gerencial,
   // Fase 2
   payloadTrabalho,
   atualizarContato,

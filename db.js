@@ -821,6 +821,34 @@ const MIGRACOES = [
     console.log(`migração 22: ${casados} contato(s) com consultor atual atribuído (5 nomes); os demais ficam sem consultor.`);
   },
 
+  // 23 — Prospecção, Fase 3 (2026-09-09): papel 'vendedor' com escopo por
+  // regional. usuarios ganha pessoa_id (login ↔ consultor), senha_temporaria
+  // (troca obrigatória no 1º acesso), senha_trocada_em e ultimo_acesso_em.
+  // `papel` continua sem CHECK (recriar usuarios exigiria desligar FK de 8
+  // tabelas) — a validação admin|vendedor é feita no código. carteiras:
+  // regional ↔ vendedor, N:N com no máximo UM titular por regional (índice
+  // parcial); ao definir o titular, os contatos sem consultor da regional
+  // passam para ele (decisão do usuário) — feito na rota, com histórico.
+  () => {
+    db.exec(`
+      ALTER TABLE usuarios ADD COLUMN pessoa_id        INTEGER REFERENCES pessoas(id);
+      ALTER TABLE usuarios ADD COLUMN senha_temporaria INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE usuarios ADD COLUMN senha_trocada_em TEXT;
+      ALTER TABLE usuarios ADD COLUMN ultimo_acesso_em TEXT;
+      CREATE UNIQUE INDEX idx_usuarios_pessoa ON usuarios(pessoa_id) WHERE pessoa_id IS NOT NULL;
+      CREATE TABLE carteiras (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        regional_id INTEGER NOT NULL REFERENCES regionais(id),
+        pessoa_id   INTEGER NOT NULL REFERENCES pessoas(id),
+        papel       TEXT    NOT NULL CHECK (papel IN ('titular', 'apoio')),
+        criado_em   TEXT    NOT NULL,
+        usuario_id  INTEGER REFERENCES usuarios(id),
+        UNIQUE (regional_id, pessoa_id)
+      );
+      CREATE UNIQUE INDEX idx_carteiras_titular ON carteiras(regional_id) WHERE papel = 'titular';
+      CREATE INDEX idx_carteiras_pessoa ON carteiras(pessoa_id);
+    `);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

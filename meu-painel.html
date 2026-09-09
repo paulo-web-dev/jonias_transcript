@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meu painel — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">meu painel</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/prospeccao" class="btn-topo">📇 Prospecção</a>
+      <a href="/territorio" class="btn-topo">🗺 Território</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista">
+    <p class="texto-suave" id="intro">Seus números no período, calculados pelo mesmo motor dos relatórios — só os seus.</p>
+    <div class="lista-controles territorio-filtro">
+      <button type="button" class="btn-mini" data-periodo="mes">este mês</button>
+      <button type="button" class="btn-mini" data-periodo="mes-anterior">mês passado</button>
+      <button type="button" class="btn-mini" data-periodo="semana">esta semana</button>
+      <label class="territorio-periodo">De <input type="date" id="p-de" class="campo-select" /> até <input type="date" id="p-ate" class="campo-select" /></label>
+      <button type="button" class="btn-mini btn-primario" id="btn-aplicar">Aplicar</button>
+      <span class="texto-suave" id="legenda"></span>
+    </div>
+    <div class="grade-metricas" id="cards"></div>
+    <h2 class="secao-titulo">Minhas regionais</h2>
+    <div id="regionais" class="texto-suave">carregando…</div>
+  </main>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/meu-painel.js"></script>
+</body>
+</html>

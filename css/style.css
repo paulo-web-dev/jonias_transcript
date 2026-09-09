@@ -1442,3 +1442,12 @@ col.c-consultor { width: 100px; } col.c-curso { width: 160px; } col.c-obs { widt
 #novo-status-cor { width: 40px; height: 30px; border: 1px solid var(--borda-painel); border-radius: 6px; background: none; padding: 0; cursor: pointer; }
 @media (max-width: 1100px) { .trab-corpo { grid-template-columns: 1fr; } .trab-gaveta { width: auto; } }
 .aba-btn { white-space: nowrap; }
+
+/* ============ Fase 3: papéis, usuários, carteiras ============ */
+.topo-usuario { color: var(--texto-suave); font-size: 0.8rem; align-self: center; margin-right: 0.4rem; white-space: nowrap; }
+.usuarios-novo { flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.senha-inicial-valor { font-size: 1.1rem; font-weight: 700; letter-spacing: 1px; background: rgba(0, 0, 0, 0.35); padding: 0.2rem 0.5rem; border-radius: 6px; margin: 0 0.4rem; user-select: all; }
+.carteira-apoios { white-space: normal; max-width: 420px; }
+.carteira-apoios .trab-flag { margin-right: 0.5rem; }
+.carteira-resultado { white-space: normal; max-width: 260px; font-size: 0.78rem; }
+body[data-papel="vendedor"] .so-admin { display: none !important; }

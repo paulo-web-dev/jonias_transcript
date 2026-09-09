@@ -25,10 +25,13 @@ const { sincronizarMysql, credenciaisMysql } = require("./sincronizacao.js");
 const {
   calcularMetricas, diasUteis, saudeDosDados, dadosTvCompleto,
   resumoMetas, gravarMetas, INDICADORES, INDICADORES_RECEITA, configBool,
+  metricasDaPessoa, resumoMetasDaPessoa,
 } = require("./metricas.js");
 const { prepararFatosFeedback, gerarFeedbackMarkdown } = require("./feedback.js");
 const territorio = require("./territorio.js");
 const prospeccao = require("./prospeccao.js");
+const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
+const { hashSenha, gerarSenhaInicial, validarSenhaNova } = require("./auth.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -87,7 +90,7 @@ function usuarioDaSessao(req) {
   if (!req.session.usuarioId) return null;
   return (
     db
-      .prepare("SELECT id, login, nome, papel FROM usuarios WHERE id = ? AND ativo = 1")
+      .prepare("SELECT id, login, nome, papel, pessoa_id, senha_temporaria FROM usuarios WHERE id = ? AND ativo = 1")
       .get(req.session.usuarioId) || null
   );
 }
@@ -113,7 +116,8 @@ function exigirLoginApi(req, res, next) {
 }
 
 app.get("/login", (req, res) => {
-  if (usuarioDaSessao(req)) return res.redirect("/aulas");
+  const u = usuarioDaSessao(req);
+  if (u) return res.redirect(u.senha_temporaria ? "/trocar-senha" : paginaInicialDe(u));
   res.sendFile(path.join(__dirname, "login.html"));
 });
 
@@ -141,9 +145,17 @@ app.post("/api/login", async (req, res) => {
   }
 
   limparFalhas(chaves);
-  req.session.usuarioId = conta.id;
-  req.session.papel = conta.papel;
-  res.json({ ok: true });
+  db.prepare("UPDATE usuarios SET ultimo_acesso_em = ? WHERE id = ?").run(new Date().toISOString(), conta.id);
+  // Sessão nova a cada login (anti-fixação): o id do cookie muda
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: "Falha ao iniciar a sessão." });
+    req.session.usuarioId = conta.id;
+    req.session.papel = conta.papel;
+    res.json({
+      ok: true, papel: conta.papel, trocarSenha: Boolean(conta.senha_temporaria),
+      destino: conta.senha_temporaria ? "/trocar-senha" : paginaInicialDe(conta),
+    });
+  });
 });
 
 app.post("/api/logout", (req, res) => {
@@ -220,8 +232,27 @@ function emitirEventoTv(fonte, tipo = "dados") {
   }
 }
 
-// Todas as demais rotas /api/* exigem login
-app.use("/api", exigirLoginApi);
+// Todas as demais rotas /api/* exigem login; senha temporária bloqueia tudo
+// exceto a troca; rotas de gestão são só do admin (o vendedor recebe 403 —
+// e as rotas que ele usa filtram por escopo na consulta, ver escopo.js)
+app.use("/api", exigirLoginApi, exigirSenhaTrocada);
+const PREFIXOS_SO_ADMIN = [
+  "/api/importacoes", "/api/sincronizacoes", "/api/config", "/api/periodos", "/api/saude",
+  "/api/usuarios", "/api/carteiras", "/api/prospeccao/cobertura", "/api/prospeccao/gerencial",
+  "/api/prospeccao/status", "/api/territorio/cobertura", "/api/territorio/pendencias",
+  "/api/territorio/apelidos", "/api/resumo",
+];
+app.use("/api", (req, res, next) => {
+  const caminho = req.originalUrl.split("?")[0];
+  const escrita = req.method !== "GET";
+  const soAdmin =
+    PREFIXOS_SO_ADMIN.some((p) => caminho === p || caminho.startsWith(p + "/")) ||
+    (escrita && (caminho === "/api/metas" || caminho.startsWith("/api/metas/"))) ||
+    (escrita && caminho.startsWith("/api/prospeccao/cores")) ||
+    (escrita && /^\/api\/territorio\/municipios\/[^/]+\/principal$/.test(caminho));
+  if (soAdmin) return exigirAdmin(req, res, next);
+  next();
+});
 
 // ---------- Configurações globais (só telas autenticadas) ----------
 
@@ -240,7 +271,11 @@ app.put("/api/config/tv", (req, res) => {
 // Editar NUNCA sobrescreve o passado: cria vigência nova a partir da data
 // escolhida e fecha a anterior no dia antes (ver gravarMetas em metricas.js).
 
-app.get("/api/metas", (req, res) => res.json(resumoMetas()));
+app.get("/api/metas", (req, res) => {
+  const escopo = escopoDe(req.usuario);
+  if (!escopo) return res.json(resumoMetas());
+  res.json(escopo.pessoaId ? resumoMetasDaPessoa(escopo.pessoaId) : { minha: null });
+});
 
 app.put("/api/metas", (req, res) => {
   const { pessoaId = null, escopo, vigenteDesde, valores } = req.body || {};
@@ -306,7 +341,20 @@ app.put("/api/metas/config", (req, res) => {
 
 // ---------- Páginas internas ----------
 
-app.get("/", exigirLoginPagina, (req, res) => res.redirect("/aulas"));
+// Senha temporária: qualquer página interna redireciona para a troca
+app.use(["/aulas", "/aula-ao-vivo", "/aula", "/central", "/relatorios", "/saude", "/metas", "/territorio", "/prospeccao", "/usuarios", "/meu-painel"],
+  exigirLoginPagina, exigirSenhaTrocada);
+
+app.get("/", exigirLoginPagina, (req, res) => res.redirect(req.usuario.senha_temporaria ? "/trocar-senha" : paginaInicialDe(req.usuario)));
+app.get("/trocar-senha", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "trocar-senha.html"))
+);
+app.get("/usuarios", exigirLoginPagina, exigirAdmin, (req, res) =>
+  res.sendFile(path.join(__dirname, "usuarios.html"))
+);
+app.get("/meu-painel", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "meu-painel.html"))
+);
 app.get("/aulas", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "aulas.html"))
 );
@@ -316,16 +364,16 @@ app.get("/aula-ao-vivo", exigirLoginPagina, (req, res) =>
 app.get("/aula", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "aula-view.html"))
 );
-app.get("/central", exigirLoginPagina, (req, res) =>
+app.get("/central", exigirLoginPagina, exigirAdmin, (req, res) =>
   res.sendFile(path.join(__dirname, "central.html"))
 );
-app.get("/relatorios", exigirLoginPagina, (req, res) =>
+app.get("/relatorios", exigirLoginPagina, exigirAdmin, (req, res) =>
   res.sendFile(path.join(__dirname, "relatorios.html"))
 );
-app.get("/saude", exigirLoginPagina, (req, res) =>
+app.get("/saude", exigirLoginPagina, exigirAdmin, (req, res) =>
   res.sendFile(path.join(__dirname, "saude.html"))
 );
-app.get("/metas", exigirLoginPagina, (req, res) =>
+app.get("/metas", exigirLoginPagina, exigirAdmin, (req, res) =>
   res.sendFile(path.join(__dirname, "metas.html"))
 );
 app.get("/territorio", exigirLoginPagina, (req, res) =>
@@ -681,9 +729,11 @@ function responderErroProspeccao(rota, err, res) {
   tratarErro(rota, err, res);
 }
 
+// Todas recebem o escopo do usuário (null = admin): vendedor só alcança as
+// linhas das regionais dele — linha fora do escopo responde 404
 app.get("/api/prospeccao/contatos", (req, res) => {
   try {
-    res.json(prospeccao.payloadTrabalho(req.query.uf, req.usuario));
+    res.json(prospeccao.payloadTrabalho(req.query.uf, req.usuario, escopoDe(req.usuario)));
   } catch (err) {
     responderErroProspeccao("prospeccao/contatos", err, res);
   }
@@ -691,7 +741,7 @@ app.get("/api/prospeccao/contatos", (req, res) => {
 
 app.post("/api/prospeccao/contatos", (req, res) => {
   try {
-    res.status(201).json({ linha: prospeccao.criarContato(req.body || {}, req.usuario.id) });
+    res.status(201).json({ linha: prospeccao.criarContato(req.body || {}, req.usuario.id, escopoDe(req.usuario)) });
   } catch (err) {
     responderErroProspeccao("prospeccao/contatos", err, res);
   }
@@ -699,7 +749,7 @@ app.post("/api/prospeccao/contatos", (req, res) => {
 
 app.patch("/api/prospeccao/contatos/:id", (req, res) => {
   try {
-    res.json(prospeccao.atualizarContato(req.params.id, req.body || {}, req.usuario.id));
+    res.json(prospeccao.atualizarContato(req.params.id, req.body || {}, req.usuario.id, escopoDe(req.usuario)));
   } catch (err) {
     responderErroProspeccao("prospeccao/contatos/:id", err, res);
   }
@@ -707,14 +757,18 @@ app.patch("/api/prospeccao/contatos/:id", (req, res) => {
 
 app.post("/api/prospeccao/contatos/:id/contatos", (req, res) => {
   try {
-    res.status(201).json(prospeccao.registrarContato(req.params.id, req.body || {}, req.usuario.id));
+    res.status(201).json(prospeccao.registrarContato(req.params.id, req.body || {}, req.usuario.id, escopoDe(req.usuario)));
   } catch (err) {
     responderErroProspeccao("prospeccao/contatos/:id/contatos", err, res);
   }
 });
 
 app.get("/api/prospeccao/contatos/:id/historico", (req, res) => {
-  res.json({ historico: prospeccao.historicoDoContato(req.params.id) });
+  try {
+    res.json({ historico: prospeccao.historicoDoContato(req.params.id, escopoDe(req.usuario)) });
+  } catch (err) {
+    responderErroProspeccao("prospeccao/contatos/:id/historico", err, res);
+  }
 });
 
 app.post("/api/prospeccao/status", (req, res) => {
@@ -729,7 +783,7 @@ app.post("/api/prospeccao/status", (req, res) => {
 app.post("/api/prospeccao/exportar", async (req, res) => {
   try {
     const { uf, ids } = req.body || {};
-    const buffer = await prospeccao.exportarXlsx(uf, ids);
+    const buffer = await prospeccao.exportarXlsx(uf, ids, escopoDe(req.usuario));
     const nome = `prospeccao_${String(uf || "").toUpperCase()}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     res.set({
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -739,7 +793,11 @@ app.post("/api/prospeccao/exportar", async (req, res) => {
     responderErroProspeccao("prospeccao/exportar", err, res);
   }
 });
-app.get("/api/prospeccao/cores", (req, res) => res.json({ cores: prospeccao.listarCores() }));
+// Vendedor recebe a lista enxuta (hex, nome, significado): os exemplos e as abas
+// da lista completa trazem contatos de outras regionais
+app.get("/api/prospeccao/cores", (req, res) =>
+  res.json({ cores: req.usuario.papel === "admin" ? prospeccao.listarCores() : prospeccao.listarCoresEnxuto() })
+);
 app.put("/api/prospeccao/cores/:hex", (req, res) => {
   try {
     res.json(prospeccao.definirStatusCor(req.params.hex, req.body || {}, req.usuario.id));
@@ -826,7 +884,11 @@ function validarIntervalo(de, ate, res) {
 app.get("/api/metricas", (req, res) => {
   const { de, ate } = req.query;
   if (!validarIntervalo(de, ate, res)) return;
-  res.json(calcularMetricas(de, ate));
+  const escopo = escopoDe(req.usuario);
+  if (!escopo) return res.json(calcularMetricas(de, ate));
+  // Vendedor: só o bloco dele (filtrado no SQL); sem pessoa ligada → nada
+  if (!escopo.pessoaId) return res.json({ de, ate, minha: null });
+  res.json(metricasDaPessoa(de, ate, escopo.pessoaId));
 });
 
 app.get("/api/periodos", (req, res) => {
@@ -994,6 +1056,130 @@ app.get("/api/saude", (req, res) => {
   res.json(saudeDosDados());
 });
 
+// ---------- Sessão, senha, usuários e carteiras (Fase 3 da prospecção) ----------
+
+app.get("/api/sessao", (req, res) => {
+  const u = req.usuario;
+  const escopo = escopoDe(u);
+  const pessoa = u.pessoa_id ? db.prepare("SELECT id, nome FROM pessoas WHERE id = ?").get(u.pessoa_id) : null;
+  const regionais = escopo
+    ? db.prepare(`SELECT id, uf, sigla, nome FROM regionais WHERE id IN (${escopo.regionais.map(() => "?").join(",") || "NULL"}) ORDER BY uf, sigla`).all(...escopo.regionais)
+    : null;
+  res.json({
+    id: u.id, login: u.login, nome: u.nome || u.login, papel: u.papel, pessoa, trocarSenha: Boolean(u.senha_temporaria),
+    escopo: escopo ? { regionais, ufs: escopo.ufs, municipios: escopo.municipios.size, vazio: escopo.vazio } : null,
+  });
+});
+
+app.post("/api/senha", async (req, res) => {
+  const senhaAtual = String(req.body?.senhaAtual || "");
+  const senhaNova = String(req.body?.senhaNova || "");
+  const conta = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(req.usuario.id);
+  if (!(await verificarSenha(conta.senha_hash, senhaAtual))) {
+    registrarFalha(chavesDeLogin(req.ip, conta.login)); // troca de senha também conta no rate limit
+    return res.status(401).json({ error: "Senha atual incorreta." });
+  }
+  const problema = validarSenhaNova(senhaNova, conta.login);
+  if (problema) return res.status(400).json({ error: problema });
+  if (senhaNova === senhaAtual) return res.status(400).json({ error: "A senha nova precisa ser diferente da atual." });
+  db.prepare("UPDATE usuarios SET senha_hash = ?, senha_temporaria = 0, senha_trocada_em = ? WHERE id = ?")
+    .run(await hashSenha(senhaNova), new Date().toISOString(), conta.id);
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: "Senha trocada, mas a sessão precisa ser refeita — faça login de novo." });
+    req.session.usuarioId = conta.id;
+    req.session.papel = conta.papel;
+    res.json({ ok: true, destino: paginaInicialDe(conta) });
+  });
+});
+
+const listarUsuarios = () =>
+  db.prepare(
+    `SELECT u.id, u.login, u.nome, u.papel, u.ativo, u.pessoa_id pessoaId, p.nome pessoa, u.senha_temporaria senhaTemporaria,
+            u.criado_em criadoEm, u.ultimo_acesso_em ultimoAcessoEm, u.senha_trocada_em senhaTrocadaEm
+     FROM usuarios u LEFT JOIN pessoas p ON p.id = u.pessoa_id ORDER BY u.papel, u.login`
+  ).all();
+
+app.get("/api/usuarios", (req, res) => {
+  const pessoas = db.prepare("SELECT id, nome, ativo FROM pessoas WHERE tipo = 'consultor' ORDER BY nome").all();
+  res.json({ usuarios: listarUsuarios(), pessoas });
+});
+
+function validarPessoaDeVendedor(papel, pessoaId, usuarioId) {
+  if (papel !== "vendedor") return null;
+  const id = Number(pessoaId);
+  if (!Number.isInteger(id) || !db.prepare("SELECT 1 FROM pessoas WHERE id = ? AND tipo = 'consultor'").get(id)) {
+    throw Object.assign(new Error("Vendedor precisa estar ligado a um consultor de `pessoas`."), { status: 400 });
+  }
+  const dono = db.prepare("SELECT id, login FROM usuarios WHERE pessoa_id = ? AND id != COALESCE(?, -1)").get(id, usuarioId ?? null);
+  if (dono) throw Object.assign(new Error(`Esse consultor já está ligado ao usuário "${dono.login}".`), { status: 400 });
+  return id;
+}
+
+app.post("/api/usuarios", async (req, res) => {
+  try {
+    const login = String(req.body?.login || "").trim().toLowerCase();
+    const nome = String(req.body?.nome || "").trim();
+    const papel = String(req.body?.papel || "");
+    if (!/^[a-z0-9._-]{3,40}$/.test(login)) return res.status(400).json({ error: "Login: 3–40 caracteres, letras minúsculas, números, ponto, hífen ou sublinhado." });
+    if (!PAPEIS.includes(papel)) return res.status(400).json({ error: "Papel deve ser admin ou vendedor." });
+    if (db.prepare("SELECT 1 FROM usuarios WHERE lower(login) = ?").get(login)) return res.status(400).json({ error: "Login já existe." });
+    const pessoaId = validarPessoaDeVendedor(papel, req.body?.pessoaId, null);
+    const senhaInicial = gerarSenhaInicial();
+    const info = db.prepare(
+      `INSERT INTO usuarios (login, senha_hash, nome, papel, ativo, criado_em, pessoa_id, senha_temporaria)
+       VALUES (?, ?, ?, ?, 1, ?, ?, 1)`
+    ).run(login, await hashSenha(senhaInicial), nome || login, papel, new Date().toISOString(), pessoaId);
+    res.status(201).json({ usuario: listarUsuarios().find((u) => u.id === info.lastInsertRowid), senhaInicial });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("usuarios", err, res);
+  }
+});
+
+app.patch("/api/usuarios/:id", (req, res) => {
+  try {
+    const alvo = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(Number(req.params.id));
+    if (!alvo) return res.status(404).json({ error: "Usuário não encontrado." });
+    const { nome, ativo, pessoaId, papel } = req.body || {};
+    const novoPapel = papel === undefined ? alvo.papel : String(papel);
+    if (!PAPEIS.includes(novoPapel)) return res.status(400).json({ error: "Papel deve ser admin ou vendedor." });
+    if (alvo.id === req.usuario.id && (ativo === false || ativo === 0 || novoPapel !== "admin")) {
+      return res.status(400).json({ error: "Você não pode desativar ou rebaixar o próprio usuário." });
+    }
+    const novaPessoa = novoPapel === "vendedor"
+      ? validarPessoaDeVendedor("vendedor", pessoaId === undefined ? alvo.pessoa_id : pessoaId, alvo.id)
+      : (pessoaId === undefined ? alvo.pessoa_id : (pessoaId === null ? null : validarPessoaDeVendedor("vendedor", pessoaId, alvo.id)));
+    db.prepare("UPDATE usuarios SET nome = ?, ativo = ?, pessoa_id = ?, papel = ? WHERE id = ?")
+      .run(nome === undefined ? alvo.nome : String(nome).trim() || alvo.login, ativo === undefined ? alvo.ativo : (ativo ? 1 : 0), novaPessoa, novoPapel, alvo.id);
+    if (ativo === false || ativo === 0) db.prepare("DELETE FROM sessions WHERE sess LIKE ?").run(`%"usuarioId":${alvo.id}%`); // derruba sessões abertas
+    res.json({ usuario: listarUsuarios().find((u) => u.id === alvo.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("usuarios/:id", err, res);
+  }
+});
+
+app.post("/api/usuarios/:id/senha-inicial", async (req, res) => {
+  const alvo = db.prepare("SELECT id, login FROM usuarios WHERE id = ?").get(Number(req.params.id));
+  if (!alvo) return res.status(404).json({ error: "Usuário não encontrado." });
+  const senhaInicial = gerarSenhaInicial();
+  db.prepare("UPDATE usuarios SET senha_hash = ?, senha_temporaria = 1 WHERE id = ?").run(await hashSenha(senhaInicial), alvo.id);
+  db.prepare("DELETE FROM sessions WHERE sess LIKE ?").run(`%"usuarioId":${alvo.id}%`);
+  res.json({ login: alvo.login, senhaInicial });
+});
+
+app.get("/api/carteiras", (req, res) => res.json(prospeccao.listarCarteiras()));
+
+app.put("/api/carteiras/:regionalId", (req, res) => {
+  try {
+    res.json(prospeccao.gravarCarteira(req.params.regionalId, req.body || {}, req.usuario.id));
+  } catch (err) {
+    responderErroProspeccao("carteiras", err, res);
+  }
+});
+
+app.get("/api/prospeccao/gerencial", (req, res) => res.json(prospeccao.gerencial()));
+
 // ---------- Território: casamento cidade → município, cobertura e revisão ----------
 
 // Período opcional: sem `de`/`ate` = base inteira; com um deles, valida os dois.
@@ -1054,13 +1240,13 @@ app.get("/api/territorio/mapa", (req, res) => {
 app.get("/api/territorio/agregado", (req, res) => {
   const p = periodoOpcional(req, res);
   if (!p) return;
-  res.json(territorio.agregarTerritorio(p.de, p.ate));
+  res.json(territorio.agregarTerritorio(p.de, p.ate, escopoDe(req.usuario)));
 });
 
 app.get("/api/territorio/municipios/:codigo", (req, res) => {
   const p = periodoOpcional(req, res);
   if (!p) return;
-  const detalhe = territorio.detalheMunicipio(req.params.codigo, p.de, p.ate);
+  const detalhe = territorio.detalheMunicipio(req.params.codigo, p.de, p.ate, escopoDe(req.usuario));
   if (!detalhe) return res.status(404).json({ error: "Município não encontrado." });
   res.json(detalhe);
 });

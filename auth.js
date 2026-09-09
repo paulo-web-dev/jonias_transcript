@@ -112,6 +112,27 @@ async function semearAdmin() {
   }
 }
 
+// ---------- Senhas de usuários criados pelo admin (Fase 3 da prospecção) ----------
+// Senha inicial: 12 caracteres de um alfabeto sem ambiguidade (sem 0/O, 1/l/I),
+// gerada com crypto, mostrada UMA vez na resposta e gravada só como hash;
+// o usuário é obrigado a trocá-la no primeiro acesso (senha_temporaria = 1).
+const crypto = require("crypto");
+const ALFABETO_SENHA = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+function gerarSenhaInicial(tamanho = 12) {
+  const bytes = crypto.randomBytes(tamanho);
+  return [...bytes].map((b) => ALFABETO_SENHA[b % ALFABETO_SENHA.length]).join("");
+}
+
+const SENHA_MINIMA = 10;
+// Devolve a mensagem de erro ou null
+function validarSenhaNova(senha, login) {
+  const s = String(senha || "");
+  if (s.length < SENHA_MINIMA) return `A senha precisa ter pelo menos ${SENHA_MINIMA} caracteres.`;
+  if (login && s.toLowerCase().includes(String(login).toLowerCase())) return "A senha não pode conter o login.";
+  if (!/[a-zA-Z]/.test(s) || !/\d/.test(s)) return "Use letras e números.";
+  return null;
+}
+
 module.exports = {
   hashSenha,
   verificarSenha,
@@ -121,4 +142,7 @@ module.exports = {
   bloqueioAtivo,
   registrarFalha,
   limparFalhas,
+  gerarSenhaInicial,
+  validarSenhaNova,
+  SENHA_MINIMA,
 };

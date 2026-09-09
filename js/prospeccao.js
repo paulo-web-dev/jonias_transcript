@@ -91,7 +91,7 @@ function enriquecer(o) {
   o.municipioNome = m ? m[0] : o.municipio_texto || "";
   o.regionalId = m ? m[1] : null;
   o.regionalSigla = o.regionalId ? d.regionaisPorId.get(o.regionalId)?.sigla || "" : "";
-  o.consultorNome = o.pessoa_id ? d.consultoresPorId.get(o.pessoa_id) || "" : "";
+  o.consultorNome = o.pessoa_id === -1 ? "outro consultor" : o.pessoa_id ? d.consultoresPorId.get(o.pessoa_id) || "" : "";
   o.statusNome = o.contato_inexistente ? "Contato inexistente" : o.cor_linha ? d.statusPorHex.get(o.cor_linha)?.nome || "" : "";
   o.statusHexVisual = o.contato_inexistente ? COR_INEXISTENTE : o.cor_linha && d.statusPorHex.has(o.cor_linha) ? o.cor_linha : null;
   o.busca = normalizar([o.municipioNome, o.municipio_texto, o.responsavel, o.cargo, o.telefone, o.telefone_original, o.whatsapp, o.email, o.observacoes, o.curso, o.setor, o.consultor_planilha].filter(Boolean).join(" | "));
@@ -109,9 +109,43 @@ async function carregarTrabalho() {
   trab.dados = d;
   trab.linhas = d.linhas.map(montarLinha);
   trab.porId = new Map(trab.linhas.map((o) => [o.id, o]));
+  aplicarEscopoNaTela(d);
   preencherFiltrosEstaticos();
   aplicarFiltros();
   console.log(`[prospeccao] ${uf}: ${trab.linhas.length} linhas em ${Math.round(performance.now() - t0)} ms`);
+}
+
+// Vendedor (escopo vindo do servidor): UF limitada às da carteira, filtro de
+// consultor some (é sempre ele) e aviso quando não há carteira atribuída
+function aplicarEscopoNaTela(d) {
+  const aviso = document.getElementById("aviso-escopo");
+  if (!d.escopo) { aviso.classList.add("oculto"); return; }
+  const ufs = d.escopo.ufs.length ? d.escopo.ufs : [trab.uf];
+  el.fUf.innerHTML = ufs.map((u) => `<option value="${u}" ${u === trab.uf ? "selected" : ""}>${u}</option>`).join("");
+  el.fConsultor.classList.add("oculto");
+  document.getElementById("n-consultor").closest(".campo").classList.add("oculto");
+  aviso.classList.toggle("oculto", !d.escopo.vazio);
+  if (d.escopo.vazio) aviso.textContent = "Seu usuário ainda não tem regional atribuída — peça ao administrador para definir a sua carteira em /usuarios.";
+}
+
+function preencherFiltrosEstaticos() {
+  const d = trab.dados;
+  el.fRegional.innerHTML = `<option value="">regional: todas</option>` + d.regionais.map((r) => `<option value="${r.id}">${escapeHtml(r.sigla)}</option>`).join("");
+  el.fSetor.innerHTML = `<option value="">setor: todos</option>` + d.setores.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
+  el.fConsultor.innerHTML = `<option value="">consultor: todos</option><option value="sem">sem consultor</option>` + d.consultores.map((c) => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join("");
+  el.listaMunicipiosUf.innerHTML = Object.entries(d.municipios).map(([c, [nome]]) => `<option value="${escapeHtml(nome)}" data-codigo="${c}"></option>`).join("");
+  el.listaSetores.innerHTML = d.setores.map((s) => `<option value="${escapeHtml(s)}"></option>`).join("");
+  const chips = [{ hex: "", nome: "sem status" }, ...d.status, { hex: "inexistente", nome: "Contato inexistente", cor: COR_INEXISTENTE }];
+  el.fStatus.innerHTML = chips.map((s) => `<button type="button" class="chip chip-status ${trab.filtros.status.has(s.hex) ? "ativo" : ""}" data-hex="${s.hex}"
+      style="${s.hex && s.hex !== "inexistente" ? `--cor:#${s.hex};` : s.hex === "inexistente" ? `--cor:#${COR_INEXISTENTE};` : ""}">${escapeHtml(s.nome)}</button>`).join("");
+  const opcoesStatus = `<option value="">status: manter</option>` + d.status.map((s) => `<option value="${s.hex}">${escapeHtml(s.nome)}</option>`).join("");
+  el.popoverStatus.innerHTML = opcoesStatus;
+  el.nStatus.innerHTML = `<option value="">sem status</option>` + d.status.map((s) => `<option value="${s.hex}">${escapeHtml(s.nome)}</option>`).join("");
+  el.nConsultor.innerHTML = `<option value="">sem consultor</option>` + d.consultores.map((c) => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join("");
+  // refletir filtros no formulário
+  const f = trab.filtros;
+  el.fBusca.value = f.busca; el.fMunicipio.value = f.municipio; el.fRegional.value = f.regional; el.fSetor.value = f.setor; el.fConsultor.value = f.consultor;
+  el.fOcultas.checked = f.ocultas; el.fSemTelefone.checked = f.semTelefone; el.fInexistente.checked = f.inexistente; el.fNunca.checked = f.nunca; el.fDe.value = f.de; el.fAte.value = f.ate;
 }
 
 // ---------- filtros ----------
@@ -830,12 +864,50 @@ document.getElementById("btn-sair").addEventListener("click", async () => {
 });
 window.addEventListener("hashchange", () => { if (ignorarHash) return; const aba = lerHash(); mostrarAba(aba); if (trab.dados && trab.uf === el.fUf.value) { preencherFiltrosEstaticos(); aplicarFiltros(); } });
 
+// ---------- Gerencial (admin): drill down por regional ----------
+
+async function carregarGerencial() {
+  const g = await chamarApi("/api/prospeccao/gerencial");
+  const soma = (k) => g.regionais.reduce((s, r) => s + (r[k] || 0), 0);
+  document.getElementById("gerencial-cards").innerHTML = g.porUf.map((u) => `<div class="metrica-card"><span class="metrica-rotulo">${escapeHtml(u.uf)}</span>
+      <span class="metrica-valor">${inteiro(u.contatos)}</span><span class="metrica-extra">${inteiro(u.semConsultor)} sem consultor · ${inteiro(u.nuncaTocados)} nunca tocados</span></div>`).join("") +
+    `<div class="metrica-card"><span class="metrica-rotulo">Regionais com titular</span><span class="metrica-valor">${g.regionais.filter((r) => r.titular).length} <small>de ${g.regionais.length}</small></span>
+      <span class="metrica-extra">${g.semRegional.map((s) => `${escapeHtml(s.uf)}: ${inteiro(s.contatos)} contatos sem regional (município não casado)`).join(" · ") || "todos os contatos têm regional"}</span></div>`;
+  document.querySelector("#tabela-gerencial tbody").innerHTML = g.regionais.map((r) => `<tr data-regional="${r.id}" data-uf="${escapeHtml(r.uf)}" title="abrir na aba Trabalho">
+    <td>${escapeHtml(r.uf)}</td><td class="celula-nome">${escapeHtml(r.sigla)}<div class="texto-suave territorio-descricao">${escapeHtml(r.nome || "")}</div></td>
+    <td style="text-align:left">${r.titular ? escapeHtml(r.titular) : '<span class="pct-baixo">sem titular</span>'}</td><td style="text-align:left" class="texto-suave">${r.apoios.map(escapeHtml).join(", ") || "—"}</td>
+    <td>${inteiro(r.contatos)}</td><td>${inteiro(r.telefonesValidos)}</td><td>${r.semConsultor ? `<span class="pct-meio">${inteiro(r.semConsultor)}</span>` : "0"}</td>
+    <td>${inteiro(r.trabalhados)}</td><td class="${r.contatos && r.trabalhados / r.contatos >= 0.6 ? "pct-ok" : r.contatos && r.trabalhados / r.contatos >= 0.3 ? "pct-meio" : "pct-baixo"}">${pctDe(r.trabalhados, r.contatos)}</td>
+    <td>${inteiro(r.nuncaTocados)}</td><td>${inteiro(r.inexistentes)}</td><td>${escapeHtml(dataBr(r.ultimoContato))}</td><td>${inteiro(r.editados)}</td></tr>`).join("");
+  document.querySelector("#tabela-gerencial tfoot").innerHTML = `<tr><td colspan="4">Total (${g.regionais.length} regionais)</td><td>${inteiro(soma("contatos"))}</td><td>${inteiro(soma("telefonesValidos"))}</td>
+    <td>${inteiro(soma("semConsultor"))}</td><td>${inteiro(soma("trabalhados"))}</td><td>${pctDe(soma("trabalhados"), soma("contatos"))}</td><td>${inteiro(soma("nuncaTocados"))}</td><td>${inteiro(soma("inexistentes"))}</td><td></td><td>${inteiro(soma("editados"))}</td></tr>`;
+}
+
+document.getElementById("tabela-gerencial").addEventListener("click", async (ev) => {
+  const tr = ev.target.closest("tr[data-regional]");
+  if (!tr) return;
+  const uf = tr.dataset.uf;
+  Object.assign(trab.filtros, { busca: "", municipio: "", regional: tr.dataset.regional, setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, de: "", ate: "" });
+  mostrarAba("trabalho");
+  if (trab.uf !== uf) { trab.uf = uf; el.fUf.value = uf; await carregarTrabalho().catch((e) => avisar("⚠ " + e.message, true)); }
+  else { preencherFiltrosEstaticos(); aplicarFiltros(); }
+});
+
 (async () => {
   const aba = lerHash();
+  let sessao = null;
+  try { sessao = await chamarApi("/api/sessao"); } catch (_) { /* nav.js já redireciona */ }
+  const vendedor = sessao?.papel === "vendedor";
+  if (vendedor) {
+    for (const b of document.querySelectorAll(".aba-btn.so-admin")) b.remove();
+    if (sessao.escopo?.ufs?.length && !sessao.escopo.ufs.includes(trab.uf)) trab.uf = sessao.escopo.ufs[0];
+    mostrarAba("trabalho");
+  } else {
+    mostrarAba(aba);
+  }
   el.fUf.value = trab.uf;
-  mostrarAba(aba);
   try {
-    await Promise.all([carregarTrabalho(), carregarCores(), carregarCobertura()]);
+    await Promise.all(vendedor ? [carregarTrabalho()] : [carregarTrabalho(), carregarCores(), carregarCobertura(), carregarGerencial()]);
   } catch (e) {
     avisar("⚠ Não foi possível carregar. (" + e.message + ")", true);
   }

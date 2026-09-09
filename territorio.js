@@ -23,6 +23,7 @@ const path = require("path");
 const db = require("./db.js");
 const { normalizarNome, removerBom, lerCsv } = require("./importacao.js");
 const { calcularMetricas } = require("./metricas.js");
+const { clausulaMunicipios: clausulaMunicipiosEscopo, dentroDoEscopo } = require("./escopo.js");
 
 const DADOS = path.join(__dirname, "dados");
 const ARQ_CSV_REGIONAIS = path.join(DADOS, "regionais_municipios_PR_SC.csv");
@@ -714,16 +715,21 @@ const SQL_ALUNO_DISTINTO = "COUNT(DISTINCT COALESCE(student_id, 'm' || id))";
 // os 694, com zero e temHistorico), outros estados por UF, "sem município" por
 // grupo, total e a conferência da cadeia municípios = regionais = estados;
 // estados + outros estados + sem município = total = calcularMetricas().empresa.
-function agregarTerritorio(de, ate) {
+// escopo (escopo.js, Fase 3): vendedor recebe SÓ as regionais e municípios
+// dele — a consulta por município já vem filtrada e o retorno não traz
+// estados, outros estados, sem município, total nem conferência (números da
+// empresa). Admin: escopo null, tudo como antes.
+function agregarTerritorio(de, ate, escopo = null) {
   const periodo = clausulaPeriodo(de, ate);
   const base = `FROM matriculas WHERE ${FILTRO_MATRICULA_VALIDA}${periodo.sql}`;
+  const cm = escopo ? clausulaMunicipiosEscopo(escopo) : { sql: "1=1", valores: [] };
 
   const porMunicipio = new Map(
     db.prepare(
       `SELECT codigo_ibge codigo, COUNT(*) matriculas, ${SQL_ALUNO_DISTINTO} alunos,
               SUM(COALESCE(valor_centavos, 0)) receitaCentavos
-       ${base} AND codigo_ibge IS NOT NULL GROUP BY 1`
-    ).all(...periodo.valores).map((l) => [l.codigo, l])
+       ${base} AND codigo_ibge IS NOT NULL AND ${cm.sql} GROUP BY 1`
+    ).all(...periodo.valores, ...cm.valores).map((l) => [l.codigo, l])
   );
   const comHistorico = new Set(
     db.prepare(`SELECT DISTINCT codigo_ibge FROM matriculas WHERE ${FILTRO_MATRICULA_VALIDA} AND codigo_ibge IS NOT NULL`)
@@ -825,6 +831,18 @@ function agregarTerritorio(de, ate) {
   }
   const conferencia = { bate: elos.every((e) => e.bate), elos, janelaMetricas: janela, semRegional };
 
+  if (escopo) {
+    // Vendedor: só as regionais e municípios dele; nada da empresa
+    const regionaisDele = new Set(escopo.regionais);
+    return {
+      periodo: { de: de || null, ate: ate || null },
+      escopo: { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio },
+      regionais: regionais.filter((r) => regionaisDele.has(r.id)).map((r) => ({ ...r, compartilhados: { ...r.compartilhados, municipios: r.compartilhados.municipios.filter((m) => escopo.municipios.has(m.codigo)) } })),
+      municipios: municipios.filter((m) => escopo.municipios.has(m.codigo)),
+      calculadoEm: new Date().toISOString(),
+    };
+  }
+
   return {
     periodo: { de: de || null, ate: ate || null },
     estados, regionais, municipios, outrosEstados: fora, semMunicipio, total, conferencia,
@@ -833,8 +851,9 @@ function agregarTerritorio(de, ate) {
 }
 
 // Detalhe de um município: resumo, cursos, vendedores (carteira) e alunos
-function detalheMunicipio(codigoIbge, de, ate) {
+function detalheMunicipio(codigoIbge, de, ate, escopo = null) {
   const codigo = Number(codigoIbge);
+  if (!dentroDoEscopo(escopo, codigo)) return null; // fora da regional do vendedor = 404
   const municipio = db
     .prepare(
       `SELECT m.codigo_ibge codigo, m.uf, m.nome, m.regional_principal_id regionalPrincipalId,
@@ -880,7 +899,7 @@ function detalheMunicipio(codigoIbge, de, ate) {
 
   const vendedores = db
     .prepare(
-      `SELECT COALESCE(p.nome, 'Sem atribuição') vendedor, p.tipo, COUNT(*) matriculas,
+      `SELECT COALESCE(p.nome, 'Sem atribuição') vendedor, m.pessoa_id pessoaId, p.tipo, COUNT(*) matriculas,
               COUNT(DISTINCT COALESCE(m.student_id, 'm' || m.id)) alunos,
               SUM(COALESCE(m.valor_centavos, 0)) receitaCentavos, MAX(m.criada_em) ultima
        ${base.replace("FROM matriculas m", "FROM matriculas m LEFT JOIN pessoas p ON p.id = m.pessoa_id")}
@@ -902,11 +921,29 @@ function detalheMunicipio(codigoIbge, de, ate) {
     db.prepare(`SELECT 1 FROM matriculas WHERE codigo_ibge = ? AND ${FILTRO_MATRICULA_VALIDA} LIMIT 1`).get(codigo)
   );
 
+  const prospeccaoCtx = contextoProspeccao(municipio, de, ate);
+  if (escopo) {
+    // Vendedor: sem nomes de terceiros — "você" × "outros" agregado; alunos sem o vendedor de terceiros
+    const meus = vendedores.filter((v) => v.pessoaId === escopo.pessoaId);
+    const outros = vendedores.filter((v) => v.pessoaId !== escopo.pessoaId);
+    const somaOutros = outros.reduce((s, v) => ({ matriculas: s.matriculas + v.matriculas, alunos: s.alunos + v.alunos, receitaCentavos: s.receitaCentavos + v.receitaCentavos, ultima: s.ultima > (v.ultima || "") ? s.ultima : v.ultima || "" }), { matriculas: 0, alunos: 0, receitaCentavos: 0, ultima: "" });
+    return {
+      periodo: { de: de || null, ate: ate || null },
+      municipio: { ...municipio, outrasRegionais: outrasRegionais.filter((r) => escopo.regionais.includes(r.id)) },
+      resumo, cursos, temHistorico,
+      vendedores: [
+        ...meus.map((v) => ({ vendedor: "você", tipo: v.tipo, matriculas: v.matriculas, alunos: v.alunos, receitaCentavos: v.receitaCentavos, ultima: v.ultima })),
+        ...(outros.length ? [{ vendedor: "outros (canais e equipe)", tipo: null, ...somaOutros, ultima: somaOutros.ultima || null }] : []),
+      ],
+      matriculas: matriculas.map((x) => ({ ...x, vendedor: x.vendedor === "Sem atribuição" ? x.vendedor : (vendedores.find((v) => v.vendedor === x.vendedor)?.pessoaId === escopo.pessoaId ? "você" : "outro") })),
+      prospeccao: prospeccaoCtx,
+    };
+  }
   return {
     periodo: { de: de || null, ate: ate || null },
     municipio: { ...municipio, outrasRegionais },
     resumo, cursos, vendedores, matriculas, temHistorico,
-    prospeccao: contextoProspeccao(municipio, de, ate),
+    prospeccao: prospeccaoCtx,
   };
 }
 

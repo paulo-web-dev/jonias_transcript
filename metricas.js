@@ -66,23 +66,29 @@ function porPessoaId(linhas) {
   return new Map(linhas.map((l) => [l.pessoa_id, l]));
 }
 
-function calcularMetricas(de, ate) {
+// apenasPessoaId (Fase 3): calcula SÓ para essa pessoa — as consultas filtram
+// por pessoa_id no SQL e o retorno não traz equipe/canais/empresa (dado de
+// outros nunca sai do banco para o vendedor).
+function calcularMetricas(de, ate, apenasPessoaId = null) {
   const fim = ate + "T23:59:59";
   const nDiasUteis = diasUteis(de, ate);
   const metas = metasVigentes(de, ate);
-  const consultores = db
-    .prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 ORDER BY nome")
-    .all();
+  const consultores = apenasPessoaId
+    ? db.prepare("SELECT id, nome FROM pessoas WHERE id = ? AND tipo = 'consultor'").all(apenasPessoaId)
+    : db.prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 ORDER BY nome").all();
+  // "pessoa_id IS NOT NULL" vira "pessoa_id = ?" quando há escopo
+  const fp = apenasPessoaId ? "pessoa_id = ?" : "pessoa_id IS NOT NULL";
+  const extra = apenasPessoaId ? [apenasPessoaId] : [];
 
   const ligacoes = porPessoaId(db.prepare(
     `SELECT pessoa_id, COUNT(*) discadas, SUM(atendida) atendidas,
             SUM(COALESCE(tempo_conversa_seg, 0)) conversa_seg
-     FROM ligacoes WHERE data_hora BETWEEN ? AND ? AND pessoa_id IS NOT NULL
-     GROUP BY pessoa_id`).all(de, fim));
+     FROM ligacoes WHERE data_hora BETWEEN ? AND ? AND ${fp}
+     GROUP BY pessoa_id`).all(de, fim, ...extra));
   const toques = db.prepare(
     `SELECT pessoa_id, tempo_toque_seg FROM ligacoes
-     WHERE data_hora BETWEEN ? AND ? AND pessoa_id IS NOT NULL AND tempo_toque_seg IS NOT NULL`
-  ).all(de, fim);
+     WHERE data_hora BETWEEN ? AND ? AND ${fp} AND tempo_toque_seg IS NOT NULL`
+  ).all(de, fim, ...extra);
   const toquesPorPessoa = new Map();
   for (const t of toques) {
     (toquesPorPessoa.get(t.pessoa_id) ?? toquesPorPessoa.set(t.pessoa_id, []).get(t.pessoa_id))
@@ -91,11 +97,11 @@ function calcularMetricas(de, ate) {
 
   const leads = porPessoaId(db.prepare(
     `SELECT pessoa_id, COUNT(*) n FROM oportunidades
-     WHERE fase_01_em BETWEEN ? AND ? AND pessoa_id IS NOT NULL GROUP BY pessoa_id`).all(de, fim));
+     WHERE fase_01_em BETWEEN ? AND ? AND ${fp} GROUP BY pessoa_id`).all(de, fim, ...extra));
   const funil = db.prepare(
     `SELECT pessoa_id, fase_atual, COUNT(*) n FROM oportunidades
-     WHERE fase_01_em BETWEEN ? AND ? AND pessoa_id IS NOT NULL
-     GROUP BY pessoa_id, fase_atual`).all(de, fim);
+     WHERE fase_01_em BETWEEN ? AND ? AND ${fp}
+     GROUP BY pessoa_id, fase_atual`).all(de, fim, ...extra);
   const funilPorPessoa = new Map();
   for (const f of funil) {
     (funilPorPessoa.get(f.pessoa_id) ?? funilPorPessoa.set(f.pessoa_id, {}).get(f.pessoa_id))[
@@ -104,25 +110,25 @@ function calcularMetricas(de, ate) {
   const perdidas = porPessoaId(db.prepare(
     `SELECT pessoa_id, COUNT(*) n, SUM(fase_06_em IS NULL) aproximadas FROM oportunidades
      WHERE status = 'Perdido' AND COALESCE(fase_06_em, atualizado_em) BETWEEN ? AND ?
-       AND pessoa_id IS NOT NULL GROUP BY pessoa_id`).all(de, fim));
+       AND ${fp} GROUP BY pessoa_id`).all(de, fim, ...extra));
   const conquistadas = porPessoaId(db.prepare(
     `SELECT pessoa_id, COUNT(*) n, SUM(COALESCE(ticket_centavos, 0)) ticket_centavos
      FROM oportunidades
-     WHERE status = 'Conquistado' AND fase_06_em BETWEEN ? AND ? AND pessoa_id IS NOT NULL
-     GROUP BY pessoa_id`).all(de, fim));
+     WHERE status = 'Conquistado' AND fase_06_em BETWEEN ? AND ? AND ${fp}
+     GROUP BY pessoa_id`).all(de, fim, ...extra));
 
   const filtroMatricula =
     `criada_em BETWEEN ? AND ? AND (status IS NULL OR status != 'canceled')`;
   const matriculas = porPessoaId(db.prepare(
     `SELECT pessoa_id, COUNT(*) n, SUM(COALESCE(valor_centavos, 0)) receita_centavos
-     FROM matriculas WHERE ${filtroMatricula} AND pessoa_id IS NOT NULL
-     GROUP BY pessoa_id`).all(de, fim));
+     FROM matriculas WHERE ${filtroMatricula} AND ${fp}
+     GROUP BY pessoa_id`).all(de, fim, ...extra));
   const conflitos = porPessoaId(db.prepare(
     `SELECT m.pessoa_id, COUNT(*) n FROM matriculas m
      JOIN oportunidades o ON o.id = m.oportunidade_id
-     WHERE m.criada_em BETWEEN ? AND ? AND m.pessoa_id IS NOT NULL
+     WHERE m.criada_em BETWEEN ? AND ? AND m.${fp}
        AND o.pessoa_id IS NOT NULL AND m.pessoa_id != o.pessoa_id
-     GROUP BY m.pessoa_id`).all(de, fim));
+     GROUP BY m.pessoa_id`).all(de, fim, ...extra));
 
   const comMeta = (valor, metaDia) => ({
     valor,
@@ -163,6 +169,14 @@ function calcularMetricas(de, ate) {
       conflitosAtribuicao: conflitos.get(p.id)?.n || 0,
     };
   });
+
+  // Escopo de uma pessoa: para aqui — sem equipe, canais ou empresa
+  if (apenasPessoaId) {
+    return {
+      de, ate, diasUteis: nDiasUteis, calculadoEm: new Date().toISOString(),
+      minha: porPessoa[0] || null,
+    };
+  }
 
   // Agregado dos consultores (metas do time = soma das metas individuais)
   const soma = (fn) => porPessoa.reduce((s, p) => s + fn(p), 0);
@@ -767,7 +781,20 @@ function gravarMetas({ pessoaId, vigenteDesde, valores }) {
   return mudancas;
 }
 
+// ---------- Escopo de uma pessoa (Fase 3 da prospecção: vendedor) ----------
+// Só o bloco da própria pessoa; nada de equipe, canais, empresa, ranking.
+const metricasDaPessoa = (de, ate, pessoaId) => calcularMetricas(de, ate, pessoaId);
+
+// Metas vigentes da pessoa (própria ou herdada do padrão) — sem o histórico
+// dos outros, sem equipe, sem receita da empresa.
+function resumoMetasDaPessoa(pessoaId) {
+  const r = resumoMetas();
+  const propria = r.porPessoa[pessoaId] || null;
+  return { hoje: r.hoje, indicadores: r.indicadores, receitaIndicadores: r.receitaIndicadores, minha: propria };
+}
+
 module.exports = {
   diasUteis, metasVigentes, calcularMetricas, saudeDosDados, dadosTvCompleto,
   resumoMetas, gravarMetas, INDICADORES, INDICADORES_RECEITA, configBool,
+  metricasDaPessoa, resumoMetasDaPessoa,
 };

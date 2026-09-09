@@ -73,6 +73,13 @@ aula-ai/
 ├── metricas.js      # motor de métricas em SQL puro + saúde + payload TV
 ├── feedback.js      # Etapa 3: dossiê de fatos + prompt do feedback individual (IA)
 ├── territorio.js    # território: referência PR/SC, casamento cidade→município, cobertura
+├── prospeccao.js    # prospecção ativa: importação, tela de trabalho, carteiras, gerencial
+├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
+├── escopo.js        # papéis (admin | vendedor) e escopo por regional — corte no servidor
+├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
+├── trocar-senha.html # troca de senha (obrigatória no 1º acesso)
+├── meu-painel.html  # painel do vendedor: métricas próprias × metas
+├── js/nav.js        # menu por papel via /api/sessao (conveniência; a proteção é nas rotas)
 ├── dados/           # referência versionada (CSV de regionais, JSONs do IBGE, mapa SVG)
 ├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
 ├── css/style.css    # tema dark completo (robô, listas, modais, login, view, central)
@@ -110,7 +117,9 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **19**.
+pelo mesmo caminho). Versão atual: **20**. Migração que recria tabela referenciada
+por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
+`foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -286,6 +295,123 @@ Território (migração 18, 2026-09-09; módulo `territorio.js`; **zero IA**):
   receita, ticket, canceladas), cursos (por `turmas.nome`), carteira por
   vendedor e a lista de alunos — sempre da cópia local.
 
+Prospecção ativa (migração 20, 2026-09-09; módulo `prospeccao.js`; **zero IA**).
+Decisão: o jonIAs é o lugar OFICIAL das carteiras de prospecção (o Excel será
+abandonado). Fase 1 = carga com fidelidade total:
+
+- `contatos_ativo(id, uf, setor, linha_origem, arquivo_nome, importacao_id, orgao, municipio_texto, codigo_ibge, municipio_metodo, municipio_confianca, telefone_original, telefone, telefone_valido, whatsapp_original, whatsapp, responsavel, cargo, email, data_ultimo_contato, observacoes, consultor_planilha, cor_linha → cores_prospeccao, cores_celulas_json, linha_oculta, extras_json, criado_em, atualizado_em, editado_em, UNIQUE(uf, setor, linha_origem))`
+  — 1 linha por linha da planilha; `setor` = nome da aba verbatim; `uf`
+  escolhida no upload (nunca deduzida do nome do arquivo); `orgao` derivado
+  do nome da aba (PM/CM/Autarquia). Reimportar = upsert pela chave natural;
+  **aba com `editado_em` preenchido (edição no jonIAs, Fase 2) é recusada**
+  na reimportação — o sistema virou a fonte. `linha_oculta` marca as linhas
+  ocultas da planilha (1.761 PR / 934 SC — importadas, decisão do usuário).
+- `cores_prospeccao(cor_hex PK, origem, linhas, celulas, status_nome, significado, ignorar, ordem, atualizado_em, usuario_id)`
+  — **cor é informação**: 1 linha por cor de preenchimento distinta (RGB de
+  6 hex, tema+tint já resolvidos); `status_nome`/`significado` só o usuário
+  dá, em `/prospeccao` (nada é presumido); `ignorar = 1` = só formatação.
+  Status do contato = `status_nome` da `cor_linha` (JOIN, nunca copiado).
+- **Armadilhas do .xlsx tratadas** (`prospeccao.js`): cabeçalho procurado nas
+  5 primeiras linhas e aceito com ≥ 2 colunas do dicionário (aba sem
+  cabeçalho fica de fora, listada); mapeamento por nome normalizado +
+  sinônimos (`CAMPOS`/`PADROES`: "Reponsavel", "Contato", "Whats"…), **nunca
+  por posição**; rótulo genérico ("Coluna 1", "Column 32") é decidido pelo
+  CONTEÚDO (`inferirColunasGenericas`: ≥ 80 % dos valores batem com município
+  da UF, padrão de telefone ou nome de consultor em `pessoas`; só preenche
+  campo vazio; vira ressalva no relatório) — em "PM TRIBUTAÇÃO" (SC) a Coluna
+  1 é consultor, em "JURIDICO PM" (SC) é município e a Coluna 2 é telefone;
+  "Coluna 1" de "TRIBUTAÇÃO" (PR) não bateu com nada e ficou em extras; coluna
+  repetida ou não reconhecida → `extras_json` com o rótulo original e
+  contagem no relatório (`colunasNaoReconhecidas`). Telefone: original
+  preservado + só dígitos (55/0 iniciais removidos; célula com dois números →
+  o 1º vale e os outros vão para extras); célula que o Excel formatou como
+  **data** perde o número no exceljs — o valor bruto é lido do XML da aba via
+  jszip (`valoresBrutosPorAba`; regex com alternativa `/>` primeiro, senão é
+  O(n²)). Cor: `cell.fill` ARGB, tema+tint (tema do arquivo, `_themes.theme1`;
+  índices 0 lt1, 1 dk1, 2 lt2, 3 dk2, 4–9 accent; tint na luminância HSL) ou
+  indexada; cor da linha = moda das células (empate: coluna município);
+  células diferentes → `cores_celulas_json`. Nunca usar `cell.text` (lança em
+  célula mesclada). Hiperlinks vão para extras como "(link)".
+- Município: `territorio.js` — `chaveDoContato` limpa anotações
+  ("APUCARANA (LIGAR APÓS 12H00)", "Campo largo - Consorcio…") antes de
+  `classificarCidade`; apelidos compartilhados com as matrículas
+  (`municipio_apelidos`), resolvidos na mesma revisão de `/territorio` (que
+  mostra "N contato(s) da prospecção" por chave). Medido em 2026-09-09: PR
+  16.320 linhas (98,2% casadas), SC 9.680 (96,9%), 34 chaves pendentes —
+  quase todas autarquias/entidades no lugar da cidade.
+- Auditoria: `importacoes.tipo = 'prospeccao'` com `detalhes_json` completo
+  (por aba: colunas casadas, não reconhecidas, telefones, cores, tempos).
+- **Migração 21 (2026-09-09, decisão do usuário)**: promovidos de extras a
+  campo `curso` (CURSO/Curso/C CURSO — 1.474 linhas), `contato_inexistente`
+  (flag 1 quando "contato(s) inexistente(s)"/"tel inexistente" tem qualquer
+  texto — "só chama", "telefone não funciona", "Sim"; texto original em
+  `contato_inexistente_texto`; **é status, não coluna: prevalece sobre o
+  status da cor** na tela de trabalho) e `cadastro_crm` (booleano de
+  "Cadastro no CRM?"; Sim/Não → 1/0, outro texto → extras). Aba SAÚDE PM
+  (PR) confirmada como esqueleto: só a coluna MUNICIPIO tem valor no XML —
+  não é perda de leitura, a planilha nunca teve telefones ali.
+- **Migração 22 (Fase 2, 2026-09-09)**: `pessoa_id` (consultor atual — só
+  Frederico, Renato, Eduardo, Agnes e Bianca, casados por nome normalizado
+  contra nome/wallet/`nomes_alternativos`; "Fred" entrou como grafia do
+  Frederico; toda outra grafia fica sem consultor, texto preservado em
+  `consultor_planilha`; 15.097 casados), `editado_por`, `origem`
+  (`planilha` | `manual`) e `contatos_ativo_historico(contato_id, tipo
+  contato|edicao|status|criacao, canal ligacao|whatsapp|email|visita|outro,
+  campo, valor_anterior, valor_novo, observacao, usuario_id, registrado_em)`.
+  **Status** = `cor_linha` → `cores_prospeccao` (marcar status = trocar a
+  cor; status novo = linha com `origem = 'criado'`); status efetivo:
+  `contato_inexistente = 1` → "Contato inexistente", senão `status_nome`
+  da cor (sem nome/ignorada → sem status). Tela de trabalho em
+  `/prospeccao` (aba Trabalho): filtros em memória (busca, município,
+  regional, setor, consultor, status múltiplo, ocultas, sem telefone,
+  inexistente, nunca tocado, período do último contato — estado no
+  `hash`), tabela virtual (34 px por linha, ~60 `<tr>` no DOM, cabeçalho
+  sticky, ordenação por coluna), edição inline (Enter/Tab salvam, Esc
+  cancela, Tab vai para a próxima célula), menu de status, popover
+  "registrar contato" (Ctrl+Enter), gaveta de detalhes + histórico, modal
+  de novo contato, exportação .xlsx do filtro ou da UF. Teclado na tabela:
+  ↑↓ selecionam, R registra, D abre detalhes, Enter edita, / busca.
+- **Migração 23 (Fase 3, 2026-09-09) — papéis e escopo.** `usuarios` ganha
+  `pessoa_id` (login ↔ consultor, único), `senha_temporaria` (1 = troca
+  obrigatória no 1º acesso), `senha_trocada_em`, `ultimo_acesso_em`; `papel`
+  ∈ `admin | vendedor` validado no código (a tabela não tem CHECK — recriar
+  exigiria desligar FK de 8 tabelas). `carteiras(regional_id, pessoa_id,
+  papel titular|apoio)`: N:N com **no máximo um titular por regional**
+  (índice parcial); todos os vinculados veem e editam a regional inteira; ao
+  definir o titular, os contatos **sem consultor** da regional passam para
+  ele (`gravarCarteira`, histórico `campo pessoa_id`, sem marcar
+  `editado_em` — atribuição em massa não é edição e não bloqueia
+  reimportação). Decisões do usuário: vários vendedores por regional; o
+  vendedor vê toda a regional; sem-consultor viram dele.
+  **Escopo no servidor** (`escopo.js`): `escopoDe(usuario)` → `null` para
+  admin; para vendedor `{pessoaId, regionais, ufs, municipios (Set de
+  códigos com regional principal na carteira), vazio}`. As consultas filtram
+  no SQL (`clausulaMunicipios`): `payloadTrabalho` (linhas, regionais,
+  municípios, setores, consultores = só ele; **pessoa_id de terceiros vira
+  -1 e `consultor_planilha` sai como NULL, no próprio SELECT**),
+  `buscarLinha` (linha fora do escopo = 404), `atualizarContato`
+  (`pessoa_id` só ele/NULL, município só da regional), `criarContato`,
+  `exportarXlsx` (ids ∩ escopo), `historicoDoContato`,
+  `calcularMetricas(de, ate, pessoaId)` (`pessoa_id = ?` em todas as
+  consultas; devolve só `minha`, sem equipe/canais/empresa),
+  `resumoMetasDaPessoa`, `agregarTerritorio(…, escopo)` (só regionais e
+  municípios dele; sem estados/outros/total/conferência),
+  `detalheMunicipio(…, escopo)` (município fora = null; `vendedores` vira
+  "você" × "outros" sem nomes; alunos sem o vendedor de terceiros),
+  `listarCoresEnxuto`. Rotas de gestão respondem **403** ao vendedor
+  (`PREFIXOS_SO_ADMIN` em `server.js`: importações, sincronizações, config,
+  períodos, saúde, usuários, carteiras, cobertura, gerencial, status novo,
+  pendências/apelidos do território, escritas em metas/cores/principal) e as
+  páginas `/central /relatorios /saude /metas /usuarios` também. Login:
+  `session.regenerate` (anti-fixação), resposta `{papel, trocarSenha,
+  destino}`; `exigirSenhaTrocada` bloqueia tudo (API 403 / página 302) até
+  `POST /api/senha` (mín. 10 caracteres com letras e números, ≠ login,
+  argon2id, regenera sessão). Rate limit, argon2 e sessão de 12 h
+  inalterados; desativar usuário apaga as sessões dele. Auditado em
+  2026-09-09 com um vendedor de teste (AMOP/AMSOP): zero nomes de terceiros
+  nos payloads, 404/403 onde previsto. Menu por papel em `js/nav.js`
+  (`/api/sessao`; esconde links `.so-admin` — conveniência, não proteção).
+
 ## Rotas
 
 | Rota | Descrição |
@@ -319,6 +445,23 @@ Território (migração 18, 2026-09-09; módulo `territorio.js`; **zero IA**):
 | `GET /api/territorio/agregado?de&ate` | Fase 2: `estados`, `regionais` (principal; `compartilhados` à parte), `municipios` (694, com `temHistorico`), `outrosEstados.porUf`, `semMunicipio.porGrupo`, `total`, `conferencia.elos` (✓/✗ com diferença) |
 | `GET /api/territorio/municipios/:codigo?de&ate` | detalhe do município: regional principal + outras, `resumo` (matrículas, alunos distintos, receita, ticket médio, canceladas), `cursos`, `vendedores` (carteira), `matriculas` (alunos), `prospeccao` (regional no período com quantos municípios já compraram + `semCompra`; vizinhos geográficos com situação cliente/nunca e valores no período); 404 se não existe |
 | `GET /api/territorio/mapa` | malha municipal PR+SC em SVG (`dados/mapa_PR_SC.svg`, autenticada, `Cache-Control` 1 dia); 503 se o arquivo não existe |
+| `POST /api/importacoes/prospeccao?arquivo=&uf=` | planilha de prospecção (.xlsx binário, 50 MB); `uf` obrigatória (400); resposta com relatório por aba (`abas`), colunas não reconhecidas, cores, municípios; erro estrutural → 422 |
+| `GET /prospeccao` | tela: cores encontradas → status (nome/significado/só formatação, salva ao sair do campo) + cobertura da carga por UF/aba + colunas não reconhecidas |
+| `GET /api/prospeccao/cores`, `PUT /api/prospeccao/cores/:hex` | cores com contagens, abas e exemplos reais; PUT `{statusNome, significado, ignorar}` (campo ausente não mexe) |
+| `GET /api/prospeccao/cobertura` | por UF e por aba: linhas, ocultas, telefone válido, whatsapp, e-mail, município casado/pendente, cores, editadas; colunas não reconhecidas e abas não importadas da última importação de cada UF |
+| `GET /api/prospeccao/contatos?uf=` | Fase 2: payload compacto da UF (`campos` + `linhas` como arrays, ~3 MB para 16 k linhas, ~150 ms), `status` (cores nomeadas não ignoradas), `setores`, `regionais`, `municipios`, `consultores` (os 5) — a tela filtra tudo em memória |
+| `PATCH /api/prospeccao/contatos/:id` | `{campo: valor}` nos campos editáveis (`responsavel, cargo, email, observacoes, curso, setor, telefone, whatsapp, data_ultimo_contato, cor_linha, pessoa_id, contato_inexistente, cadastro_crm, linha_oculta, codigo_ibge`); valida (400), normaliza telefone, grava `editado_em/editado_por` e histórico por campo; devolve `{linha, alteracoes}` |
+| `POST /api/prospeccao/contatos/:id/contatos` | registrar contato `{canal, observacao, statusHex?, data?}` → histórico `contato`, `data_ultimo_contato` (padrão hoje), status opcional; devolve `{linha, historico}` |
+| `GET /api/prospeccao/contatos/:id/historico` | histórico cronológico com usuário e nomes de status |
+| `POST /api/prospeccao/contatos` | contato manual (`origem = 'manual'`, `linha_origem` negativo sequencial por UF+setor); município por `codigo_ibge` (mesma UF) ou texto (casado como na importação) |
+| `POST /api/prospeccao/status` | status novo `{nome, corHex, significado}` → `cores_prospeccao` com `origem = 'criado'` |
+| `POST /api/prospeccao/exportar` | `{uf, ids?}` → .xlsx (uma aba por setor, linha pintada com a cor do status, cabeçalho congelado) — rede de segurança; vendedor: ids ∩ escopo |
+| `GET /api/sessao` | Fase 3: `{id, login, nome, papel, pessoa, trocarSenha, escopo: {regionais, ufs, municipios, vazio} \| null}` — base do menu por papel |
+| `POST /api/senha` | `{senhaAtual, senhaNova}` → 401 senha atual errada (conta no rate limit), 400 fraca; grava argon2id, zera `senha_temporaria`, regenera a sessão |
+| `GET/POST /api/usuarios`, `PATCH /api/usuarios/:id`, `POST /api/usuarios/:id/senha-inicial` | admin: lista + consultores; cria (`login` minúsculo, `papel`, `pessoaId` obrigatório para vendedor) com **senha inicial gerada, devolvida uma vez**; PATCH nome/ativo/pessoa/papel (não desativa nem rebaixa a si mesmo; desativar apaga sessões); nova senha inicial |
+| `GET /api/carteiras`, `PUT /api/carteiras/:regionalId` | admin: regionais com titular/apoios, contatos e sem consultor; PUT `{titularPessoaId, apoios}` → grava e atribui os sem-consultor ao titular, devolve `{atribuidos}` |
+| `GET /api/prospeccao/gerencial` | admin: por regional — titular, apoios, contatos, telefone válido, sem consultor, trabalhados, nunca tocados, inexistentes, último contato, editados; totais por UF e "sem regional" |
+| `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
 sessão com usuário **ativo** (sessão órfã/inativa é destruída); sem login: API
@@ -641,6 +784,34 @@ José dos Pinhais); 0 pendências, conferência fechando nos 4 elos:
   ficaria isolado — 1.926 fronteiras; `--so-vizinhos` regenera sem rede).
 - Regenerar a referência do IBGE: `node scripts/gerar-referencias-territorio.js`
   (precisa de internet; commitar o resultado).
+
+### 🚧 Prospecção ativa no jonIAs (`/prospeccao`, iniciada em 2026-09-09)
+As planilhas de carteiras por setor (ATIVOS PARANÁ, ATIVO SANTA CATARINA;
+SP fica para depois — mesma rota, só escolher a UF) passam a viver no
+jonIAs, que vira a fonte oficial; o Excel será abandonado. Sem IA. Plano em
+fases, cada uma aprovada antes da seguinte:
+- ✅ **Fase 1 — carga com fidelidade total** (migração 20): importador
+  `prospeccao.js` (ver "Prospecção ativa" em Banco de dados), upload na
+  `/central` com UF, relatório por aba, tela `/prospeccao` (cores → status,
+  cobertura, colunas não reconhecidas), pendências de município na revisão
+  de `/territorio`. Decisões: linhas ocultas entram marcadas; abas atípicas
+  importam o que casa e mandam o resto para extras; reimportação = upsert e
+  aba editada no sistema é recusada.
+- ✅ **Fase 2 — tela de trabalho do consultor** (2026-09-09, migração 22):
+  aba Trabalho em `/prospeccao` — tudo em memória depois de uma chamada por
+  UF, sem recarregar página; edição inline, status, registrar contato com
+  histórico, novo contato, exportação .xlsx (ver "Migração 22" em Banco de
+  dados). Consultor só para a equipe atual (decisão do usuário).
+- ✅ **Fase 3 — papéis e escopo** (2026-09-09, migração 23): papel
+  `vendedor` ligado a `pessoas`, carteiras por regional (titular + apoios),
+  corte no servidor (ver "Migração 23" em Banco de dados), `/usuarios`
+  (criação com senha inicial, carteiras), `/trocar-senha`, `/meu-painel`,
+  aba Gerencial na prospecção (admin). Estoque medido antes de repartir:
+  20.671 contatos sem consultor (13.549 nunca tocados) — tabela por regional
+  no plano da fase.
+- ⏳ **Fase 4 — cruzamento com o CDR**: `ligacoes.numero_b` × `telefone`
+  (dígitos puros) → municípios ligados por ramal/consultor; painel gerencial
+  por regional: contatos, trabalhados, nunca tocados.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

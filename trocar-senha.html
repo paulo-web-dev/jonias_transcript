@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trocar senha — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="pagina-login">
+  <main class="login-caixa">
+    <h1>jon<span class="grad">IA</span>s</h1>
+    <p class="login-subtitulo" id="subtitulo">Defina a sua senha</p>
+    <form id="form-senha" autocomplete="off">
+      <label class="campo"><span>Senha atual (a inicial que você recebeu)</span><input type="password" id="senha-atual" required autofocus autocomplete="current-password" /></label>
+      <label class="campo"><span>Senha nova (mínimo 10 caracteres, letras e números)</span><input type="password" id="senha-nova" required autocomplete="new-password" /></label>
+      <label class="campo"><span>Confirme a senha nova</span><input type="password" id="senha-confirma" required autocomplete="new-password" /></label>
+      <p id="senha-erro" class="login-erro oculto"></p>
+      <button class="btn btn-primario btn-largo" type="submit">Salvar senha</button>
+    </form>
+    <p class="texto-suave" style="margin-top:1rem;font-size:0.8rem"><a href="/api/logout" id="link-sair" style="color:var(--acento-2)">Sair</a></p>
+  </main>
+  <script src="/js/trocar-senha.js"></script>
+</body>
+</html>

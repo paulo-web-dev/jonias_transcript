@@ -53,6 +53,26 @@
         </label>
       </div>
 
+      <!-- Prospecção ativa (planilhas de carteiras) -->
+      <div class="fonte-card">
+        <div class="fonte-cabecalho">
+          <h3>📇 Prospecção ativa (planilhas)</h3>
+          <span class="texto-suave">ATIVOS PARANÁ / ATIVO SANTA CATARINA (.xlsx, uma aba por setor) — o jonIAs é a fonte oficial depois da carga</span>
+        </div>
+        <p id="prospeccao-status" class="fonte-status texto-suave">Escolha a UF da planilha e envie. Reimportar atualiza o que mudou; aba com linha editada no sistema é recusada.</p>
+        <div class="fonte-acoes-linha">
+          <select id="prospeccao-uf" class="campo-select" aria-label="UF da planilha">
+            <option value="PR">PR — Paraná</option>
+            <option value="SC">SC — Santa Catarina</option>
+            <option value="SP">SP — São Paulo</option>
+          </select>
+          <label class="btn btn-primario fonte-upload">
+            <span class="btn-icone">⬆</span> Enviar planilha de prospecção
+            <input type="file" id="arquivo-prospeccao" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
+          </label>
+        </div>
+      </div>
+
       <!-- MySQL Unyflex -->
       <div class="fonte-card">
         <div class="fonte-cabecalho">
@@ -95,6 +115,7 @@
 
   <div id="aviso" class="aviso" role="status"></div>
 
+  <script src="/js/nav.js"></script>
   <script src="/js/central.js"></script>
 </body>
 </html>
