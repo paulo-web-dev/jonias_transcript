@@ -69,8 +69,12 @@ aula-ai/
 ├── saude.html       # saúde dos dados            (rota /saude)
 ├── tv.html          # painel público da sala     (rota /tv?token=)
 ├── metas.html       # painel de metas            (rota /metas)
+├── territorio.html  # inteligência por território (rota /territorio)
 ├── metricas.js      # motor de métricas em SQL puro + saúde + payload TV
 ├── feedback.js      # Etapa 3: dossiê de fatos + prompt do feedback individual (IA)
+├── territorio.js    # território: referência PR/SC, casamento cidade→município, cobertura
+├── dados/           # referência versionada (CSV de regionais, JSONs do IBGE, mapa SVG)
+├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
 ├── css/style.css    # tema dark completo (robô, listas, modais, login, view, central)
 ├── js/
 │   ├── markdown.js  # conversor MD→HTML compartilhado (navegador + servidor/PDF)
@@ -78,6 +82,7 @@ aula-ai/
 │   ├── aulas.js     # lista, busca, criar/renomear/excluir
 │   ├── aula-view.js # visualização + links de exportação
 │   ├── central.js   # uploads, sincronização e histórico de ingestões
+│   ├── territorio.js # cobertura do casamento + revisão manual (Fase 1)
 │   └── login.js
 ├── aula-ai.db       # SQLite (gerado em runtime, ignorado no git)
 └── .env             # ANTHROPIC_API_KEY, SESSION_SECRET, ADMIN_*, MYSQL_*, TV_TOKEN
@@ -105,7 +110,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **17**.
+pelo mesmo caminho). Versão atual: **19**.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
   — `status`: `em_andamento` | `encerrada`; `duracao` em segundos; datas em ISO 8601.
@@ -205,6 +210,82 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   dossiê EXATO enviado ao modelo (texto sempre auditável contra números
   congelados); gerar de novo insere nova linha — versões antigas ficam.
 
+Território (migração 18, 2026-09-09; módulo `territorio.js`; **zero IA**):
+
+- `regionais(id, uf, sigla, nome, cidade_polo, UNIQUE(uf, sigla))`,
+  `municipios(codigo_ibge PK, uf, nome, nome_normalizado, regional_principal_id → regionais)`,
+  `regional_municipios(regional_id, codigo_ibge, ordem)` — referência de PR/SC
+  carregada em **todo boot** por `carregarReferencias()` (idempotente) a partir
+  de `dados/municipios_ibge_PR_SC.json` (694 municípios com código IBGE) e
+  `dados/regionais_municipios_PR_SC.csv` (CSV do usuário: `uf;sigla_regional;
+  nome_regional;cidade_polo;municipio`, BOM + `;`; 40 regionais, 714 vínculos).
+  **20 municípios do PR estão em duas regionais**: `regional_municipios` guarda
+  todos os vínculos e `regional_principal_id` elege a que conta (decisão do
+  usuário, 2026-09-09: mapa do estado e totais usam só a principal, então
+  regionais somam igual ao estado; a outra regional mostra o município como
+  "compartilhado", à parte). Padrão da principal = primeira ocorrência no CSV;
+  alterável em `/territorio` e preservada nos boots seguintes. Município do
+  CSV inexistente no IBGE → **erro fatal no boot**; CSV ausente → aviso alto,
+  app sobe sem regionais. Vínculo que sumiu do CSV é removido (é referência).
+- `municipio_apelidos(id, cidade_norm, uf_norm, resultado municipio|fora|ignorar|pendente, codigo_ibge, metodo, confianca, distancia, amostra_original, criado_em, usuario_id, UNIQUE(cidade_norm, uf_norm))`
+  — 1 linha por chave (cidade normalizada, UF normalizada). Resultado
+  automático **nunca é sobrescrito** (estável entre syncs); resolução manual
+  (`metodo = 'manual'`) substitui e nunca é perguntada de novo.
+- `matriculas` ganhou `aluno_estado` (students.state, trim), `aluno_cep` (só
+  dígitos), `codigo_ibge`, `municipio_metodo`, `municipio_confianca`. A
+  migração marca `configuracoes.sync_completo_pendente = '1'`: o sync
+  seguinte ignora o corte incremental e reprocessa tudo (as antigas não
+  passariam pelo `updated_at`); a marca é apagada ao concluir.
+- **Casamento cidade → município** (`cruzarMunicipios()`, ao fim de cada sync
+  e após cada resolução manual; 6 k linhas, ~50 ms): `normalizarCidade`
+  desfaz mojibake (latin1→utf8), extrai sufixo de UF ("Toledo - PR",
+  "Curitiba (Paraná)" — hífen colado como "Ji-Paraná" é nome), tira acento/
+  pontuação/caixa e aplica `d + vogal → do` ("D'Oeste", "D IGUAÇU");
+  `normalizarUf` aceita sigla, nome por extenso, sigla embutida e, sem state,
+  a **faixa de CEP** (80000–87999 = PR, 88000–89999 = SC, resto = OUTRA).
+  Camadas, na ordem: `exato_uf` (nome + UF, alta) → `exato` (nome único em
+  PR+SC sem UF, alta) → `fora_uf`/`fora_cep`/`fora_brasil` (média; o último
+  usa `dados/municipios_brasil.json`) → `aproximado` (Levenshtein ≤ min(2,
+  20% do tamanho), candidato único, média) → `pendente` (`sem_uf` = homônimo
+  PR/SC sem UF, `conflito_uf` = "Concórdia/PR", `sem_match`). Nunca palpite.
+  Na matrícula, resolução manual grava `manual` | `manual_fora` |
+  `manual_ignorar` em `municipio_metodo`. Medido em 2026-09-09 (5.784
+  matrículas válidas): 90,5% casadas / 92,2% da receita; 5,2% fora de PR/SC
+  (7,5% da receita); 11 chaves pendentes (R$ 16 k).
+- "Período inteiro" em `/territorio` exclui matrículas com `criada_em NULL`
+  (44 na base, R$ 2.690) — elas nunca entram em período nenhum dos
+  relatórios; a tela mostra a contagem à parte (`semData`).
+- **Migração 19 (2026-09-09)**: `matriculas.aluno_uf` = UF resolvida (state,
+  sufixo da cidade ou faixa de CEP — agora com a tabela de faixas de **todas**
+  as UFs, então `fora_cep` sabe o estado) e, para município casado, a UF do
+  município; é o que permite "Outros estados" por UF em SQL. Marca
+  `configuracoes.territorio_recruzar_pendente = '1'`: o boot reprocessa o
+  casamento uma vez (`recruzarSePendente()`) e apaga a marca. Apelido
+  automático cuja chave sumiu das matrículas é removido no cruzamento (o
+  manual fica).
+- **Revisão em lote**: `pendencias()` devolve, por chave, amostras da cidade,
+  estado e CEP como vieram, e uma `sugestao` heurística com motivo (campos
+  cidade/estado trocados, homônimo em outra UF, município contido no texto,
+  prefixo único, ≤ 2 letras em nome ≥ 6, vários CEPs de cidades diferentes →
+  ignorar, texto ≤ 4 letras → ignorar, cidade que existe em outra UF → fora).
+  A tela pré-preenche e o usuário confirma em lote (`POST
+  /api/territorio/apelidos/lote`, valida tudo antes de gravar, reprocessa uma
+  vez). O botão CEP consulta ViaCEP/BrasilAPI **pelo navegador do revisor** —
+  o servidor nunca acessa a internet.
+- **Agregação (`agregarTerritorio(de, ate)`)**: municípios (os 694, com zero
+  e `temHistorico`), regionais **só pela principal** (compartilhados à parte,
+  com `contadoEm`), estados, `outrosEstados` por UF, `semMunicipio` por grupo,
+  total e `conferencia` com 4 elos (municípios = regionais [+ sem regional] =
+  estados; estados + outros + sem município = total; total =
+  `calcularMetricas().empresa` — sem período, a janela é min/max de
+  `criada_em`). A tela mostra ✓/✗ com os dois lados e a diferença; **nunca
+  ajusta**. Conferido em 2026-09-09: fecha na base inteira (5.740 / R$
+  9.392.004,50) e em ago/26 (177 / R$ 237.542). Alunos distintos =
+  `COUNT(DISTINCT COALESCE(student_id, 'm'||id))` (não aditivo: SQL próprio
+  por regional/estado). `detalheMunicipio` traz resumo (matrículas, alunos,
+  receita, ticket, canceladas), cursos (por `turmas.nome`), carteira por
+  vendedor e a lista de alunos — sempre da cópia local.
+
 ## Rotas
 
 | Rota | Descrição |
@@ -228,6 +309,16 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
 | `GET /api/metas`, `PUT /api/metas`, `PUT /api/metas/config` | painel `/metas` (`resumoMetas()`): padrão vigente, valor efetivo por consultor (própria ou herdada, com "desde" e vigência futura), meta da equipe + soma das individuais, receita do mês com/sem Gerencial, histórico. PUT `{pessoaId: null\|id, escopo: dia\|semana\|mes\|equipe, vigenteDesde, valores: {ligacoes, leads, matriculas, receita \| receita (semana) \| semana, mes}}` — campo ausente não mexe, `null`/"" = sem meta (pessoa: volta a herdar), reais → centavos; data inválida/retroativa, escopo equipe com pessoa, consultor inexistente → 400/404. `/config` `{incluiGerencial: bool}`. Ambos emitem SSE `{tipo:"config"}` — a TV refaz o fetch em silêncio (sem pulso/toast) |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
+| `GET /territorio` | inteligência por território (Fase 1: cobertura do casamento + revisão manual; Fases 2–3: agregação e mapas, pendentes) |
+| `GET /api/territorio/cobertura?de&ate` | cobertura do casamento por camada (matrículas, receita, %), `casadas`, `chaves`, `semData`; período opcional (ausente = base inteira, mesmo filtro dos relatórios) |
+| `GET /api/territorio/pendencias` | `pendentes` e `aproximados` (chave, amostras como vieram, UF/CEP, matrículas, receita, 3 sugestões por Levenshtein) + `compartilhados` (municípios em duas regionais com opções de principal) |
+| `POST /api/territorio/apelidos` | `{cidadeNorm, ufNorm, resultado: municipio\|fora\|ignorar, codigoIbge}` → grava apelido `manual` e reprocessa todas as matrículas; inválido → 400 |
+| `GET /api/territorio/municipios` | 694 municípios (+ regionais vinculadas e principal) e 40 regionais |
+| `PUT /api/territorio/municipios/:codigo/principal` | `{regionalId}` — só entre as regionais vinculadas ao município no CSV (senão 400) |
+| `POST /api/territorio/apelidos/lote` | `{itens: [{cidadeNorm, ufNorm, resultado, codigoIbge}]}` — confirmação em lote da revisão; valida todos antes de gravar, reprocessa uma vez |
+| `GET /api/territorio/agregado?de&ate` | Fase 2: `estados`, `regionais` (principal; `compartilhados` à parte), `municipios` (694, com `temHistorico`), `outrosEstados.porUf`, `semMunicipio.porGrupo`, `total`, `conferencia.elos` (✓/✗ com diferença) |
+| `GET /api/territorio/municipios/:codigo?de&ate` | detalhe do município: regional principal + outras, `resumo` (matrículas, alunos distintos, receita, ticket médio, canceladas), `cursos`, `vendedores` (carteira), `matriculas` (alunos), `prospeccao` (regional no período com quantos municípios já compraram + `semCompra`; vizinhos geográficos com situação cliente/nunca e valores no período); 404 se não existe |
+| `GET /api/territorio/mapa` | malha municipal PR+SC em SVG (`dados/mapa_PR_SC.svg`, autenticada, `Cache-Control` 1 dia); 503 se o arquivo não existe |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
 sessão com usuário **ativo** (sessão órfã/inativa é destruída); sem login: API
@@ -501,6 +592,55 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   regerar cria nova versão, com seletor de versões na tela.
 - Pendente da etapa: outras aplicações de IA sobre as métricas (ex.: análise
   do período para a equipe), a priorizar.
+
+### ✅ Inteligência comercial por território (`/territorio`, 2026-09-09, migrações 18–19)
+Três níveis (estado PR/SC → regional → município) com receita e matrículas e
+filtro de período; tudo em SQL, **sem IA**. Feito em três fases, cada uma
+aprovada pelo usuário antes da seguinte. Revisão manual concluída em
+2026-09-09: 11 pendências + 3 aproximados resolvidos por decisão do usuário
+(CEP prevalece sobre nome digitado — "CONCORDIA" com CEP 83024 virou São
+José dos Pinhais); 0 pendências, conferência fechando nos 4 elos:
+- ✅ **Fase 1** — referência (`dados/`, migração 18), `state`/`cep` no sync,
+  casamento cidade → município em camadas com método/confiança, tela de
+  cobertura + revisão manual (pendências, aproximados, regional principal dos
+  compartilhados). Ver "Território" em Banco de dados.
+- ✅ **Fase 2** (2026-09-09, migração 19) — `agregarTerritorio(de, ate)`:
+  estado/regional/município com o filtro canônico de `metricas.js`; regional
+  soma só a principal, compartilhados à parte; `temHistorico` distingue "sem
+  dado" de "zero no período"; conferência obrigatória em 4 elos, exibida com
+  números e nunca ajustada. Navegação em tabelas com breadcrumb e
+  `location.hash` (`#/`, `#/r/<id>`, `#/m/<código>` + `?de&ate`); cartão
+  "Outros estados" por UF; detalhe do município (alunos distintos, cursos,
+  ticket médio, carteira por vendedor, lista de alunos, aviso quando pertence
+  a outra regional). Revisão manual com sugestão do sistema, confirmação em
+  lote e consulta de CEP pelo navegador.
+- ✅ **Fase 3** (2026-09-09) — mapas em SVG puro a partir de
+  `dados/mapa_PR_SC.svg` (malha do IBGE, qualidade mínima, 127 KB, `path
+  id="m<código>"`, servida por `GET /api/territorio/mapa` — sem CDN; o
+  cliente baixa uma vez, mede o bbox de cada path num svg invisível e clona
+  o `<g>` da UF a cada render). **ESTADO**: PR e SC lado a lado, cada
+  município pintado pela faixa da regional principal (5 quantis sobre os
+  valores > 0 do nível), rótulo da sigla no centro da regional, hover
+  destaca a regional inteira, barra "N de M municípios já compraram" por
+  estado e a comparação PR × SC em texto (SC: 77 de 295; PR: 278 de 399);
+  cartões "Outros estados" (por UF), "Sem município" e total ao lado.
+  **REGIONAL**: viewBox no bbox da regional (+8%), resto do estado esmaecido,
+  município por faixa própria, nome de cada município (rótulos ficam fora do
+  `transform` que espelha o eixo y — coordenadas convertidas), compartilhado
+  hachurado (`<pattern>`), cartão "Nunca compraram — o próximo cliente" com
+  chips. **MUNICÍPIO**: mesmo mapa com o município em traço branco + painel
+  da Fase 2 + prospecção: receita da regional no período e quantos municípios
+  dela já compraram, vizinhos clientes (N de M, com valores; tabela e chips
+  clicáveis) e a lista "na regional, nunca compraram". Modos **Receita |
+  Matrículas | Prospecção** (prospecção pinta cliente em ciano e nunca-comprou
+  em âmbar, nos 3 níveis). Cores: **sem dado (nunca comprou) = cinza neutro
+  `#232a3d` com traço**, zero no período = faixa mais escura da escala
+  (mesma distinção da TV). `Esc` sobe um nível; tooltip próprio; sem
+  biblioteca. Vizinhança vem de `dados/vizinhos_PR_SC.json` (gerado pelo
+  script a partir da própria malha: ≥ 2 vértices em comum; ≥ 1 só para quem
+  ficaria isolado — 1.926 fronteiras; `--so-vizinhos` regenera sem rede).
+- Regenerar a referência do IBGE: `node scripts/gerar-referencias-territorio.js`
+  (precisa de internet; commitar o resultado).
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

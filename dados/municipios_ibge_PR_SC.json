@@ -1,0 +1,3472 @@
+[
+ {
+  "codigo": 4100103,
+  "uf": "PR",
+  "nome": "Abatiá"
+ },
+ {
+  "codigo": 4100202,
+  "uf": "PR",
+  "nome": "Adrianópolis"
+ },
+ {
+  "codigo": 4100301,
+  "uf": "PR",
+  "nome": "Agudos do Sul"
+ },
+ {
+  "codigo": 4100400,
+  "uf": "PR",
+  "nome": "Almirante Tamandaré"
+ },
+ {
+  "codigo": 4100459,
+  "uf": "PR",
+  "nome": "Altamira do Paraná"
+ },
+ {
+  "codigo": 4100509,
+  "uf": "PR",
+  "nome": "Altônia"
+ },
+ {
+  "codigo": 4100608,
+  "uf": "PR",
+  "nome": "Alto Paraná"
+ },
+ {
+  "codigo": 4100707,
+  "uf": "PR",
+  "nome": "Alto Piquiri"
+ },
+ {
+  "codigo": 4100806,
+  "uf": "PR",
+  "nome": "Alvorada do Sul"
+ },
+ {
+  "codigo": 4100905,
+  "uf": "PR",
+  "nome": "Amaporã"
+ },
+ {
+  "codigo": 4101002,
+  "uf": "PR",
+  "nome": "Ampére"
+ },
+ {
+  "codigo": 4101051,
+  "uf": "PR",
+  "nome": "Anahy"
+ },
+ {
+  "codigo": 4101101,
+  "uf": "PR",
+  "nome": "Andirá"
+ },
+ {
+  "codigo": 4101150,
+  "uf": "PR",
+  "nome": "Ângulo"
+ },
+ {
+  "codigo": 4101200,
+  "uf": "PR",
+  "nome": "Antonina"
+ },
+ {
+  "codigo": 4101309,
+  "uf": "PR",
+  "nome": "Antônio Olinto"
+ },
+ {
+  "codigo": 4101408,
+  "uf": "PR",
+  "nome": "Apucarana"
+ },
+ {
+  "codigo": 4101507,
+  "uf": "PR",
+  "nome": "Arapongas"
+ },
+ {
+  "codigo": 4101606,
+  "uf": "PR",
+  "nome": "Arapoti"
+ },
+ {
+  "codigo": 4101655,
+  "uf": "PR",
+  "nome": "Arapuã"
+ },
+ {
+  "codigo": 4101705,
+  "uf": "PR",
+  "nome": "Araruna"
+ },
+ {
+  "codigo": 4101804,
+  "uf": "PR",
+  "nome": "Araucária"
+ },
+ {
+  "codigo": 4101853,
+  "uf": "PR",
+  "nome": "Ariranha do Ivaí"
+ },
+ {
+  "codigo": 4101903,
+  "uf": "PR",
+  "nome": "Assaí"
+ },
+ {
+  "codigo": 4102000,
+  "uf": "PR",
+  "nome": "Assis Chateaubriand"
+ },
+ {
+  "codigo": 4102109,
+  "uf": "PR",
+  "nome": "Astorga"
+ },
+ {
+  "codigo": 4102208,
+  "uf": "PR",
+  "nome": "Atalaia"
+ },
+ {
+  "codigo": 4102307,
+  "uf": "PR",
+  "nome": "Balsa Nova"
+ },
+ {
+  "codigo": 4102406,
+  "uf": "PR",
+  "nome": "Bandeirantes"
+ },
+ {
+  "codigo": 4102505,
+  "uf": "PR",
+  "nome": "Barbosa Ferraz"
+ },
+ {
+  "codigo": 4102604,
+  "uf": "PR",
+  "nome": "Barracão"
+ },
+ {
+  "codigo": 4102703,
+  "uf": "PR",
+  "nome": "Barra do Jacaré"
+ },
+ {
+  "codigo": 4102752,
+  "uf": "PR",
+  "nome": "Bela Vista da Caroba"
+ },
+ {
+  "codigo": 4102802,
+  "uf": "PR",
+  "nome": "Bela Vista do Paraíso"
+ },
+ {
+  "codigo": 4102901,
+  "uf": "PR",
+  "nome": "Bituruna"
+ },
+ {
+  "codigo": 4103008,
+  "uf": "PR",
+  "nome": "Boa Esperança"
+ },
+ {
+  "codigo": 4103024,
+  "uf": "PR",
+  "nome": "Boa Esperança do Iguaçu"
+ },
+ {
+  "codigo": 4103040,
+  "uf": "PR",
+  "nome": "Boa Ventura de São Roque"
+ },
+ {
+  "codigo": 4103057,
+  "uf": "PR",
+  "nome": "Boa Vista da Aparecida"
+ },
+ {
+  "codigo": 4103107,
+  "uf": "PR",
+  "nome": "Bocaiúva do Sul"
+ },
+ {
+  "codigo": 4103156,
+  "uf": "PR",
+  "nome": "Bom Jesus do Sul"
+ },
+ {
+  "codigo": 4103206,
+  "uf": "PR",
+  "nome": "Bom Sucesso"
+ },
+ {
+  "codigo": 4103222,
+  "uf": "PR",
+  "nome": "Bom Sucesso do Sul"
+ },
+ {
+  "codigo": 4103305,
+  "uf": "PR",
+  "nome": "Borrazópolis"
+ },
+ {
+  "codigo": 4103354,
+  "uf": "PR",
+  "nome": "Braganey"
+ },
+ {
+  "codigo": 4103370,
+  "uf": "PR",
+  "nome": "Brasilândia do Sul"
+ },
+ {
+  "codigo": 4103404,
+  "uf": "PR",
+  "nome": "Cafeara"
+ },
+ {
+  "codigo": 4103453,
+  "uf": "PR",
+  "nome": "Cafelândia"
+ },
+ {
+  "codigo": 4103479,
+  "uf": "PR",
+  "nome": "Cafezal do Sul"
+ },
+ {
+  "codigo": 4103503,
+  "uf": "PR",
+  "nome": "Califórnia"
+ },
+ {
+  "codigo": 4103602,
+  "uf": "PR",
+  "nome": "Cambará"
+ },
+ {
+  "codigo": 4103701,
+  "uf": "PR",
+  "nome": "Cambé"
+ },
+ {
+  "codigo": 4103800,
+  "uf": "PR",
+  "nome": "Cambira"
+ },
+ {
+  "codigo": 4103909,
+  "uf": "PR",
+  "nome": "Campina da Lagoa"
+ },
+ {
+  "codigo": 4103958,
+  "uf": "PR",
+  "nome": "Campina do Simão"
+ },
+ {
+  "codigo": 4104006,
+  "uf": "PR",
+  "nome": "Campina Grande do Sul"
+ },
+ {
+  "codigo": 4104055,
+  "uf": "PR",
+  "nome": "Campo Bonito"
+ },
+ {
+  "codigo": 4104105,
+  "uf": "PR",
+  "nome": "Campo do Tenente"
+ },
+ {
+  "codigo": 4104204,
+  "uf": "PR",
+  "nome": "Campo Largo"
+ },
+ {
+  "codigo": 4104253,
+  "uf": "PR",
+  "nome": "Campo Magro"
+ },
+ {
+  "codigo": 4104303,
+  "uf": "PR",
+  "nome": "Campo Mourão"
+ },
+ {
+  "codigo": 4104402,
+  "uf": "PR",
+  "nome": "Cândido de Abreu"
+ },
+ {
+  "codigo": 4104428,
+  "uf": "PR",
+  "nome": "Candói"
+ },
+ {
+  "codigo": 4104451,
+  "uf": "PR",
+  "nome": "Cantagalo"
+ },
+ {
+  "codigo": 4104501,
+  "uf": "PR",
+  "nome": "Capanema"
+ },
+ {
+  "codigo": 4104600,
+  "uf": "PR",
+  "nome": "Capitão Leônidas Marques"
+ },
+ {
+  "codigo": 4104659,
+  "uf": "PR",
+  "nome": "Carambeí"
+ },
+ {
+  "codigo": 4104709,
+  "uf": "PR",
+  "nome": "Carlópolis"
+ },
+ {
+  "codigo": 4104808,
+  "uf": "PR",
+  "nome": "Cascavel"
+ },
+ {
+  "codigo": 4104907,
+  "uf": "PR",
+  "nome": "Castro"
+ },
+ {
+  "codigo": 4105003,
+  "uf": "PR",
+  "nome": "Catanduvas"
+ },
+ {
+  "codigo": 4105102,
+  "uf": "PR",
+  "nome": "Centenário do Sul"
+ },
+ {
+  "codigo": 4105201,
+  "uf": "PR",
+  "nome": "Cerro Azul"
+ },
+ {
+  "codigo": 4105300,
+  "uf": "PR",
+  "nome": "Céu Azul"
+ },
+ {
+  "codigo": 4105409,
+  "uf": "PR",
+  "nome": "Chopinzinho"
+ },
+ {
+  "codigo": 4105508,
+  "uf": "PR",
+  "nome": "Cianorte"
+ },
+ {
+  "codigo": 4105607,
+  "uf": "PR",
+  "nome": "Cidade Gaúcha"
+ },
+ {
+  "codigo": 4105706,
+  "uf": "PR",
+  "nome": "Clevelândia"
+ },
+ {
+  "codigo": 4105805,
+  "uf": "PR",
+  "nome": "Colombo"
+ },
+ {
+  "codigo": 4105904,
+  "uf": "PR",
+  "nome": "Colorado"
+ },
+ {
+  "codigo": 4106001,
+  "uf": "PR",
+  "nome": "Congonhinhas"
+ },
+ {
+  "codigo": 4106100,
+  "uf": "PR",
+  "nome": "Conselheiro Mairinck"
+ },
+ {
+  "codigo": 4106209,
+  "uf": "PR",
+  "nome": "Contenda"
+ },
+ {
+  "codigo": 4106308,
+  "uf": "PR",
+  "nome": "Corbélia"
+ },
+ {
+  "codigo": 4106407,
+  "uf": "PR",
+  "nome": "Cornélio Procópio"
+ },
+ {
+  "codigo": 4106456,
+  "uf": "PR",
+  "nome": "Coronel Domingos Soares"
+ },
+ {
+  "codigo": 4106506,
+  "uf": "PR",
+  "nome": "Coronel Vivida"
+ },
+ {
+  "codigo": 4106555,
+  "uf": "PR",
+  "nome": "Corumbataí do Sul"
+ },
+ {
+  "codigo": 4106571,
+  "uf": "PR",
+  "nome": "Cruzeiro do Iguaçu"
+ },
+ {
+  "codigo": 4106605,
+  "uf": "PR",
+  "nome": "Cruzeiro do Oeste"
+ },
+ {
+  "codigo": 4106704,
+  "uf": "PR",
+  "nome": "Cruzeiro do Sul"
+ },
+ {
+  "codigo": 4106803,
+  "uf": "PR",
+  "nome": "Cruz Machado"
+ },
+ {
+  "codigo": 4106852,
+  "uf": "PR",
+  "nome": "Cruzmaltina"
+ },
+ {
+  "codigo": 4106902,
+  "uf": "PR",
+  "nome": "Curitiba"
+ },
+ {
+  "codigo": 4107009,
+  "uf": "PR",
+  "nome": "Curiúva"
+ },
+ {
+  "codigo": 4107108,
+  "uf": "PR",
+  "nome": "Diamante do Norte"
+ },
+ {
+  "codigo": 4107124,
+  "uf": "PR",
+  "nome": "Diamante do Sul"
+ },
+ {
+  "codigo": 4107157,
+  "uf": "PR",
+  "nome": "Diamante D'Oeste"
+ },
+ {
+  "codigo": 4107207,
+  "uf": "PR",
+  "nome": "Dois Vizinhos"
+ },
+ {
+  "codigo": 4107256,
+  "uf": "PR",
+  "nome": "Douradina"
+ },
+ {
+  "codigo": 4107306,
+  "uf": "PR",
+  "nome": "Doutor Camargo"
+ },
+ {
+  "codigo": 4107405,
+  "uf": "PR",
+  "nome": "Enéas Marques"
+ },
+ {
+  "codigo": 4107504,
+  "uf": "PR",
+  "nome": "Engenheiro Beltrão"
+ },
+ {
+  "codigo": 4107520,
+  "uf": "PR",
+  "nome": "Esperança Nova"
+ },
+ {
+  "codigo": 4107538,
+  "uf": "PR",
+  "nome": "Entre Rios do Oeste"
+ },
+ {
+  "codigo": 4107546,
+  "uf": "PR",
+  "nome": "Espigão Alto do Iguaçu"
+ },
+ {
+  "codigo": 4107553,
+  "uf": "PR",
+  "nome": "Farol"
+ },
+ {
+  "codigo": 4107603,
+  "uf": "PR",
+  "nome": "Faxinal"
+ },
+ {
+  "codigo": 4107652,
+  "uf": "PR",
+  "nome": "Fazenda Rio Grande"
+ },
+ {
+  "codigo": 4107702,
+  "uf": "PR",
+  "nome": "Fênix"
+ },
+ {
+  "codigo": 4107736,
+  "uf": "PR",
+  "nome": "Fernandes Pinheiro"
+ },
+ {
+  "codigo": 4107751,
+  "uf": "PR",
+  "nome": "Figueira"
+ },
+ {
+  "codigo": 4107801,
+  "uf": "PR",
+  "nome": "Floraí"
+ },
+ {
+  "codigo": 4107850,
+  "uf": "PR",
+  "nome": "Flor da Serra do Sul"
+ },
+ {
+  "codigo": 4107900,
+  "uf": "PR",
+  "nome": "Floresta"
+ },
+ {
+  "codigo": 4108007,
+  "uf": "PR",
+  "nome": "Florestópolis"
+ },
+ {
+  "codigo": 4108106,
+  "uf": "PR",
+  "nome": "Flórida"
+ },
+ {
+  "codigo": 4108205,
+  "uf": "PR",
+  "nome": "Formosa do Oeste"
+ },
+ {
+  "codigo": 4108304,
+  "uf": "PR",
+  "nome": "Foz do Iguaçu"
+ },
+ {
+  "codigo": 4108320,
+  "uf": "PR",
+  "nome": "Francisco Alves"
+ },
+ {
+  "codigo": 4108403,
+  "uf": "PR",
+  "nome": "Francisco Beltrão"
+ },
+ {
+  "codigo": 4108452,
+  "uf": "PR",
+  "nome": "Foz do Jordão"
+ },
+ {
+  "codigo": 4108502,
+  "uf": "PR",
+  "nome": "General Carneiro"
+ },
+ {
+  "codigo": 4108551,
+  "uf": "PR",
+  "nome": "Godoy Moreira"
+ },
+ {
+  "codigo": 4108601,
+  "uf": "PR",
+  "nome": "Goioerê"
+ },
+ {
+  "codigo": 4108650,
+  "uf": "PR",
+  "nome": "Goioxim"
+ },
+ {
+  "codigo": 4108700,
+  "uf": "PR",
+  "nome": "Grandes Rios"
+ },
+ {
+  "codigo": 4108809,
+  "uf": "PR",
+  "nome": "Guaíra"
+ },
+ {
+  "codigo": 4108908,
+  "uf": "PR",
+  "nome": "Guairaçá"
+ },
+ {
+  "codigo": 4108957,
+  "uf": "PR",
+  "nome": "Guamiranga"
+ },
+ {
+  "codigo": 4109005,
+  "uf": "PR",
+  "nome": "Guapirama"
+ },
+ {
+  "codigo": 4109104,
+  "uf": "PR",
+  "nome": "Guaporema"
+ },
+ {
+  "codigo": 4109203,
+  "uf": "PR",
+  "nome": "Guaraci"
+ },
+ {
+  "codigo": 4109302,
+  "uf": "PR",
+  "nome": "Guaraniaçu"
+ },
+ {
+  "codigo": 4109401,
+  "uf": "PR",
+  "nome": "Guarapuava"
+ },
+ {
+  "codigo": 4109500,
+  "uf": "PR",
+  "nome": "Guaraqueçaba"
+ },
+ {
+  "codigo": 4109609,
+  "uf": "PR",
+  "nome": "Guaratuba"
+ },
+ {
+  "codigo": 4109658,
+  "uf": "PR",
+  "nome": "Honório Serpa"
+ },
+ {
+  "codigo": 4109708,
+  "uf": "PR",
+  "nome": "Ibaiti"
+ },
+ {
+  "codigo": 4109757,
+  "uf": "PR",
+  "nome": "Ibema"
+ },
+ {
+  "codigo": 4109807,
+  "uf": "PR",
+  "nome": "Ibiporã"
+ },
+ {
+  "codigo": 4109906,
+  "uf": "PR",
+  "nome": "Icaraíma"
+ },
+ {
+  "codigo": 4110003,
+  "uf": "PR",
+  "nome": "Iguaraçu"
+ },
+ {
+  "codigo": 4110052,
+  "uf": "PR",
+  "nome": "Iguatu"
+ },
+ {
+  "codigo": 4110078,
+  "uf": "PR",
+  "nome": "Imbaú"
+ },
+ {
+  "codigo": 4110102,
+  "uf": "PR",
+  "nome": "Imbituva"
+ },
+ {
+  "codigo": 4110201,
+  "uf": "PR",
+  "nome": "Inácio Martins"
+ },
+ {
+  "codigo": 4110300,
+  "uf": "PR",
+  "nome": "Inajá"
+ },
+ {
+  "codigo": 4110409,
+  "uf": "PR",
+  "nome": "Indianópolis"
+ },
+ {
+  "codigo": 4110508,
+  "uf": "PR",
+  "nome": "Ipiranga"
+ },
+ {
+  "codigo": 4110607,
+  "uf": "PR",
+  "nome": "Iporã"
+ },
+ {
+  "codigo": 4110656,
+  "uf": "PR",
+  "nome": "Iracema do Oeste"
+ },
+ {
+  "codigo": 4110706,
+  "uf": "PR",
+  "nome": "Irati"
+ },
+ {
+  "codigo": 4110805,
+  "uf": "PR",
+  "nome": "Iretama"
+ },
+ {
+  "codigo": 4110904,
+  "uf": "PR",
+  "nome": "Itaguajé"
+ },
+ {
+  "codigo": 4110953,
+  "uf": "PR",
+  "nome": "Itaipulândia"
+ },
+ {
+  "codigo": 4111001,
+  "uf": "PR",
+  "nome": "Itambaracá"
+ },
+ {
+  "codigo": 4111100,
+  "uf": "PR",
+  "nome": "Itambé"
+ },
+ {
+  "codigo": 4111209,
+  "uf": "PR",
+  "nome": "Itapejara d'Oeste"
+ },
+ {
+  "codigo": 4111258,
+  "uf": "PR",
+  "nome": "Itaperuçu"
+ },
+ {
+  "codigo": 4111308,
+  "uf": "PR",
+  "nome": "Itaúna do Sul"
+ },
+ {
+  "codigo": 4111407,
+  "uf": "PR",
+  "nome": "Ivaí"
+ },
+ {
+  "codigo": 4111506,
+  "uf": "PR",
+  "nome": "Ivaiporã"
+ },
+ {
+  "codigo": 4111555,
+  "uf": "PR",
+  "nome": "Ivaté"
+ },
+ {
+  "codigo": 4111605,
+  "uf": "PR",
+  "nome": "Ivatuba"
+ },
+ {
+  "codigo": 4111704,
+  "uf": "PR",
+  "nome": "Jaboti"
+ },
+ {
+  "codigo": 4111803,
+  "uf": "PR",
+  "nome": "Jacarezinho"
+ },
+ {
+  "codigo": 4111902,
+  "uf": "PR",
+  "nome": "Jaguapitã"
+ },
+ {
+  "codigo": 4112009,
+  "uf": "PR",
+  "nome": "Jaguariaíva"
+ },
+ {
+  "codigo": 4112108,
+  "uf": "PR",
+  "nome": "Jandaia do Sul"
+ },
+ {
+  "codigo": 4112207,
+  "uf": "PR",
+  "nome": "Janiópolis"
+ },
+ {
+  "codigo": 4112306,
+  "uf": "PR",
+  "nome": "Japira"
+ },
+ {
+  "codigo": 4112405,
+  "uf": "PR",
+  "nome": "Japurá"
+ },
+ {
+  "codigo": 4112504,
+  "uf": "PR",
+  "nome": "Jardim Alegre"
+ },
+ {
+  "codigo": 4112603,
+  "uf": "PR",
+  "nome": "Jardim Olinda"
+ },
+ {
+  "codigo": 4112702,
+  "uf": "PR",
+  "nome": "Jataizinho"
+ },
+ {
+  "codigo": 4112751,
+  "uf": "PR",
+  "nome": "Jesuítas"
+ },
+ {
+  "codigo": 4112801,
+  "uf": "PR",
+  "nome": "Joaquim Távora"
+ },
+ {
+  "codigo": 4112900,
+  "uf": "PR",
+  "nome": "Jundiaí do Sul"
+ },
+ {
+  "codigo": 4112959,
+  "uf": "PR",
+  "nome": "Juranda"
+ },
+ {
+  "codigo": 4113007,
+  "uf": "PR",
+  "nome": "Jussara"
+ },
+ {
+  "codigo": 4113106,
+  "uf": "PR",
+  "nome": "Kaloré"
+ },
+ {
+  "codigo": 4113205,
+  "uf": "PR",
+  "nome": "Lapa"
+ },
+ {
+  "codigo": 4113254,
+  "uf": "PR",
+  "nome": "Laranjal"
+ },
+ {
+  "codigo": 4113304,
+  "uf": "PR",
+  "nome": "Laranjeiras do Sul"
+ },
+ {
+  "codigo": 4113403,
+  "uf": "PR",
+  "nome": "Leópolis"
+ },
+ {
+  "codigo": 4113429,
+  "uf": "PR",
+  "nome": "Lidianópolis"
+ },
+ {
+  "codigo": 4113452,
+  "uf": "PR",
+  "nome": "Lindoeste"
+ },
+ {
+  "codigo": 4113502,
+  "uf": "PR",
+  "nome": "Loanda"
+ },
+ {
+  "codigo": 4113601,
+  "uf": "PR",
+  "nome": "Lobato"
+ },
+ {
+  "codigo": 4113700,
+  "uf": "PR",
+  "nome": "Londrina"
+ },
+ {
+  "codigo": 4113734,
+  "uf": "PR",
+  "nome": "Luiziana"
+ },
+ {
+  "codigo": 4113759,
+  "uf": "PR",
+  "nome": "Lunardelli"
+ },
+ {
+  "codigo": 4113809,
+  "uf": "PR",
+  "nome": "Lupionópolis"
+ },
+ {
+  "codigo": 4113908,
+  "uf": "PR",
+  "nome": "Mallet"
+ },
+ {
+  "codigo": 4114005,
+  "uf": "PR",
+  "nome": "Mamborê"
+ },
+ {
+  "codigo": 4114104,
+  "uf": "PR",
+  "nome": "Mandaguaçu"
+ },
+ {
+  "codigo": 4114203,
+  "uf": "PR",
+  "nome": "Mandaguari"
+ },
+ {
+  "codigo": 4114302,
+  "uf": "PR",
+  "nome": "Mandirituba"
+ },
+ {
+  "codigo": 4114351,
+  "uf": "PR",
+  "nome": "Manfrinópolis"
+ },
+ {
+  "codigo": 4114401,
+  "uf": "PR",
+  "nome": "Mangueirinha"
+ },
+ {
+  "codigo": 4114500,
+  "uf": "PR",
+  "nome": "Manoel Ribas"
+ },
+ {
+  "codigo": 4114609,
+  "uf": "PR",
+  "nome": "Marechal Cândido Rondon"
+ },
+ {
+  "codigo": 4114708,
+  "uf": "PR",
+  "nome": "Maria Helena"
+ },
+ {
+  "codigo": 4114807,
+  "uf": "PR",
+  "nome": "Marialva"
+ },
+ {
+  "codigo": 4114906,
+  "uf": "PR",
+  "nome": "Marilândia do Sul"
+ },
+ {
+  "codigo": 4115002,
+  "uf": "PR",
+  "nome": "Marilena"
+ },
+ {
+  "codigo": 4115101,
+  "uf": "PR",
+  "nome": "Mariluz"
+ },
+ {
+  "codigo": 4115200,
+  "uf": "PR",
+  "nome": "Maringá"
+ },
+ {
+  "codigo": 4115309,
+  "uf": "PR",
+  "nome": "Mariópolis"
+ },
+ {
+  "codigo": 4115358,
+  "uf": "PR",
+  "nome": "Maripá"
+ },
+ {
+  "codigo": 4115408,
+  "uf": "PR",
+  "nome": "Marmeleiro"
+ },
+ {
+  "codigo": 4115457,
+  "uf": "PR",
+  "nome": "Marquinho"
+ },
+ {
+  "codigo": 4115507,
+  "uf": "PR",
+  "nome": "Marumbi"
+ },
+ {
+  "codigo": 4115606,
+  "uf": "PR",
+  "nome": "Matelândia"
+ },
+ {
+  "codigo": 4115705,
+  "uf": "PR",
+  "nome": "Matinhos"
+ },
+ {
+  "codigo": 4115739,
+  "uf": "PR",
+  "nome": "Mato Rico"
+ },
+ {
+  "codigo": 4115754,
+  "uf": "PR",
+  "nome": "Mauá da Serra"
+ },
+ {
+  "codigo": 4115804,
+  "uf": "PR",
+  "nome": "Medianeira"
+ },
+ {
+  "codigo": 4115853,
+  "uf": "PR",
+  "nome": "Mercedes"
+ },
+ {
+  "codigo": 4115903,
+  "uf": "PR",
+  "nome": "Mirador"
+ },
+ {
+  "codigo": 4116000,
+  "uf": "PR",
+  "nome": "Miraselva"
+ },
+ {
+  "codigo": 4116059,
+  "uf": "PR",
+  "nome": "Missal"
+ },
+ {
+  "codigo": 4116109,
+  "uf": "PR",
+  "nome": "Moreira Sales"
+ },
+ {
+  "codigo": 4116208,
+  "uf": "PR",
+  "nome": "Morretes"
+ },
+ {
+  "codigo": 4116307,
+  "uf": "PR",
+  "nome": "Munhoz de Melo"
+ },
+ {
+  "codigo": 4116406,
+  "uf": "PR",
+  "nome": "Nossa Senhora das Graças"
+ },
+ {
+  "codigo": 4116505,
+  "uf": "PR",
+  "nome": "Nova Aliança do Ivaí"
+ },
+ {
+  "codigo": 4116604,
+  "uf": "PR",
+  "nome": "Nova América da Colina"
+ },
+ {
+  "codigo": 4116703,
+  "uf": "PR",
+  "nome": "Nova Aurora"
+ },
+ {
+  "codigo": 4116802,
+  "uf": "PR",
+  "nome": "Nova Cantu"
+ },
+ {
+  "codigo": 4116901,
+  "uf": "PR",
+  "nome": "Nova Esperança"
+ },
+ {
+  "codigo": 4116950,
+  "uf": "PR",
+  "nome": "Nova Esperança do Sudoeste"
+ },
+ {
+  "codigo": 4117008,
+  "uf": "PR",
+  "nome": "Nova Fátima"
+ },
+ {
+  "codigo": 4117057,
+  "uf": "PR",
+  "nome": "Nova Laranjeiras"
+ },
+ {
+  "codigo": 4117107,
+  "uf": "PR",
+  "nome": "Nova Londrina"
+ },
+ {
+  "codigo": 4117206,
+  "uf": "PR",
+  "nome": "Nova Olímpia"
+ },
+ {
+  "codigo": 4117214,
+  "uf": "PR",
+  "nome": "Nova Santa Bárbara"
+ },
+ {
+  "codigo": 4117222,
+  "uf": "PR",
+  "nome": "Nova Santa Rosa"
+ },
+ {
+  "codigo": 4117255,
+  "uf": "PR",
+  "nome": "Nova Prata do Iguaçu"
+ },
+ {
+  "codigo": 4117271,
+  "uf": "PR",
+  "nome": "Nova Tebas"
+ },
+ {
+  "codigo": 4117297,
+  "uf": "PR",
+  "nome": "Novo Itacolomi"
+ },
+ {
+  "codigo": 4117305,
+  "uf": "PR",
+  "nome": "Ortigueira"
+ },
+ {
+  "codigo": 4117404,
+  "uf": "PR",
+  "nome": "Ourizona"
+ },
+ {
+  "codigo": 4117453,
+  "uf": "PR",
+  "nome": "Ouro Verde do Oeste"
+ },
+ {
+  "codigo": 4117503,
+  "uf": "PR",
+  "nome": "Paiçandu"
+ },
+ {
+  "codigo": 4117602,
+  "uf": "PR",
+  "nome": "Palmas"
+ },
+ {
+  "codigo": 4117701,
+  "uf": "PR",
+  "nome": "Palmeira"
+ },
+ {
+  "codigo": 4117800,
+  "uf": "PR",
+  "nome": "Palmital"
+ },
+ {
+  "codigo": 4117909,
+  "uf": "PR",
+  "nome": "Palotina"
+ },
+ {
+  "codigo": 4118006,
+  "uf": "PR",
+  "nome": "Paraíso do Norte"
+ },
+ {
+  "codigo": 4118105,
+  "uf": "PR",
+  "nome": "Paranacity"
+ },
+ {
+  "codigo": 4118204,
+  "uf": "PR",
+  "nome": "Paranaguá"
+ },
+ {
+  "codigo": 4118303,
+  "uf": "PR",
+  "nome": "Paranapoema"
+ },
+ {
+  "codigo": 4118402,
+  "uf": "PR",
+  "nome": "Paranavaí"
+ },
+ {
+  "codigo": 4118451,
+  "uf": "PR",
+  "nome": "Pato Bragado"
+ },
+ {
+  "codigo": 4118501,
+  "uf": "PR",
+  "nome": "Pato Branco"
+ },
+ {
+  "codigo": 4118600,
+  "uf": "PR",
+  "nome": "Paula Freitas"
+ },
+ {
+  "codigo": 4118709,
+  "uf": "PR",
+  "nome": "Paulo Frontin"
+ },
+ {
+  "codigo": 4118808,
+  "uf": "PR",
+  "nome": "Peabiru"
+ },
+ {
+  "codigo": 4118857,
+  "uf": "PR",
+  "nome": "Perobal"
+ },
+ {
+  "codigo": 4118907,
+  "uf": "PR",
+  "nome": "Pérola"
+ },
+ {
+  "codigo": 4119004,
+  "uf": "PR",
+  "nome": "Pérola d'Oeste"
+ },
+ {
+  "codigo": 4119103,
+  "uf": "PR",
+  "nome": "Piên"
+ },
+ {
+  "codigo": 4119152,
+  "uf": "PR",
+  "nome": "Pinhais"
+ },
+ {
+  "codigo": 4119202,
+  "uf": "PR",
+  "nome": "Pinhalão"
+ },
+ {
+  "codigo": 4119251,
+  "uf": "PR",
+  "nome": "Pinhal de São Bento"
+ },
+ {
+  "codigo": 4119301,
+  "uf": "PR",
+  "nome": "Pinhão"
+ },
+ {
+  "codigo": 4119400,
+  "uf": "PR",
+  "nome": "Piraí do Sul"
+ },
+ {
+  "codigo": 4119509,
+  "uf": "PR",
+  "nome": "Piraquara"
+ },
+ {
+  "codigo": 4119608,
+  "uf": "PR",
+  "nome": "Pitanga"
+ },
+ {
+  "codigo": 4119657,
+  "uf": "PR",
+  "nome": "Pitangueiras"
+ },
+ {
+  "codigo": 4119707,
+  "uf": "PR",
+  "nome": "Planaltina do Paraná"
+ },
+ {
+  "codigo": 4119806,
+  "uf": "PR",
+  "nome": "Planalto"
+ },
+ {
+  "codigo": 4119905,
+  "uf": "PR",
+  "nome": "Ponta Grossa"
+ },
+ {
+  "codigo": 4119954,
+  "uf": "PR",
+  "nome": "Pontal do Paraná"
+ },
+ {
+  "codigo": 4120002,
+  "uf": "PR",
+  "nome": "Porecatu"
+ },
+ {
+  "codigo": 4120101,
+  "uf": "PR",
+  "nome": "Porto Amazonas"
+ },
+ {
+  "codigo": 4120150,
+  "uf": "PR",
+  "nome": "Porto Barreiro"
+ },
+ {
+  "codigo": 4120200,
+  "uf": "PR",
+  "nome": "Porto Rico"
+ },
+ {
+  "codigo": 4120309,
+  "uf": "PR",
+  "nome": "Porto Vitória"
+ },
+ {
+  "codigo": 4120333,
+  "uf": "PR",
+  "nome": "Prado Ferreira"
+ },
+ {
+  "codigo": 4120358,
+  "uf": "PR",
+  "nome": "Pranchita"
+ },
+ {
+  "codigo": 4120408,
+  "uf": "PR",
+  "nome": "Presidente Castelo Branco"
+ },
+ {
+  "codigo": 4120507,
+  "uf": "PR",
+  "nome": "Primeiro de Maio"
+ },
+ {
+  "codigo": 4120606,
+  "uf": "PR",
+  "nome": "Prudentópolis"
+ },
+ {
+  "codigo": 4120655,
+  "uf": "PR",
+  "nome": "Quarto Centenário"
+ },
+ {
+  "codigo": 4120705,
+  "uf": "PR",
+  "nome": "Quatiguá"
+ },
+ {
+  "codigo": 4120804,
+  "uf": "PR",
+  "nome": "Quatro Barras"
+ },
+ {
+  "codigo": 4120853,
+  "uf": "PR",
+  "nome": "Quatro Pontes"
+ },
+ {
+  "codigo": 4120903,
+  "uf": "PR",
+  "nome": "Quedas do Iguaçu"
+ },
+ {
+  "codigo": 4121000,
+  "uf": "PR",
+  "nome": "Querência do Norte"
+ },
+ {
+  "codigo": 4121109,
+  "uf": "PR",
+  "nome": "Quinta do Sol"
+ },
+ {
+  "codigo": 4121208,
+  "uf": "PR",
+  "nome": "Quitandinha"
+ },
+ {
+  "codigo": 4121257,
+  "uf": "PR",
+  "nome": "Ramilândia"
+ },
+ {
+  "codigo": 4121307,
+  "uf": "PR",
+  "nome": "Rancho Alegre"
+ },
+ {
+  "codigo": 4121356,
+  "uf": "PR",
+  "nome": "Rancho Alegre D'Oeste"
+ },
+ {
+  "codigo": 4121406,
+  "uf": "PR",
+  "nome": "Realeza"
+ },
+ {
+  "codigo": 4121505,
+  "uf": "PR",
+  "nome": "Rebouças"
+ },
+ {
+  "codigo": 4121604,
+  "uf": "PR",
+  "nome": "Renascença"
+ },
+ {
+  "codigo": 4121703,
+  "uf": "PR",
+  "nome": "Reserva"
+ },
+ {
+  "codigo": 4121752,
+  "uf": "PR",
+  "nome": "Reserva do Iguaçu"
+ },
+ {
+  "codigo": 4121802,
+  "uf": "PR",
+  "nome": "Ribeirão Claro"
+ },
+ {
+  "codigo": 4121901,
+  "uf": "PR",
+  "nome": "Ribeirão do Pinhal"
+ },
+ {
+  "codigo": 4122008,
+  "uf": "PR",
+  "nome": "Rio Azul"
+ },
+ {
+  "codigo": 4122107,
+  "uf": "PR",
+  "nome": "Rio Bom"
+ },
+ {
+  "codigo": 4122156,
+  "uf": "PR",
+  "nome": "Rio Bonito do Iguaçu"
+ },
+ {
+  "codigo": 4122172,
+  "uf": "PR",
+  "nome": "Rio Branco do Ivaí"
+ },
+ {
+  "codigo": 4122206,
+  "uf": "PR",
+  "nome": "Rio Branco do Sul"
+ },
+ {
+  "codigo": 4122305,
+  "uf": "PR",
+  "nome": "Rio Negro"
+ },
+ {
+  "codigo": 4122404,
+  "uf": "PR",
+  "nome": "Rolândia"
+ },
+ {
+  "codigo": 4122503,
+  "uf": "PR",
+  "nome": "Roncador"
+ },
+ {
+  "codigo": 4122602,
+  "uf": "PR",
+  "nome": "Rondon"
+ },
+ {
+  "codigo": 4122651,
+  "uf": "PR",
+  "nome": "Rosário do Ivaí"
+ },
+ {
+  "codigo": 4122701,
+  "uf": "PR",
+  "nome": "Sabáudia"
+ },
+ {
+  "codigo": 4122800,
+  "uf": "PR",
+  "nome": "Salgado Filho"
+ },
+ {
+  "codigo": 4122909,
+  "uf": "PR",
+  "nome": "Salto do Itararé"
+ },
+ {
+  "codigo": 4123006,
+  "uf": "PR",
+  "nome": "Salto do Lontra"
+ },
+ {
+  "codigo": 4123105,
+  "uf": "PR",
+  "nome": "Santa Amélia"
+ },
+ {
+  "codigo": 4123204,
+  "uf": "PR",
+  "nome": "Santa Cecília do Pavão"
+ },
+ {
+  "codigo": 4123303,
+  "uf": "PR",
+  "nome": "Santa Cruz de Monte Castelo"
+ },
+ {
+  "codigo": 4123402,
+  "uf": "PR",
+  "nome": "Santa Fé"
+ },
+ {
+  "codigo": 4123501,
+  "uf": "PR",
+  "nome": "Santa Helena"
+ },
+ {
+  "codigo": 4123600,
+  "uf": "PR",
+  "nome": "Santa Inês"
+ },
+ {
+  "codigo": 4123709,
+  "uf": "PR",
+  "nome": "Santa Isabel do Ivaí"
+ },
+ {
+  "codigo": 4123808,
+  "uf": "PR",
+  "nome": "Santa Izabel do Oeste"
+ },
+ {
+  "codigo": 4123824,
+  "uf": "PR",
+  "nome": "Santa Lúcia"
+ },
+ {
+  "codigo": 4123857,
+  "uf": "PR",
+  "nome": "Santa Maria do Oeste"
+ },
+ {
+  "codigo": 4123907,
+  "uf": "PR",
+  "nome": "Santa Mariana"
+ },
+ {
+  "codigo": 4123956,
+  "uf": "PR",
+  "nome": "Santa Mônica"
+ },
+ {
+  "codigo": 4124004,
+  "uf": "PR",
+  "nome": "Santana do Itararé"
+ },
+ {
+  "codigo": 4124020,
+  "uf": "PR",
+  "nome": "Santa Tereza do Oeste"
+ },
+ {
+  "codigo": 4124053,
+  "uf": "PR",
+  "nome": "Santa Terezinha de Itaipu"
+ },
+ {
+  "codigo": 4124103,
+  "uf": "PR",
+  "nome": "Santo Antônio da Platina"
+ },
+ {
+  "codigo": 4124202,
+  "uf": "PR",
+  "nome": "Santo Antônio do Caiuá"
+ },
+ {
+  "codigo": 4124301,
+  "uf": "PR",
+  "nome": "Santo Antônio do Paraíso"
+ },
+ {
+  "codigo": 4124400,
+  "uf": "PR",
+  "nome": "Santo Antônio do Sudoeste"
+ },
+ {
+  "codigo": 4124509,
+  "uf": "PR",
+  "nome": "Santo Inácio"
+ },
+ {
+  "codigo": 4124608,
+  "uf": "PR",
+  "nome": "São Carlos do Ivaí"
+ },
+ {
+  "codigo": 4124707,
+  "uf": "PR",
+  "nome": "São Jerônimo da Serra"
+ },
+ {
+  "codigo": 4124806,
+  "uf": "PR",
+  "nome": "São João"
+ },
+ {
+  "codigo": 4124905,
+  "uf": "PR",
+  "nome": "São João do Caiuá"
+ },
+ {
+  "codigo": 4125001,
+  "uf": "PR",
+  "nome": "São João do Ivaí"
+ },
+ {
+  "codigo": 4125100,
+  "uf": "PR",
+  "nome": "São João do Triunfo"
+ },
+ {
+  "codigo": 4125209,
+  "uf": "PR",
+  "nome": "São Jorge d'Oeste"
+ },
+ {
+  "codigo": 4125308,
+  "uf": "PR",
+  "nome": "São Jorge do Ivaí"
+ },
+ {
+  "codigo": 4125357,
+  "uf": "PR",
+  "nome": "São Jorge do Patrocínio"
+ },
+ {
+  "codigo": 4125407,
+  "uf": "PR",
+  "nome": "São José da Boa Vista"
+ },
+ {
+  "codigo": 4125456,
+  "uf": "PR",
+  "nome": "São José das Palmeiras"
+ },
+ {
+  "codigo": 4125506,
+  "uf": "PR",
+  "nome": "São José dos Pinhais"
+ },
+ {
+  "codigo": 4125555,
+  "uf": "PR",
+  "nome": "São Manoel do Paraná"
+ },
+ {
+  "codigo": 4125605,
+  "uf": "PR",
+  "nome": "São Mateus do Sul"
+ },
+ {
+  "codigo": 4125704,
+  "uf": "PR",
+  "nome": "São Miguel do Iguaçu"
+ },
+ {
+  "codigo": 4125753,
+  "uf": "PR",
+  "nome": "São Pedro do Iguaçu"
+ },
+ {
+  "codigo": 4125803,
+  "uf": "PR",
+  "nome": "São Pedro do Ivaí"
+ },
+ {
+  "codigo": 4125902,
+  "uf": "PR",
+  "nome": "São Pedro do Paraná"
+ },
+ {
+  "codigo": 4126009,
+  "uf": "PR",
+  "nome": "São Sebastião da Amoreira"
+ },
+ {
+  "codigo": 4126108,
+  "uf": "PR",
+  "nome": "São Tomé"
+ },
+ {
+  "codigo": 4126207,
+  "uf": "PR",
+  "nome": "Sapopema"
+ },
+ {
+  "codigo": 4126256,
+  "uf": "PR",
+  "nome": "Sarandi"
+ },
+ {
+  "codigo": 4126272,
+  "uf": "PR",
+  "nome": "Saudade do Iguaçu"
+ },
+ {
+  "codigo": 4126306,
+  "uf": "PR",
+  "nome": "Sengés"
+ },
+ {
+  "codigo": 4126355,
+  "uf": "PR",
+  "nome": "Serranópolis do Iguaçu"
+ },
+ {
+  "codigo": 4126405,
+  "uf": "PR",
+  "nome": "Sertaneja"
+ },
+ {
+  "codigo": 4126504,
+  "uf": "PR",
+  "nome": "Sertanópolis"
+ },
+ {
+  "codigo": 4126603,
+  "uf": "PR",
+  "nome": "Siqueira Campos"
+ },
+ {
+  "codigo": 4126652,
+  "uf": "PR",
+  "nome": "Sulina"
+ },
+ {
+  "codigo": 4126678,
+  "uf": "PR",
+  "nome": "Tamarana"
+ },
+ {
+  "codigo": 4126702,
+  "uf": "PR",
+  "nome": "Tamboara"
+ },
+ {
+  "codigo": 4126801,
+  "uf": "PR",
+  "nome": "Tapejara"
+ },
+ {
+  "codigo": 4126900,
+  "uf": "PR",
+  "nome": "Tapira"
+ },
+ {
+  "codigo": 4127007,
+  "uf": "PR",
+  "nome": "Teixeira Soares"
+ },
+ {
+  "codigo": 4127106,
+  "uf": "PR",
+  "nome": "Telêmaco Borba"
+ },
+ {
+  "codigo": 4127205,
+  "uf": "PR",
+  "nome": "Terra Boa"
+ },
+ {
+  "codigo": 4127304,
+  "uf": "PR",
+  "nome": "Terra Rica"
+ },
+ {
+  "codigo": 4127403,
+  "uf": "PR",
+  "nome": "Terra Roxa"
+ },
+ {
+  "codigo": 4127502,
+  "uf": "PR",
+  "nome": "Tibagi"
+ },
+ {
+  "codigo": 4127601,
+  "uf": "PR",
+  "nome": "Tijucas do Sul"
+ },
+ {
+  "codigo": 4127700,
+  "uf": "PR",
+  "nome": "Toledo"
+ },
+ {
+  "codigo": 4127809,
+  "uf": "PR",
+  "nome": "Tomazina"
+ },
+ {
+  "codigo": 4127858,
+  "uf": "PR",
+  "nome": "Três Barras do Paraná"
+ },
+ {
+  "codigo": 4127882,
+  "uf": "PR",
+  "nome": "Tunas do Paraná"
+ },
+ {
+  "codigo": 4127908,
+  "uf": "PR",
+  "nome": "Tuneiras do Oeste"
+ },
+ {
+  "codigo": 4127957,
+  "uf": "PR",
+  "nome": "Tupãssi"
+ },
+ {
+  "codigo": 4127965,
+  "uf": "PR",
+  "nome": "Turvo"
+ },
+ {
+  "codigo": 4128005,
+  "uf": "PR",
+  "nome": "Ubiratã"
+ },
+ {
+  "codigo": 4128104,
+  "uf": "PR",
+  "nome": "Umuarama"
+ },
+ {
+  "codigo": 4128203,
+  "uf": "PR",
+  "nome": "União da Vitória"
+ },
+ {
+  "codigo": 4128302,
+  "uf": "PR",
+  "nome": "Uniflor"
+ },
+ {
+  "codigo": 4128401,
+  "uf": "PR",
+  "nome": "Uraí"
+ },
+ {
+  "codigo": 4128500,
+  "uf": "PR",
+  "nome": "Wenceslau Braz"
+ },
+ {
+  "codigo": 4128534,
+  "uf": "PR",
+  "nome": "Ventania"
+ },
+ {
+  "codigo": 4128559,
+  "uf": "PR",
+  "nome": "Vera Cruz do Oeste"
+ },
+ {
+  "codigo": 4128609,
+  "uf": "PR",
+  "nome": "Verê"
+ },
+ {
+  "codigo": 4128625,
+  "uf": "PR",
+  "nome": "Alto Paraíso"
+ },
+ {
+  "codigo": 4128633,
+  "uf": "PR",
+  "nome": "Doutor Ulysses"
+ },
+ {
+  "codigo": 4128658,
+  "uf": "PR",
+  "nome": "Virmond"
+ },
+ {
+  "codigo": 4128708,
+  "uf": "PR",
+  "nome": "Vitorino"
+ },
+ {
+  "codigo": 4128807,
+  "uf": "PR",
+  "nome": "Xambrê"
+ },
+ {
+  "codigo": 4200051,
+  "uf": "SC",
+  "nome": "Abdon Batista"
+ },
+ {
+  "codigo": 4200101,
+  "uf": "SC",
+  "nome": "Abelardo Luz"
+ },
+ {
+  "codigo": 4200200,
+  "uf": "SC",
+  "nome": "Agrolândia"
+ },
+ {
+  "codigo": 4200309,
+  "uf": "SC",
+  "nome": "Agronômica"
+ },
+ {
+  "codigo": 4200408,
+  "uf": "SC",
+  "nome": "Água Doce"
+ },
+ {
+  "codigo": 4200507,
+  "uf": "SC",
+  "nome": "Águas de Chapecó"
+ },
+ {
+  "codigo": 4200556,
+  "uf": "SC",
+  "nome": "Águas Frias"
+ },
+ {
+  "codigo": 4200606,
+  "uf": "SC",
+  "nome": "Águas Mornas"
+ },
+ {
+  "codigo": 4200705,
+  "uf": "SC",
+  "nome": "Alfredo Wagner"
+ },
+ {
+  "codigo": 4200754,
+  "uf": "SC",
+  "nome": "Alto Bela Vista"
+ },
+ {
+  "codigo": 4200804,
+  "uf": "SC",
+  "nome": "Anchieta"
+ },
+ {
+  "codigo": 4200903,
+  "uf": "SC",
+  "nome": "Angelina"
+ },
+ {
+  "codigo": 4201000,
+  "uf": "SC",
+  "nome": "Anita Garibaldi"
+ },
+ {
+  "codigo": 4201109,
+  "uf": "SC",
+  "nome": "Anitápolis"
+ },
+ {
+  "codigo": 4201208,
+  "uf": "SC",
+  "nome": "Antônio Carlos"
+ },
+ {
+  "codigo": 4201257,
+  "uf": "SC",
+  "nome": "Apiúna"
+ },
+ {
+  "codigo": 4201273,
+  "uf": "SC",
+  "nome": "Arabutã"
+ },
+ {
+  "codigo": 4201307,
+  "uf": "SC",
+  "nome": "Araquari"
+ },
+ {
+  "codigo": 4201406,
+  "uf": "SC",
+  "nome": "Araranguá"
+ },
+ {
+  "codigo": 4201505,
+  "uf": "SC",
+  "nome": "Armazém"
+ },
+ {
+  "codigo": 4201604,
+  "uf": "SC",
+  "nome": "Arroio Trinta"
+ },
+ {
+  "codigo": 4201653,
+  "uf": "SC",
+  "nome": "Arvoredo"
+ },
+ {
+  "codigo": 4201703,
+  "uf": "SC",
+  "nome": "Ascurra"
+ },
+ {
+  "codigo": 4201802,
+  "uf": "SC",
+  "nome": "Atalanta"
+ },
+ {
+  "codigo": 4201901,
+  "uf": "SC",
+  "nome": "Aurora"
+ },
+ {
+  "codigo": 4201950,
+  "uf": "SC",
+  "nome": "Balneário Arroio do Silva"
+ },
+ {
+  "codigo": 4202008,
+  "uf": "SC",
+  "nome": "Balneário Camboriú"
+ },
+ {
+  "codigo": 4202057,
+  "uf": "SC",
+  "nome": "Balneário Barra do Sul"
+ },
+ {
+  "codigo": 4202073,
+  "uf": "SC",
+  "nome": "Balneário Gaivota"
+ },
+ {
+  "codigo": 4202081,
+  "uf": "SC",
+  "nome": "Bandeirante"
+ },
+ {
+  "codigo": 4202099,
+  "uf": "SC",
+  "nome": "Barra Bonita"
+ },
+ {
+  "codigo": 4202107,
+  "uf": "SC",
+  "nome": "Barra Velha"
+ },
+ {
+  "codigo": 4202131,
+  "uf": "SC",
+  "nome": "Bela Vista do Toldo"
+ },
+ {
+  "codigo": 4202156,
+  "uf": "SC",
+  "nome": "Belmonte"
+ },
+ {
+  "codigo": 4202206,
+  "uf": "SC",
+  "nome": "Benedito Novo"
+ },
+ {
+  "codigo": 4202305,
+  "uf": "SC",
+  "nome": "Biguaçu"
+ },
+ {
+  "codigo": 4202404,
+  "uf": "SC",
+  "nome": "Blumenau"
+ },
+ {
+  "codigo": 4202438,
+  "uf": "SC",
+  "nome": "Bocaina do Sul"
+ },
+ {
+  "codigo": 4202453,
+  "uf": "SC",
+  "nome": "Bombinhas"
+ },
+ {
+  "codigo": 4202503,
+  "uf": "SC",
+  "nome": "Bom Jardim da Serra"
+ },
+ {
+  "codigo": 4202537,
+  "uf": "SC",
+  "nome": "Bom Jesus"
+ },
+ {
+  "codigo": 4202578,
+  "uf": "SC",
+  "nome": "Bom Jesus do Oeste"
+ },
+ {
+  "codigo": 4202602,
+  "uf": "SC",
+  "nome": "Bom Retiro"
+ },
+ {
+  "codigo": 4202701,
+  "uf": "SC",
+  "nome": "Botuverá"
+ },
+ {
+  "codigo": 4202800,
+  "uf": "SC",
+  "nome": "Braço do Norte"
+ },
+ {
+  "codigo": 4202859,
+  "uf": "SC",
+  "nome": "Braço do Trombudo"
+ },
+ {
+  "codigo": 4202875,
+  "uf": "SC",
+  "nome": "Brunópolis"
+ },
+ {
+  "codigo": 4202909,
+  "uf": "SC",
+  "nome": "Brusque"
+ },
+ {
+  "codigo": 4203006,
+  "uf": "SC",
+  "nome": "Caçador"
+ },
+ {
+  "codigo": 4203105,
+  "uf": "SC",
+  "nome": "Caibi"
+ },
+ {
+  "codigo": 4203154,
+  "uf": "SC",
+  "nome": "Calmon"
+ },
+ {
+  "codigo": 4203204,
+  "uf": "SC",
+  "nome": "Camboriú"
+ },
+ {
+  "codigo": 4203253,
+  "uf": "SC",
+  "nome": "Capão Alto"
+ },
+ {
+  "codigo": 4203303,
+  "uf": "SC",
+  "nome": "Campo Alegre"
+ },
+ {
+  "codigo": 4203402,
+  "uf": "SC",
+  "nome": "Campo Belo do Sul"
+ },
+ {
+  "codigo": 4203501,
+  "uf": "SC",
+  "nome": "Campo Erê"
+ },
+ {
+  "codigo": 4203600,
+  "uf": "SC",
+  "nome": "Campos Novos"
+ },
+ {
+  "codigo": 4203709,
+  "uf": "SC",
+  "nome": "Canelinha"
+ },
+ {
+  "codigo": 4203808,
+  "uf": "SC",
+  "nome": "Canoinhas"
+ },
+ {
+  "codigo": 4203907,
+  "uf": "SC",
+  "nome": "Capinzal"
+ },
+ {
+  "codigo": 4203956,
+  "uf": "SC",
+  "nome": "Capivari de Baixo"
+ },
+ {
+  "codigo": 4204004,
+  "uf": "SC",
+  "nome": "Catanduvas"
+ },
+ {
+  "codigo": 4204103,
+  "uf": "SC",
+  "nome": "Caxambu do Sul"
+ },
+ {
+  "codigo": 4204152,
+  "uf": "SC",
+  "nome": "Celso Ramos"
+ },
+ {
+  "codigo": 4204178,
+  "uf": "SC",
+  "nome": "Cerro Negro"
+ },
+ {
+  "codigo": 4204194,
+  "uf": "SC",
+  "nome": "Chapadão do Lageado"
+ },
+ {
+  "codigo": 4204202,
+  "uf": "SC",
+  "nome": "Chapecó"
+ },
+ {
+  "codigo": 4204251,
+  "uf": "SC",
+  "nome": "Cocal do Sul"
+ },
+ {
+  "codigo": 4204301,
+  "uf": "SC",
+  "nome": "Concórdia"
+ },
+ {
+  "codigo": 4204350,
+  "uf": "SC",
+  "nome": "Cordilheira Alta"
+ },
+ {
+  "codigo": 4204400,
+  "uf": "SC",
+  "nome": "Coronel Freitas"
+ },
+ {
+  "codigo": 4204459,
+  "uf": "SC",
+  "nome": "Coronel Martins"
+ },
+ {
+  "codigo": 4204509,
+  "uf": "SC",
+  "nome": "Corupá"
+ },
+ {
+  "codigo": 4204558,
+  "uf": "SC",
+  "nome": "Correia Pinto"
+ },
+ {
+  "codigo": 4204608,
+  "uf": "SC",
+  "nome": "Criciúma"
+ },
+ {
+  "codigo": 4204707,
+  "uf": "SC",
+  "nome": "Cunha Porã"
+ },
+ {
+  "codigo": 4204756,
+  "uf": "SC",
+  "nome": "Cunhataí"
+ },
+ {
+  "codigo": 4204806,
+  "uf": "SC",
+  "nome": "Curitibanos"
+ },
+ {
+  "codigo": 4204905,
+  "uf": "SC",
+  "nome": "Descanso"
+ },
+ {
+  "codigo": 4205001,
+  "uf": "SC",
+  "nome": "Dionísio Cerqueira"
+ },
+ {
+  "codigo": 4205100,
+  "uf": "SC",
+  "nome": "Dona Emma"
+ },
+ {
+  "codigo": 4205159,
+  "uf": "SC",
+  "nome": "Doutor Pedrinho"
+ },
+ {
+  "codigo": 4205175,
+  "uf": "SC",
+  "nome": "Entre Rios"
+ },
+ {
+  "codigo": 4205191,
+  "uf": "SC",
+  "nome": "Ermo"
+ },
+ {
+  "codigo": 4205209,
+  "uf": "SC",
+  "nome": "Erval Velho"
+ },
+ {
+  "codigo": 4205308,
+  "uf": "SC",
+  "nome": "Faxinal dos Guedes"
+ },
+ {
+  "codigo": 4205357,
+  "uf": "SC",
+  "nome": "Flor do Sertão"
+ },
+ {
+  "codigo": 4205407,
+  "uf": "SC",
+  "nome": "Florianópolis"
+ },
+ {
+  "codigo": 4205431,
+  "uf": "SC",
+  "nome": "Formosa do Sul"
+ },
+ {
+  "codigo": 4205456,
+  "uf": "SC",
+  "nome": "Forquilhinha"
+ },
+ {
+  "codigo": 4205506,
+  "uf": "SC",
+  "nome": "Fraiburgo"
+ },
+ {
+  "codigo": 4205555,
+  "uf": "SC",
+  "nome": "Frei Rogério"
+ },
+ {
+  "codigo": 4205605,
+  "uf": "SC",
+  "nome": "Galvão"
+ },
+ {
+  "codigo": 4205704,
+  "uf": "SC",
+  "nome": "Garopaba"
+ },
+ {
+  "codigo": 4205803,
+  "uf": "SC",
+  "nome": "Garuva"
+ },
+ {
+  "codigo": 4205902,
+  "uf": "SC",
+  "nome": "Gaspar"
+ },
+ {
+  "codigo": 4206009,
+  "uf": "SC",
+  "nome": "Governador Celso Ramos"
+ },
+ {
+  "codigo": 4206108,
+  "uf": "SC",
+  "nome": "Grão-Pará"
+ },
+ {
+  "codigo": 4206207,
+  "uf": "SC",
+  "nome": "Gravatal"
+ },
+ {
+  "codigo": 4206306,
+  "uf": "SC",
+  "nome": "Guabiruba"
+ },
+ {
+  "codigo": 4206405,
+  "uf": "SC",
+  "nome": "Guaraciaba"
+ },
+ {
+  "codigo": 4206504,
+  "uf": "SC",
+  "nome": "Guaramirim"
+ },
+ {
+  "codigo": 4206603,
+  "uf": "SC",
+  "nome": "Guarujá do Sul"
+ },
+ {
+  "codigo": 4206652,
+  "uf": "SC",
+  "nome": "Guatambú"
+ },
+ {
+  "codigo": 4206702,
+  "uf": "SC",
+  "nome": "Herval d'Oeste"
+ },
+ {
+  "codigo": 4206751,
+  "uf": "SC",
+  "nome": "Ibiam"
+ },
+ {
+  "codigo": 4206801,
+  "uf": "SC",
+  "nome": "Ibicaré"
+ },
+ {
+  "codigo": 4206900,
+  "uf": "SC",
+  "nome": "Ibirama"
+ },
+ {
+  "codigo": 4207007,
+  "uf": "SC",
+  "nome": "Içara"
+ },
+ {
+  "codigo": 4207106,
+  "uf": "SC",
+  "nome": "Ilhota"
+ },
+ {
+  "codigo": 4207205,
+  "uf": "SC",
+  "nome": "Imaruí"
+ },
+ {
+  "codigo": 4207304,
+  "uf": "SC",
+  "nome": "Imbituba"
+ },
+ {
+  "codigo": 4207403,
+  "uf": "SC",
+  "nome": "Imbuia"
+ },
+ {
+  "codigo": 4207502,
+  "uf": "SC",
+  "nome": "Indaial"
+ },
+ {
+  "codigo": 4207577,
+  "uf": "SC",
+  "nome": "Iomerê"
+ },
+ {
+  "codigo": 4207601,
+  "uf": "SC",
+  "nome": "Ipira"
+ },
+ {
+  "codigo": 4207650,
+  "uf": "SC",
+  "nome": "Iporã do Oeste"
+ },
+ {
+  "codigo": 4207684,
+  "uf": "SC",
+  "nome": "Ipuaçu"
+ },
+ {
+  "codigo": 4207700,
+  "uf": "SC",
+  "nome": "Ipumirim"
+ },
+ {
+  "codigo": 4207759,
+  "uf": "SC",
+  "nome": "Iraceminha"
+ },
+ {
+  "codigo": 4207809,
+  "uf": "SC",
+  "nome": "Irani"
+ },
+ {
+  "codigo": 4207858,
+  "uf": "SC",
+  "nome": "Irati"
+ },
+ {
+  "codigo": 4207908,
+  "uf": "SC",
+  "nome": "Irineópolis"
+ },
+ {
+  "codigo": 4208005,
+  "uf": "SC",
+  "nome": "Itá"
+ },
+ {
+  "codigo": 4208104,
+  "uf": "SC",
+  "nome": "Itaiópolis"
+ },
+ {
+  "codigo": 4208203,
+  "uf": "SC",
+  "nome": "Itajaí"
+ },
+ {
+  "codigo": 4208302,
+  "uf": "SC",
+  "nome": "Itapema"
+ },
+ {
+  "codigo": 4208401,
+  "uf": "SC",
+  "nome": "Itapiranga"
+ },
+ {
+  "codigo": 4208450,
+  "uf": "SC",
+  "nome": "Itapoá"
+ },
+ {
+  "codigo": 4208500,
+  "uf": "SC",
+  "nome": "Ituporanga"
+ },
+ {
+  "codigo": 4208609,
+  "uf": "SC",
+  "nome": "Jaborá"
+ },
+ {
+  "codigo": 4208708,
+  "uf": "SC",
+  "nome": "Jacinto Machado"
+ },
+ {
+  "codigo": 4208807,
+  "uf": "SC",
+  "nome": "Jaguaruna"
+ },
+ {
+  "codigo": 4208906,
+  "uf": "SC",
+  "nome": "Jaraguá do Sul"
+ },
+ {
+  "codigo": 4208955,
+  "uf": "SC",
+  "nome": "Jardinópolis"
+ },
+ {
+  "codigo": 4209003,
+  "uf": "SC",
+  "nome": "Joaçaba"
+ },
+ {
+  "codigo": 4209102,
+  "uf": "SC",
+  "nome": "Joinville"
+ },
+ {
+  "codigo": 4209151,
+  "uf": "SC",
+  "nome": "José Boiteux"
+ },
+ {
+  "codigo": 4209177,
+  "uf": "SC",
+  "nome": "Jupiá"
+ },
+ {
+  "codigo": 4209201,
+  "uf": "SC",
+  "nome": "Lacerdópolis"
+ },
+ {
+  "codigo": 4209300,
+  "uf": "SC",
+  "nome": "Lages"
+ },
+ {
+  "codigo": 4209409,
+  "uf": "SC",
+  "nome": "Laguna"
+ },
+ {
+  "codigo": 4209458,
+  "uf": "SC",
+  "nome": "Lajeado Grande"
+ },
+ {
+  "codigo": 4209508,
+  "uf": "SC",
+  "nome": "Laurentino"
+ },
+ {
+  "codigo": 4209607,
+  "uf": "SC",
+  "nome": "Lauro Müller"
+ },
+ {
+  "codigo": 4209706,
+  "uf": "SC",
+  "nome": "Lebon Régis"
+ },
+ {
+  "codigo": 4209805,
+  "uf": "SC",
+  "nome": "Leoberto Leal"
+ },
+ {
+  "codigo": 4209854,
+  "uf": "SC",
+  "nome": "Lindóia do Sul"
+ },
+ {
+  "codigo": 4209904,
+  "uf": "SC",
+  "nome": "Lontras"
+ },
+ {
+  "codigo": 4210001,
+  "uf": "SC",
+  "nome": "Luiz Alves"
+ },
+ {
+  "codigo": 4210035,
+  "uf": "SC",
+  "nome": "Luzerna"
+ },
+ {
+  "codigo": 4210050,
+  "uf": "SC",
+  "nome": "Macieira"
+ },
+ {
+  "codigo": 4210100,
+  "uf": "SC",
+  "nome": "Mafra"
+ },
+ {
+  "codigo": 4210209,
+  "uf": "SC",
+  "nome": "Major Gercino"
+ },
+ {
+  "codigo": 4210308,
+  "uf": "SC",
+  "nome": "Major Vieira"
+ },
+ {
+  "codigo": 4210407,
+  "uf": "SC",
+  "nome": "Maracajá"
+ },
+ {
+  "codigo": 4210506,
+  "uf": "SC",
+  "nome": "Maravilha"
+ },
+ {
+  "codigo": 4210555,
+  "uf": "SC",
+  "nome": "Marema"
+ },
+ {
+  "codigo": 4210605,
+  "uf": "SC",
+  "nome": "Massaranduba"
+ },
+ {
+  "codigo": 4210704,
+  "uf": "SC",
+  "nome": "Matos Costa"
+ },
+ {
+  "codigo": 4210803,
+  "uf": "SC",
+  "nome": "Meleiro"
+ },
+ {
+  "codigo": 4210852,
+  "uf": "SC",
+  "nome": "Mirim Doce"
+ },
+ {
+  "codigo": 4210902,
+  "uf": "SC",
+  "nome": "Modelo"
+ },
+ {
+  "codigo": 4211009,
+  "uf": "SC",
+  "nome": "Mondaí"
+ },
+ {
+  "codigo": 4211058,
+  "uf": "SC",
+  "nome": "Monte Carlo"
+ },
+ {
+  "codigo": 4211108,
+  "uf": "SC",
+  "nome": "Monte Castelo"
+ },
+ {
+  "codigo": 4211207,
+  "uf": "SC",
+  "nome": "Morro da Fumaça"
+ },
+ {
+  "codigo": 4211256,
+  "uf": "SC",
+  "nome": "Morro Grande"
+ },
+ {
+  "codigo": 4211306,
+  "uf": "SC",
+  "nome": "Navegantes"
+ },
+ {
+  "codigo": 4211405,
+  "uf": "SC",
+  "nome": "Nova Erechim"
+ },
+ {
+  "codigo": 4211454,
+  "uf": "SC",
+  "nome": "Nova Itaberaba"
+ },
+ {
+  "codigo": 4211504,
+  "uf": "SC",
+  "nome": "Nova Trento"
+ },
+ {
+  "codigo": 4211603,
+  "uf": "SC",
+  "nome": "Nova Veneza"
+ },
+ {
+  "codigo": 4211652,
+  "uf": "SC",
+  "nome": "Novo Horizonte"
+ },
+ {
+  "codigo": 4211702,
+  "uf": "SC",
+  "nome": "Orleans"
+ },
+ {
+  "codigo": 4211751,
+  "uf": "SC",
+  "nome": "Otacílio Costa"
+ },
+ {
+  "codigo": 4211801,
+  "uf": "SC",
+  "nome": "Ouro"
+ },
+ {
+  "codigo": 4211850,
+  "uf": "SC",
+  "nome": "Ouro Verde"
+ },
+ {
+  "codigo": 4211876,
+  "uf": "SC",
+  "nome": "Paial"
+ },
+ {
+  "codigo": 4211892,
+  "uf": "SC",
+  "nome": "Painel"
+ },
+ {
+  "codigo": 4211900,
+  "uf": "SC",
+  "nome": "Palhoça"
+ },
+ {
+  "codigo": 4212007,
+  "uf": "SC",
+  "nome": "Palma Sola"
+ },
+ {
+  "codigo": 4212056,
+  "uf": "SC",
+  "nome": "Palmeira"
+ },
+ {
+  "codigo": 4212106,
+  "uf": "SC",
+  "nome": "Palmitos"
+ },
+ {
+  "codigo": 4212205,
+  "uf": "SC",
+  "nome": "Papanduva"
+ },
+ {
+  "codigo": 4212239,
+  "uf": "SC",
+  "nome": "Paraíso"
+ },
+ {
+  "codigo": 4212254,
+  "uf": "SC",
+  "nome": "Passo de Torres"
+ },
+ {
+  "codigo": 4212270,
+  "uf": "SC",
+  "nome": "Passos Maia"
+ },
+ {
+  "codigo": 4212304,
+  "uf": "SC",
+  "nome": "Paulo Lopes"
+ },
+ {
+  "codigo": 4212403,
+  "uf": "SC",
+  "nome": "Pedras Grandes"
+ },
+ {
+  "codigo": 4212502,
+  "uf": "SC",
+  "nome": "Penha"
+ },
+ {
+  "codigo": 4212601,
+  "uf": "SC",
+  "nome": "Peritiba"
+ },
+ {
+  "codigo": 4212650,
+  "uf": "SC",
+  "nome": "Pescaria Brava"
+ },
+ {
+  "codigo": 4212700,
+  "uf": "SC",
+  "nome": "Petrolândia"
+ },
+ {
+  "codigo": 4212809,
+  "uf": "SC",
+  "nome": "Balneário Piçarras"
+ },
+ {
+  "codigo": 4212908,
+  "uf": "SC",
+  "nome": "Pinhalzinho"
+ },
+ {
+  "codigo": 4213005,
+  "uf": "SC",
+  "nome": "Pinheiro Preto"
+ },
+ {
+  "codigo": 4213104,
+  "uf": "SC",
+  "nome": "Piratuba"
+ },
+ {
+  "codigo": 4213153,
+  "uf": "SC",
+  "nome": "Planalto Alegre"
+ },
+ {
+  "codigo": 4213203,
+  "uf": "SC",
+  "nome": "Pomerode"
+ },
+ {
+  "codigo": 4213302,
+  "uf": "SC",
+  "nome": "Ponte Alta"
+ },
+ {
+  "codigo": 4213351,
+  "uf": "SC",
+  "nome": "Ponte Alta do Norte"
+ },
+ {
+  "codigo": 4213401,
+  "uf": "SC",
+  "nome": "Ponte Serrada"
+ },
+ {
+  "codigo": 4213500,
+  "uf": "SC",
+  "nome": "Porto Belo"
+ },
+ {
+  "codigo": 4213609,
+  "uf": "SC",
+  "nome": "Porto União"
+ },
+ {
+  "codigo": 4213708,
+  "uf": "SC",
+  "nome": "Pouso Redondo"
+ },
+ {
+  "codigo": 4213807,
+  "uf": "SC",
+  "nome": "Praia Grande"
+ },
+ {
+  "codigo": 4213906,
+  "uf": "SC",
+  "nome": "Presidente Castello Branco"
+ },
+ {
+  "codigo": 4214003,
+  "uf": "SC",
+  "nome": "Presidente Getúlio"
+ },
+ {
+  "codigo": 4214102,
+  "uf": "SC",
+  "nome": "Presidente Nereu"
+ },
+ {
+  "codigo": 4214151,
+  "uf": "SC",
+  "nome": "Princesa"
+ },
+ {
+  "codigo": 4214201,
+  "uf": "SC",
+  "nome": "Quilombo"
+ },
+ {
+  "codigo": 4214300,
+  "uf": "SC",
+  "nome": "Rancho Queimado"
+ },
+ {
+  "codigo": 4214409,
+  "uf": "SC",
+  "nome": "Rio das Antas"
+ },
+ {
+  "codigo": 4214508,
+  "uf": "SC",
+  "nome": "Rio do Campo"
+ },
+ {
+  "codigo": 4214607,
+  "uf": "SC",
+  "nome": "Rio do Oeste"
+ },
+ {
+  "codigo": 4214706,
+  "uf": "SC",
+  "nome": "Rio dos Cedros"
+ },
+ {
+  "codigo": 4214805,
+  "uf": "SC",
+  "nome": "Rio do Sul"
+ },
+ {
+  "codigo": 4214904,
+  "uf": "SC",
+  "nome": "Rio Fortuna"
+ },
+ {
+  "codigo": 4215000,
+  "uf": "SC",
+  "nome": "Rio Negrinho"
+ },
+ {
+  "codigo": 4215059,
+  "uf": "SC",
+  "nome": "Rio Rufino"
+ },
+ {
+  "codigo": 4215075,
+  "uf": "SC",
+  "nome": "Riqueza"
+ },
+ {
+  "codigo": 4215109,
+  "uf": "SC",
+  "nome": "Rodeio"
+ },
+ {
+  "codigo": 4215208,
+  "uf": "SC",
+  "nome": "Romelândia"
+ },
+ {
+  "codigo": 4215307,
+  "uf": "SC",
+  "nome": "Salete"
+ },
+ {
+  "codigo": 4215356,
+  "uf": "SC",
+  "nome": "Saltinho"
+ },
+ {
+  "codigo": 4215406,
+  "uf": "SC",
+  "nome": "Salto Veloso"
+ },
+ {
+  "codigo": 4215455,
+  "uf": "SC",
+  "nome": "Sangão"
+ },
+ {
+  "codigo": 4215505,
+  "uf": "SC",
+  "nome": "Santa Cecília"
+ },
+ {
+  "codigo": 4215554,
+  "uf": "SC",
+  "nome": "Santa Helena"
+ },
+ {
+  "codigo": 4215604,
+  "uf": "SC",
+  "nome": "Santa Rosa de Lima"
+ },
+ {
+  "codigo": 4215653,
+  "uf": "SC",
+  "nome": "Santa Rosa do Sul"
+ },
+ {
+  "codigo": 4215679,
+  "uf": "SC",
+  "nome": "Santa Terezinha"
+ },
+ {
+  "codigo": 4215687,
+  "uf": "SC",
+  "nome": "Santa Terezinha do Progresso"
+ },
+ {
+  "codigo": 4215695,
+  "uf": "SC",
+  "nome": "Santiago do Sul"
+ },
+ {
+  "codigo": 4215703,
+  "uf": "SC",
+  "nome": "Santo Amaro da Imperatriz"
+ },
+ {
+  "codigo": 4215752,
+  "uf": "SC",
+  "nome": "São Bernardino"
+ },
+ {
+  "codigo": 4215802,
+  "uf": "SC",
+  "nome": "São Bento do Sul"
+ },
+ {
+  "codigo": 4215901,
+  "uf": "SC",
+  "nome": "São Bonifácio"
+ },
+ {
+  "codigo": 4216008,
+  "uf": "SC",
+  "nome": "São Carlos"
+ },
+ {
+  "codigo": 4216057,
+  "uf": "SC",
+  "nome": "São Cristóvão do Sul"
+ },
+ {
+  "codigo": 4216107,
+  "uf": "SC",
+  "nome": "São Domingos"
+ },
+ {
+  "codigo": 4216206,
+  "uf": "SC",
+  "nome": "São Francisco do Sul"
+ },
+ {
+  "codigo": 4216255,
+  "uf": "SC",
+  "nome": "São João do Oeste"
+ },
+ {
+  "codigo": 4216305,
+  "uf": "SC",
+  "nome": "São João Batista"
+ },
+ {
+  "codigo": 4216354,
+  "uf": "SC",
+  "nome": "São João do Itaperiú"
+ },
+ {
+  "codigo": 4216404,
+  "uf": "SC",
+  "nome": "São João do Sul"
+ },
+ {
+  "codigo": 4216503,
+  "uf": "SC",
+  "nome": "São Joaquim"
+ },
+ {
+  "codigo": 4216602,
+  "uf": "SC",
+  "nome": "São José"
+ },
+ {
+  "codigo": 4216701,
+  "uf": "SC",
+  "nome": "São José do Cedro"
+ },
+ {
+  "codigo": 4216800,
+  "uf": "SC",
+  "nome": "São José do Cerrito"
+ },
+ {
+  "codigo": 4216909,
+  "uf": "SC",
+  "nome": "São Lourenço do Oeste"
+ },
+ {
+  "codigo": 4217006,
+  "uf": "SC",
+  "nome": "São Ludgero"
+ },
+ {
+  "codigo": 4217105,
+  "uf": "SC",
+  "nome": "São Martinho"
+ },
+ {
+  "codigo": 4217154,
+  "uf": "SC",
+  "nome": "São Miguel da Boa Vista"
+ },
+ {
+  "codigo": 4217204,
+  "uf": "SC",
+  "nome": "São Miguel do Oeste"
+ },
+ {
+  "codigo": 4217253,
+  "uf": "SC",
+  "nome": "São Pedro de Alcântara"
+ },
+ {
+  "codigo": 4217303,
+  "uf": "SC",
+  "nome": "Saudades"
+ },
+ {
+  "codigo": 4217402,
+  "uf": "SC",
+  "nome": "Schroeder"
+ },
+ {
+  "codigo": 4217501,
+  "uf": "SC",
+  "nome": "Seara"
+ },
+ {
+  "codigo": 4217550,
+  "uf": "SC",
+  "nome": "Serra Alta"
+ },
+ {
+  "codigo": 4217600,
+  "uf": "SC",
+  "nome": "Siderópolis"
+ },
+ {
+  "codigo": 4217709,
+  "uf": "SC",
+  "nome": "Sombrio"
+ },
+ {
+  "codigo": 4217758,
+  "uf": "SC",
+  "nome": "Sul Brasil"
+ },
+ {
+  "codigo": 4217808,
+  "uf": "SC",
+  "nome": "Taió"
+ },
+ {
+  "codigo": 4217907,
+  "uf": "SC",
+  "nome": "Tangará"
+ },
+ {
+  "codigo": 4217956,
+  "uf": "SC",
+  "nome": "Tigrinhos"
+ },
+ {
+  "codigo": 4218004,
+  "uf": "SC",
+  "nome": "Tijucas"
+ },
+ {
+  "codigo": 4218103,
+  "uf": "SC",
+  "nome": "Timbé do Sul"
+ },
+ {
+  "codigo": 4218202,
+  "uf": "SC",
+  "nome": "Timbó"
+ },
+ {
+  "codigo": 4218251,
+  "uf": "SC",
+  "nome": "Timbó Grande"
+ },
+ {
+  "codigo": 4218301,
+  "uf": "SC",
+  "nome": "Três Barras"
+ },
+ {
+  "codigo": 4218350,
+  "uf": "SC",
+  "nome": "Treviso"
+ },
+ {
+  "codigo": 4218400,
+  "uf": "SC",
+  "nome": "Treze de Maio"
+ },
+ {
+  "codigo": 4218509,
+  "uf": "SC",
+  "nome": "Treze Tílias"
+ },
+ {
+  "codigo": 4218608,
+  "uf": "SC",
+  "nome": "Trombudo Central"
+ },
+ {
+  "codigo": 4218707,
+  "uf": "SC",
+  "nome": "Tubarão"
+ },
+ {
+  "codigo": 4218756,
+  "uf": "SC",
+  "nome": "Tunápolis"
+ },
+ {
+  "codigo": 4218806,
+  "uf": "SC",
+  "nome": "Turvo"
+ },
+ {
+  "codigo": 4218855,
+  "uf": "SC",
+  "nome": "União do Oeste"
+ },
+ {
+  "codigo": 4218905,
+  "uf": "SC",
+  "nome": "Urubici"
+ },
+ {
+  "codigo": 4218954,
+  "uf": "SC",
+  "nome": "Urupema"
+ },
+ {
+  "codigo": 4219002,
+  "uf": "SC",
+  "nome": "Urussanga"
+ },
+ {
+  "codigo": 4219101,
+  "uf": "SC",
+  "nome": "Vargeão"
+ },
+ {
+  "codigo": 4219150,
+  "uf": "SC",
+  "nome": "Vargem"
+ },
+ {
+  "codigo": 4219176,
+  "uf": "SC",
+  "nome": "Vargem Bonita"
+ },
+ {
+  "codigo": 4219200,
+  "uf": "SC",
+  "nome": "Vidal Ramos"
+ },
+ {
+  "codigo": 4219309,
+  "uf": "SC",
+  "nome": "Videira"
+ },
+ {
+  "codigo": 4219358,
+  "uf": "SC",
+  "nome": "Vitor Meireles"
+ },
+ {
+  "codigo": 4219408,
+  "uf": "SC",
+  "nome": "Witmarsum"
+ },
+ {
+  "codigo": 4219507,
+  "uf": "SC",
+  "nome": "Xanxerê"
+ },
+ {
+  "codigo": 4219606,
+  "uf": "SC",
+  "nome": "Xavantina"
+ },
+ {
+  "codigo": 4219705,
+  "uf": "SC",
+  "nome": "Xaxim"
+ },
+ {
+  "codigo": 4219853,
+  "uf": "SC",
+  "nome": "Zortéa"
+ },
+ {
+  "codigo": 4220000,
+  "uf": "SC",
+  "nome": "Balneário Rincão"
+ }
+]

@@ -583,6 +583,84 @@ const MIGRACOES = [
       .run(eduardo, ...nomes).changes;
     if (mat || opo) console.log(`migração 17: backfill Eduardo — ${mat} matrícula(s), ${opo} oportunidade(s).`);
   },
+
+  // 18 — Inteligência comercial por território (2026-09-09).
+  // Referência: regionais e municípios de PR/SC (carregados no boot a partir
+  // de dados/regionais_municipios_PR_SC.csv + dados/municipios_ibge_PR_SC.json
+  // por territorio.js — ver carregarReferencias). Um município pode estar em
+  // duas regionais (20 casos no PR): regional_municipios guarda TODOS os
+  // vínculos e municipios.regional_principal_id elege a que conta nos totais
+  // (decisão do usuário: mapa e somas usam só a principal; a outra mostra o
+  // município como "compartilhado", à parte).
+  // Casamento students.city (texto livre) → município: municipio_apelidos tem
+  // 1 linha por (cidade normalizada, UF normalizada) com método e confiança;
+  // resolução manual é 'manual' e nunca é sobrescrita. matriculas ganha
+  // aluno_estado/aluno_cep (novos no sync) e codigo_ibge + método/confiança
+  // do casamento. sync_completo_pendente força a próxima sincronização a
+  // trazer TODAS as matrículas (estado e CEP das antigas).
+  () => {
+    db.exec(`
+      CREATE TABLE regionais (
+        id          INTEGER PRIMARY KEY,
+        uf          TEXT NOT NULL,
+        sigla       TEXT NOT NULL,
+        nome        TEXT,
+        cidade_polo TEXT,
+        UNIQUE (uf, sigla)
+      );
+      CREATE TABLE municipios (
+        codigo_ibge           INTEGER PRIMARY KEY,
+        uf                    TEXT NOT NULL,
+        nome                  TEXT NOT NULL,
+        nome_normalizado      TEXT NOT NULL,
+        regional_principal_id INTEGER REFERENCES regionais(id)
+      );
+      CREATE INDEX idx_municipios_nome ON municipios(uf, nome_normalizado);
+      CREATE TABLE regional_municipios (
+        regional_id INTEGER NOT NULL REFERENCES regionais(id),
+        codigo_ibge INTEGER NOT NULL REFERENCES municipios(codigo_ibge),
+        ordem       INTEGER NOT NULL,          -- posição da linha no CSV (1ª ocorrência = principal padrão)
+        PRIMARY KEY (regional_id, codigo_ibge)
+      );
+      CREATE TABLE municipio_apelidos (
+        id               INTEGER PRIMARY KEY,
+        cidade_norm      TEXT NOT NULL,
+        uf_norm          TEXT NOT NULL DEFAULT '',
+        resultado        TEXT NOT NULL CHECK (resultado IN ('municipio', 'fora', 'ignorar', 'pendente')),
+        codigo_ibge      INTEGER REFERENCES municipios(codigo_ibge),
+        metodo           TEXT NOT NULL CHECK (metodo IN ('exato', 'exato_uf', 'aproximado', 'fora_uf',
+                                                         'fora_cep', 'fora_brasil', 'sem_uf', 'conflito_uf',
+                                                         'sem_match', 'manual')),
+        confianca        TEXT CHECK (confianca IN ('alta', 'media', 'manual')),
+        distancia        INTEGER,
+        amostra_original TEXT,
+        criado_em        TEXT NOT NULL,
+        usuario_id       INTEGER REFERENCES usuarios(id),
+        UNIQUE (cidade_norm, uf_norm)
+      );
+      ALTER TABLE matriculas ADD COLUMN aluno_estado        TEXT;    -- students.state, só trim
+      ALTER TABLE matriculas ADD COLUMN aluno_cep           TEXT;    -- students.cep, só dígitos
+      ALTER TABLE matriculas ADD COLUMN codigo_ibge         INTEGER REFERENCES municipios(codigo_ibge);
+      ALTER TABLE matriculas ADD COLUMN municipio_metodo    TEXT;    -- cópia do apelido que resolveu
+      ALTER TABLE matriculas ADD COLUMN municipio_confianca TEXT;
+      CREATE INDEX idx_matriculas_municipio ON matriculas(codigo_ibge, criada_em);
+      INSERT INTO configuracoes (chave, valor) VALUES ('sync_completo_pendente', '1')
+        ON CONFLICT(chave) DO UPDATE SET valor = '1';
+    `);
+  },
+
+  // 19 — UF normalizada do aluno na matrícula (sigla vinda de state, do
+  // sufixo da cidade ou da faixa de CEP — agora com a tabela de faixas de
+  // TODAS as UFs), para agregar "outros estados" por UF em SQL puro.
+  // territorio_recruzar_pendente faz o boot reprocessar o casamento uma vez
+  // (preenche aluno_uf das matrículas já casadas sem esperar o próximo sync).
+  () => {
+    db.exec(`
+      ALTER TABLE matriculas ADD COLUMN aluno_uf TEXT;
+      INSERT INTO configuracoes (chave, valor) VALUES ('territorio_recruzar_pendente', '1')
+        ON CONFLICT(chave) DO UPDATE SET valor = '1';
+    `);
+  },
 ];
 
 let versao = db.pragma("user_version", { simple: true });

@@ -27,6 +27,7 @@ const {
   resumoMetas, gravarMetas, INDICADORES, INDICADORES_RECEITA, configBool,
 } = require("./metricas.js");
 const { prepararFatosFeedback, gerarFeedbackMarkdown } = require("./feedback.js");
+const territorio = require("./territorio.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -325,6 +326,9 @@ app.get("/saude", exigirLoginPagina, (req, res) =>
 );
 app.get("/metas", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "metas.html"))
+);
+app.get("/territorio", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "territorio.html"))
 );
 
 // ---------- CRUD de aulas ----------
@@ -894,6 +898,86 @@ app.get("/api/saude", (req, res) => {
   res.json(saudeDosDados());
 });
 
+// ---------- Território: casamento cidade → município, cobertura e revisão ----------
+
+// Período opcional: sem `de`/`ate` = base inteira; com um deles, valida os dois.
+function periodoOpcional(req, res) {
+  const { de, ate } = req.query;
+  if (!de && !ate) return {};
+  return validarIntervalo(de, ate, res) ? { de, ate } : null;
+}
+
+function responderErroTerritorio(rota, err, res) {
+  if (err.validacao) return res.status(400).json({ error: err.message });
+  tratarErro(rota, err, res);
+}
+
+app.get("/api/territorio/cobertura", (req, res) => {
+  const p = periodoOpcional(req, res);
+  if (!p) return;
+  res.json(territorio.coberturaTerritorio(p.de, p.ate));
+});
+
+app.get("/api/territorio/pendencias", (req, res) => {
+  res.json({ ...territorio.pendencias(), compartilhados: territorio.compartilhados() });
+});
+
+app.post("/api/territorio/apelidos", (req, res) => {
+  try {
+    const cruzamento = territorio.resolverApelido(req.body || {}, req.usuario.id);
+    res.json({ cruzamento, cobertura: territorio.coberturaTerritorio() });
+  } catch (err) {
+    responderErroTerritorio("territorio/apelidos", err, res);
+  }
+});
+
+// Confirmação em lote da revisão: valida tudo antes de gravar; reprocessa uma vez
+app.post("/api/territorio/apelidos/lote", (req, res) => {
+  try {
+    const itens = Array.isArray(req.body?.itens) ? req.body.itens : null;
+    if (!itens || !itens.length) return res.status(400).json({ error: "Informe { itens: [...] }." });
+    const cruzamento = territorio.resolverApelidosLote(itens, req.usuario.id);
+    res.json({ cruzamento, aplicados: itens.length, cobertura: territorio.coberturaTerritorio() });
+  } catch (err) {
+    responderErroTerritorio("territorio/apelidos/lote", err, res);
+  }
+});
+
+app.get("/api/territorio/municipios", (req, res) => {
+  res.json(territorio.listarMunicipiosERegionais());
+});
+
+// Fase 3: malha municipal de PR + SC (SVG do IBGE, versionada em dados/ — sem CDN)
+app.get("/api/territorio/mapa", (req, res) => {
+  const svg = territorio.lerMapaSvg();
+  if (!svg) return res.status(503).json({ error: "dados/mapa_PR_SC.svg não encontrado — rode scripts/gerar-referencias-territorio.js." });
+  res.set({ "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "private, max-age=86400" }).send(svg);
+});
+
+// Fase 2: agregação por estado/regional/município com conferência contra o total
+app.get("/api/territorio/agregado", (req, res) => {
+  const p = periodoOpcional(req, res);
+  if (!p) return;
+  res.json(territorio.agregarTerritorio(p.de, p.ate));
+});
+
+app.get("/api/territorio/municipios/:codigo", (req, res) => {
+  const p = periodoOpcional(req, res);
+  if (!p) return;
+  const detalhe = territorio.detalheMunicipio(req.params.codigo, p.de, p.ate);
+  if (!detalhe) return res.status(404).json({ error: "Município não encontrado." });
+  res.json(detalhe);
+});
+
+app.put("/api/territorio/municipios/:codigo/principal", (req, res) => {
+  try {
+    territorio.definirRegionalPrincipal(req.params.codigo, req.body?.regionalId);
+    res.json({ compartilhados: territorio.compartilhados() });
+  } catch (err) {
+    responderErroTerritorio("territorio/municipios/principal", err, res);
+  }
+});
+
 // ---------- Erros ----------
 
 function tratarErro(rota, err, res) {
@@ -919,6 +1003,16 @@ function tratarErro(rota, err, res) {
 
 (async () => {
   await semearAdmin(); // garante o primeiro admin e adota aulas sem dono
+  // Referência territorial (dados/): idempotente, roda em todo boot
+  const ref = territorio.carregarReferencias();
+  console.log(
+    `território: ${ref.municipios} municípios, ${ref.regionais} regionais, ${ref.vinculos} vínculos ` +
+      `(${ref.compartilhados} municípios em 2 regionais${ref.principaisDefinidas ? `, ${ref.principaisDefinidas} principal(is) definida(s)` : ""}` +
+      `${ref.vinculosRemovidos ? `, ${ref.vinculosRemovidos} vínculo(s) removido(s)` : ""}).`
+  );
+  for (const aviso of ref.avisos) console.warn("⚠  território:", aviso);
+  const recruzado = territorio.recruzarSePendente();
+  if (recruzado) console.log(`território: casamento reprocessado no boot (migração pendente) — ${recruzado.matriculas} matrícula(s).`);
   app.listen(PORT, () => {
     console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
   });

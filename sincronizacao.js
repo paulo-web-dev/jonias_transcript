@@ -17,6 +17,7 @@
 const mysql = require("mysql2/promise");
 const db = require("./db.js");
 const { normalizarNome, normalizarTelefone } = require("./importacao.js");
+const { cruzarMunicipios } = require("./territorio.js");
 
 // Filtro de curso válido definido pelo negócio (turmas: corte de id + status).
 // Até 2026-09-01 só entravam turmas com unyflex = 0. Decisão do usuário nessa
@@ -74,6 +75,14 @@ async function enriquecerErroDeColuna(conexao, err) {
 // Corte incremental: último sync bem-sucedido menos a margem, como
 // "YYYY-MM-DD" (enrollments.updated_at é timestamp local da origem — a margem
 // em dias absorve fuso e relógio).
+// Migração que acrescenta coluna vinda do MySQL (ex.: 18 — estado e CEP do
+// aluno) marca sync_completo_pendente = '1': o sync seguinte ignora o corte
+// incremental e traz TODAS as matrículas (as antigas não passariam pelo
+// updated_at). A marca é apagada ao concluir com sucesso.
+function copiaCompletaPendente() {
+  return db.prepare("SELECT valor FROM configuracoes WHERE chave = 'sync_completo_pendente'").get()?.valor === "1";
+}
+
 function corteIncremental() {
   const ultimo = db
     .prepare(
@@ -100,7 +109,8 @@ async function sincronizarMysql(usuarioId) {
     throw err;
   }
 
-  const corte = corteIncremental();
+  const copiaForcada = copiaCompletaPendente();
+  const corte = copiaForcada ? null : corteIncremental();
   // Turmas que ainda não existem na cópia local recebem TODAS as matrículas,
   // ignorando o corte incremental — é o que faz uma mudança de filtro (como a
   // inclusão das turmas unyflex = 1 em 2026-09-01) trazer o histórico dessas
@@ -128,7 +138,8 @@ async function sincronizarMysql(usuarioId) {
         sql: `SELECT e.id, e.classes_id, e.student_id, e.wallet, e.status,
                      e.final_value, e.created_at, c.unyflex AS turma_unyflex,
                      s.name AS aluno_nome, s.email AS aluno_email,
-                     s.phone AS aluno_telefone, s.city AS aluno_cidade
+                     s.phone AS aluno_telefone, s.city AS aluno_cidade,
+                     s.state AS aluno_estado, s.cep AS aluno_cep
               FROM enrollments e
               JOIN classes c ON c.id = e.classes_id
               LEFT JOIN students s ON s.id = e.student_id
@@ -191,15 +202,16 @@ async function sincronizarMysql(usuarioId) {
   // depois, mas nunca se perde por causa da cópia.
   const upsertMatricula = db.prepare(
     `INSERT INTO matriculas (id, turma_id, student_id, aluno_nome, aluno_email,
-       aluno_telefone, aluno_cidade, wallet, pessoa_id, status, valor_centavos,
-       criada_em, sincronizado_em)
+       aluno_telefone, aluno_cidade, aluno_estado, aluno_cep, wallet, pessoa_id, status,
+       valor_centavos, criada_em, sincronizado_em)
      VALUES (@id, @turma_id, @student_id, @aluno_nome, @aluno_email,
-       @aluno_telefone, @aluno_cidade, @wallet, @pessoa_id, @status,
+       @aluno_telefone, @aluno_cidade, @aluno_estado, @aluno_cep, @wallet, @pessoa_id, @status,
        @valor_centavos, @criada_em, @sincronizado_em)
      ON CONFLICT(id) DO UPDATE SET turma_id = excluded.turma_id,
        student_id = excluded.student_id, aluno_nome = excluded.aluno_nome,
        aluno_email = excluded.aluno_email, aluno_telefone = excluded.aluno_telefone,
-       aluno_cidade = excluded.aluno_cidade, wallet = excluded.wallet,
+       aluno_cidade = excluded.aluno_cidade, aluno_estado = excluded.aluno_estado,
+       aluno_cep = excluded.aluno_cep, wallet = excluded.wallet,
        pessoa_id = excluded.pessoa_id, status = excluded.status,
        valor_centavos = excluded.valor_centavos, criada_em = excluded.criada_em,
        sincronizado_em = excluded.sincronizado_em`
@@ -236,6 +248,8 @@ async function sincronizarMysql(usuarioId) {
         aluno_email: m.aluno_email ? String(m.aluno_email).trim().toLowerCase() : null,
         aluno_telefone: normalizarTelefone(m.aluno_telefone),
         aluno_cidade: m.aluno_cidade ?? null,
+        aluno_estado: m.aluno_estado ? String(m.aluno_estado).trim() || null : null,
+        aluno_cep: m.aluno_cep ? String(m.aluno_cep).replace(/\D/g, "") || null : null,
         wallet: m.wallet ?? null,
         pessoa_id: resolverWallet(m.wallet),
         status: m.status || null,
@@ -248,6 +262,12 @@ async function sincronizarMysql(usuarioId) {
     }
 
     const cruzamento = cruzarMatriculas();
+    // Casamento cidade → município (territorio.js): chaves novas são
+    // classificadas; resoluções manuais são preservadas.
+    const territorio = cruzarMunicipios();
+    if (copiaForcada) {
+      db.prepare("DELETE FROM configuracoes WHERE chave = 'sync_completo_pendente'").run();
+    }
 
     const detalhes = {
       motivos: {},
@@ -275,7 +295,9 @@ async function sincronizarMysql(usuarioId) {
       avisos: [
         corte
           ? `Sync incremental: matrículas com updated_at >= ${corte} (último sync menos ${MARGEM_INCREMENTAL_DIAS} dias de margem).`
-          : "Primeiro sync: cópia completa das matrículas de turmas válidas.",
+          : copiaForcada
+            ? "Cópia completa forçada (migração 18 trouxe estado e CEP do aluno — matrículas antigas reprocessadas)."
+            : "Primeiro sync: cópia completa das matrículas de turmas válidas.",
         ...(corte && turmasNovas.length
           ? [`${turmasNovas.length} turma(s) ainda não existiam na cópia local: matrículas trazidas completas, sem corte incremental.`]
           : []),
@@ -288,9 +310,12 @@ async function sincronizarMysql(usuarioId) {
           `${cruzamento.porTelefone} por telefone, ${cruzamento.semOportunidade} sem oportunidade ` +
           `(mantidas — podem ser venda fora do CRM); ${cruzamento.conquistadasSemMatricula} ` +
           `oportunidade(s) Conquistada(s) sem matrícula correspondente.`,
+        `Casamento cidade → município: ${territorio.apelidosNovos} chave(s) nova(s) classificada(s); ` +
+          `pendentes na revisão: ${(territorio.porMetodo.sem_uf || 0) + (territorio.porMetodo.conflito_uf || 0) + (territorio.porMetodo.sem_match || 0)} matrícula(s) — ver /territorio.`,
       ],
       periodo: { de: periodoDe, ate: periodoAte },
       cruzamento,
+      territorio,
     };
 
     const info = db

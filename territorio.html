@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Território — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">inteligência por território</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <a href="/relatorios" class="btn-topo">📊 Relatórios</a>
+      <a href="/metas" class="btn-topo">🎯 Metas</a>
+      <a href="/saude" class="btn-topo">🩺 Saúde dos dados</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista territorio-pagina">
+    <p class="texto-suave">Receita e matrículas por estado, regional e município de PR e SC, com a cidade do aluno
+      casada com o município oficial. Nada aqui passa por IA: só SQL sobre a cópia local, no mesmo filtro dos
+      relatórios.</p>
+
+    <div class="lista-controles territorio-filtro">
+      <label class="territorio-periodo">
+        <input type="radio" name="modo-periodo" value="inteiro" checked /> Período inteiro
+      </label>
+      <label class="territorio-periodo">
+        <input type="radio" name="modo-periodo" value="intervalo" /> De
+        <input type="date" id="periodo-de" class="campo-select" disabled />
+        até <input type="date" id="periodo-ate" class="campo-select" disabled />
+      </label>
+      <button type="button" class="btn-mini" id="btn-este-mes">este mês</button>
+      <button type="button" class="btn-mini" id="btn-mes-passado">mês passado</button>
+      <button type="button" class="btn-mini btn-primario" id="btn-aplicar">Aplicar</button>
+      <span class="texto-suave" id="periodo-legenda"></span>
+    </div>
+
+    <!-- ===== Navegação estado → regional → município ===== -->
+    <div class="territorio-cabecalho-nivel">
+      <nav class="territorio-breadcrumb" id="breadcrumb" aria-label="nível"></nav>
+      <div class="territorio-modos" id="modos" role="group" aria-label="modo do mapa">
+        <button type="button" class="btn-mini modo ativo" data-modo="receita">Receita</button>
+        <button type="button" class="btn-mini modo" data-modo="matriculas">Matrículas</button>
+        <button type="button" class="btn-mini modo" data-modo="prospeccao">Prospecção</button>
+      </div>
+    </div>
+    <div id="conferencia" class="territorio-conferencia"></div>
+    <div id="mapa-area" class="territorio-mapa-area"></div>
+    <div id="nivel-conteudo"></div>
+    <div id="tooltip" class="territorio-tooltip" hidden></div>
+
+    <!-- ===== Cobertura e revisão ===== -->
+    <details class="territorio-detalhes" id="detalhes-cobertura">
+      <summary class="secao-titulo">Cobertura do casamento cidade → município</summary>
+      <div class="grade-metricas" id="cards-cobertura"></div>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-cobertura">
+          <thead>
+            <tr><th>Camada</th><th>Matrículas</th><th>%</th><th>Receita</th><th>%</th><th style="text-align:left">Como casou</th></tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <p class="texto-suave territorio-nota" id="nota-cobertura"></p>
+    </details>
+
+    <details class="territorio-detalhes" id="detalhes-revisao" open>
+      <summary class="secao-titulo">Revisão manual <span class="chip" id="chip-pendentes">—</span></summary>
+      <p class="texto-suave">Cidades que o casamento automático não decidiu, com a sugestão do sistema e o motivo. Marque
+        as que concorda (ou ajuste) e confirme em lote. A resolução vira apelido (<code>municipio_apelidos</code>) e
+        nunca é perguntada de novo. O botão <em>CEP</em> consulta o ViaCEP pelo seu navegador e preenche o município.</p>
+      <div class="territorio-lote">
+        <button type="button" class="btn-mini btn-primario" id="btn-confirmar-lote" disabled>Confirmar selecionados (0)</button>
+        <button type="button" class="btn-mini" id="btn-marcar-sugeridas">Marcar todas com sugestão</button>
+        <button type="button" class="btn-mini" id="btn-desmarcar">Desmarcar todas</button>
+      </div>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas territorio-revisao" id="tabela-pendentes">
+          <thead>
+            <tr><th></th><th>Cidade como veio</th><th>UF</th><th>Motivo</th><th>Matr.</th><th>Receita</th><th style="text-align:left">Sugestão do sistema</th><th style="text-align:left">Resolver</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <h3 class="secao-titulo">Casamentos aproximados <span class="chip" id="chip-aproximados">—</span></h3>
+      <p class="texto-suave">Resolvidos por distância de edição (≤ 2 letras, candidato único). Já valem no mapa, mas ficam
+        marcados como aproximados até você confirmar ou corrigir.</p>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas territorio-revisao" id="tabela-aproximados">
+          <thead>
+            <tr><th></th><th>Cidade como veio</th><th>UF</th><th>Casou com</th><th>Matr.</th><th>Receita</th><th style="text-align:left">Sugestão do sistema</th><th style="text-align:left">Confirmar ou corrigir</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <h3 class="secao-titulo">Municípios em duas regionais <span class="chip" id="chip-compartilhados">—</span></h3>
+      <p class="texto-suave">O CSV de regionais lista estes municípios em duas regionais. Só a <strong>principal</strong>
+        entra nos totais e no mapa do estado (regionais somam igual ao estado); a outra mostra o município como
+        compartilhado, à parte. Padrão: a primeira ocorrência no CSV. Trocar aqui recalcula na hora.</p>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-compartilhados">
+          <thead><tr><th>Município</th><th>UF</th><th style="text-align:left">Regional principal</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+
+    <datalist id="lista-municipios"></datalist>
+  </main>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/territorio.js"></script>
+</body>
+</html>
