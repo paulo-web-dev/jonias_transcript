@@ -1351,3 +1351,20 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
 main.territorio-pagina { max-width: 1380px; }
 .mapa-svg { max-height: 640px; }
 main.territorio-pagina { width: min(1380px, 100%); }
+
+/* Prospecção ativa — Fase 1 */
+.fonte-acoes-linha { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.prospeccao-controles { flex-wrap: wrap; gap: 1rem; align-items: center; }
+.amostra-cor { display: inline-block; min-width: 110px; padding: 0.45rem 0.6rem; border-radius: 8px; font-weight: 700; font-size: 0.8rem; text-align: center; border: 1px solid rgba(255, 255, 255, 0.15); }
+.prospeccao-cores td { vertical-align: top; }
+.prospeccao-exemplos { list-style: none; font-size: 0.78rem; white-space: normal; max-width: 360px; }
+.prospeccao-exemplos li { padding: 0.1rem 0; }
+.prospeccao-abas { font-size: 0.76rem; white-space: normal; max-width: 220px; }
+.prospeccao-abas small { color: var(--acento-2); }
+.prospeccao-cores .campo-status, .prospeccao-cores .campo-significado { min-width: 170px; }
+.prospeccao-ignorada td { opacity: 0.45; }
+.prospeccao-lista { font-size: 0.82rem; }
+.prospeccao-lista li { display: block; white-space: normal; }
+.relatorio-abas { font-size: 0.78rem; }
+.relatorio-abas td.relatorio-colunas { white-space: normal; max-width: 420px; font-size: 0.72rem; }
+.relatorio-abas td:last-child { white-space: normal; max-width: 300px; }

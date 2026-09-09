@@ -661,14 +661,138 @@ const MIGRACOES = [
         ON CONFLICT(chave) DO UPDATE SET valor = '1';
     `);
   },
+
+  // 20 — Prospecção ativa (2026-09-09): as planilhas de carteiras por setor
+  // (ATIVOS PARANÁ / ATIVO SANTA CATARINA) entram no jonIAs, que vira o lugar
+  // oficial do controle. `importacoes` é recriada para aceitar tipo
+  // 'prospeccao' (SQLite não altera CHECK); ligacoes/oportunidades/matriculas
+  // apontam para importacoes(id), então a migração roda com foreign_keys OFF
+  // (receita oficial do SQLite para recriar tabela referenciada — `desligarFk`
+  // é tratado pelo runner, que confere `foreign_key_check` ao fim) — os ids
+  // são preservados na cópia.
+  // cores_prospeccao: 1 linha por cor de preenchimento distinta (RGB já com
+  // tema+tint resolvidos); nome/significado são dados pelo usuário na tela
+  // /prospeccao — cor É informação (status), nunca inventada pelo sistema.
+  // contatos_ativo: 1 linha por linha da planilha, chave (uf, aba, nº da
+  // linha); tudo preservado (originais, extras, cor por célula, oculta).
+  Object.assign(() => {
+    db.exec(`
+      CREATE TABLE importacoes_nova (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo                  TEXT    NOT NULL CHECK (tipo IN ('cdr','oportunidades','mysql','prospeccao')),
+        arquivo_nome          TEXT,
+        hash_sha256           TEXT,
+        linhas_lidas          INTEGER NOT NULL DEFAULT 0,
+        linhas_validas        INTEGER NOT NULL DEFAULT 0,
+        linhas_ignoradas      INTEGER NOT NULL DEFAULT 0,
+        registros_novos       INTEGER NOT NULL DEFAULT 0,
+        registros_atualizados INTEGER NOT NULL DEFAULT 0,
+        detalhes_json         TEXT    NOT NULL DEFAULT '{}',
+        status                TEXT    NOT NULL DEFAULT 'concluida' CHECK (status IN ('concluida','erro')),
+        erro                  TEXT,
+        usuario_id            INTEGER NOT NULL REFERENCES usuarios(id),
+        iniciado_em           TEXT    NOT NULL,
+        concluido_em          TEXT,
+        registros_identicos   INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO importacoes_nova (id, tipo, arquivo_nome, hash_sha256, linhas_lidas, linhas_validas,
+        linhas_ignoradas, registros_novos, registros_atualizados, detalhes_json, status, erro,
+        usuario_id, iniciado_em, concluido_em, registros_identicos)
+      SELECT id, tipo, arquivo_nome, hash_sha256, linhas_lidas, linhas_validas, linhas_ignoradas,
+        registros_novos, registros_atualizados, detalhes_json, status, erro, usuario_id, iniciado_em,
+        concluido_em, registros_identicos FROM importacoes;
+      DROP TABLE importacoes;
+      ALTER TABLE importacoes_nova RENAME TO importacoes;
+      CREATE INDEX idx_importacoes_tipo ON importacoes(tipo, iniciado_em);
+      CREATE INDEX idx_importacoes_hash ON importacoes(hash_sha256);
+
+      CREATE TABLE cores_prospeccao (
+        cor_hex       TEXT PRIMARY KEY,               -- 'FF0000' (6 hex, sem alpha)
+        origem        TEXT,                           -- 'argb' | 'tema N tint T' | 'indexada N'
+        linhas        INTEGER NOT NULL DEFAULT 0,     -- linhas cuja cor dominante é esta
+        celulas       INTEGER NOT NULL DEFAULT 0,     -- células isoladas (cor ≠ cor da linha)
+        status_nome   TEXT,                           -- dado pelo usuário; NULL = sem nome ainda
+        significado   TEXT,
+        ignorar       INTEGER NOT NULL DEFAULT 0,     -- 1 = só formatação, não é status
+        ordem         INTEGER,
+        atualizado_em TEXT,
+        usuario_id    INTEGER REFERENCES usuarios(id)
+      );
+      CREATE TABLE contatos_ativo (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        uf                  TEXT    NOT NULL,
+        setor               TEXT    NOT NULL,          -- nome da aba, verbatim
+        linha_origem        INTEGER NOT NULL,          -- nº da linha na aba
+        arquivo_nome        TEXT,
+        importacao_id       INTEGER REFERENCES importacoes(id),
+        orgao               TEXT,                      -- 'PM' | 'CM' | 'Autarquia' | NULL (derivado da aba)
+        municipio_texto     TEXT,
+        codigo_ibge         INTEGER REFERENCES municipios(codigo_ibge),
+        municipio_metodo    TEXT,
+        municipio_confianca TEXT,
+        telefone_original   TEXT,
+        telefone            TEXT,                      -- só dígitos
+        telefone_valido     INTEGER,                   -- 1 = 10–11 dígitos; 0 = tem algo mas inválido; NULL = vazio
+        whatsapp_original   TEXT,
+        whatsapp            TEXT,
+        responsavel         TEXT,
+        cargo               TEXT,
+        email               TEXT,
+        data_ultimo_contato TEXT,                      -- ISO (YYYY-MM-DD)
+        observacoes         TEXT,
+        consultor_planilha  TEXT,
+        cor_linha           TEXT REFERENCES cores_prospeccao(cor_hex),
+        cores_celulas_json  TEXT,                      -- {campo: hex} onde a célula difere da linha
+        linha_oculta        INTEGER NOT NULL DEFAULT 0,
+        extras_json         TEXT,                      -- colunas não mapeadas + valores não parseáveis
+        criado_em           TEXT    NOT NULL,
+        atualizado_em       TEXT,
+        editado_em          TEXT,                      -- edição feita no jonIAs (bloqueia reimportação da aba)
+        UNIQUE (uf, setor, linha_origem)
+      );
+      CREATE INDEX idx_contatos_municipio ON contatos_ativo(codigo_ibge);
+      CREATE INDEX idx_contatos_setor ON contatos_ativo(uf, setor);
+      CREATE INDEX idx_contatos_telefone ON contatos_ativo(telefone);
+      CREATE INDEX idx_contatos_cor ON contatos_ativo(cor_linha);
+    `);
+  }, { desligarFk: true }),
+
+  // 21 — Prospecção: colunas promovidas de extras a campo (decisão do usuário,
+  // 2026-09-09): curso; "contato inexistente"/"tel inexistente" vira um FLAG de
+  // status (contato_inexistente = 1, com o texto original em
+  // contato_inexistente_texto — "telefone não funciona", "só chama"…) que
+  // prevalece sobre o status da cor; "Cadastro no CRM?" vira booleano
+  // (Sim/Não; outro texto fica em extras).
+  () => {
+    db.exec(`
+      ALTER TABLE contatos_ativo ADD COLUMN curso TEXT;
+      ALTER TABLE contatos_ativo ADD COLUMN contato_inexistente INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE contatos_ativo ADD COLUMN contato_inexistente_texto TEXT;
+      ALTER TABLE contatos_ativo ADD COLUMN cadastro_crm INTEGER;
+    `);
+  },
+
 ];
 
+// Migração marcada com `desligarFk` recria uma tabela referenciada por outras:
+// foreign_keys só pode ser desligado FORA de transação, e ao fim conferimos
+// que nenhuma referência ficou órfã (foreign_key_check) antes de religar.
 let versao = db.pragma("user_version", { simple: true });
 for (; versao < MIGRACOES.length; versao++) {
-  db.transaction(() => {
-    MIGRACOES[versao]();
-    db.pragma(`user_version = ${versao + 1}`);
-  })();
+  const migracao = MIGRACOES[versao];
+  if (migracao.desligarFk) db.pragma("foreign_keys = OFF");
+  try {
+    db.transaction(() => {
+      migracao();
+      if (migracao.desligarFk) {
+        const orfas = db.pragma("foreign_key_check");
+        if (orfas.length) throw new Error(`migração ${versao + 1}: ${orfas.length} referência(s) órfã(s) após recriar tabela — abortada`);
+      }
+      db.pragma(`user_version = ${versao + 1}`);
+    })();
+  } finally {
+    if (migracao.desligarFk) db.pragma("foreign_keys = ON");
+  }
 }
 
 // ---------- Ocultação padrão da TV (TEMPORÁRIO) ----------

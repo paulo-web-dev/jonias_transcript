@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prospecção — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">prospecção ativa</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <a href="/relatorios" class="btn-topo">📊 Relatórios</a>
+      <a href="/metas" class="btn-topo">🎯 Metas</a>
+      <a href="/territorio" class="btn-topo">🗺 Território</a>
+      <a href="/saude" class="btn-topo">🩺 Saúde dos dados</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista territorio-pagina">
+    <p class="texto-suave">As carteiras de prospecção (uma aba por setor do órgão) agora vivem aqui. Fase 1: carga com
+      fidelidade total. Antes da tela de trabalho, duas coisas precisam da sua decisão: o que cada <strong>cor</strong>
+      da planilha significa e as cidades que não casaram com município (revisão em <a href="/territorio">/territorio</a>).
+      Nada aqui passa por IA.</p>
+
+    <h2 class="secao-titulo">Cores encontradas → status <span class="chip" id="chip-cores">—</span></h2>
+    <p class="texto-suave">Cada cor de preenchimento distinta nas planilhas, com quantas linhas a usam e exemplos reais.
+      Dê um nome (vira o status do contato) e um significado. Marque "só formatação" para cores que não carregam
+      informação. Nada foi presumido pelo sistema. Salva ao sair do campo.</p>
+    <div class="lista-controles prospeccao-controles">
+      <label class="territorio-periodo"><input type="checkbox" id="mostrar-ignoradas" /> mostrar cores marcadas como só formatação</label>
+      <span class="texto-suave" id="resumo-cores"></span>
+    </div>
+    <div class="tabela-scroll">
+      <table class="tabela-metricas prospeccao-cores" id="tabela-cores">
+        <thead>
+          <tr><th>Cor</th><th>Hex / origem</th><th>Linhas</th><th>Células</th><th style="text-align:left">Onde aparece</th><th style="text-align:left">Exemplos</th><th style="text-align:left">Nome do status</th><th style="text-align:left">Significado</th><th>Só formatação</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h2 class="secao-titulo">Cobertura da carga</h2>
+    <div class="grade-metricas" id="cards-cobertura"></div>
+    <div class="tabela-scroll">
+      <table class="tabela-metricas" id="tabela-abas">
+        <thead>
+          <tr><th>UF</th><th style="text-align:left">Aba (setor)</th><th>Órgão</th><th>Linhas</th><th>Ocultas</th><th>Tel. válido</th><th>%</th><th>WhatsApp</th><th>E-mail</th><th>Município casado</th><th>%</th><th>Pendentes</th><th>Sem cidade</th><th>Cores</th><th>Editadas</th></tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot></tfoot>
+      </table>
+    </div>
+
+    <h3 class="secao-titulo">Colunas não reconhecidas (preservadas em extras)</h3>
+    <p class="texto-suave">Cabeçalhos que não casaram com o dicionário de sinônimos. Os valores estão guardados linha a
+      linha em <code>extras_json</code>; nada foi descartado. Se alguma deveria ser um campo do sistema, é só dizer.</p>
+    <div id="nao-reconhecidas"></div>
+  </main>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/prospeccao.js"></script>
+</body>
+</html>

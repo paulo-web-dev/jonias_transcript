@@ -133,6 +133,28 @@ function normalizarCidade(bruto) {
   return { nome, ufNoTexto };
 }
 
+// Cidade como vem nas planilhas de prospecção: "APUCARANA (LIGAR APÓS 12H00)",
+// "CRUZMALTINA (SÓ CHAMA )", "Campo largo - Consorcio da GM/PR = COIN - 41 3000-0000".
+// Tira anotações entre parênteses/colchetes e o que vem depois de " - ", " = ",
+// ":" ou de um telefone. O texto original fica em municipio_texto; só a chave usa o limpo.
+function limparCidadeAnotada(texto) {
+  return String(texto ?? "")
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, " ")
+    .replace(/\s[-–=:]\s.*$/, " ")
+    .replace(/\s\d[\d\s().-]{6,}.*$/, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Chave (cidade, UF) de um contato da prospecção: UF vem do upload; sufixo
+// "/PR" no texto prevalece.
+function chaveDoContato(c) {
+  const { nome, ufNoTexto } = normalizarCidade(limparCidadeAnotada(c.municipio_texto));
+  if (!nome) return null;
+  const uf = ufNoTexto || c.uf || null;
+  return { nome, uf, chave: `${nome}|${uf || ""}` };
+}
+
 // Chave (cidade, UF) de uma matrícula — única definição, usada em todo lugar
 function chaveDaMatricula(m) {
   const { nome, ufNoTexto } = normalizarCidade(m.aluno_cidade);
@@ -365,6 +387,33 @@ function cruzarMunicipios() {
         apelido.confianca, uf, m.id);
       contagem[metodo] = (contagem[metodo] || 0) + 1;
     }
+    // Contatos da prospecção ativa (tabela existe desde a migração 20): UF vem
+    // do upload; sufixo "/PR" no texto da cidade prevalece. Mesmos apelidos.
+    const atualizarContato = db.prepare(
+      "UPDATE contatos_ativo SET codigo_ibge = ?, municipio_metodo = ?, municipio_confianca = ? WHERE id = ?"
+    );
+    for (const c of db.prepare("SELECT id, municipio_texto, uf FROM contatos_ativo").all()) {
+      const k = chaveDoContato(c);
+      if (!k) {
+        atualizarContato.run(null, "sem_cidade", null, c.id);
+        contagem.contatos_sem_cidade = (contagem.contatos_sem_cidade || 0) + 1;
+        continue;
+      }
+      const { nome, uf, chave } = k;
+      chavesVistas.add(chave);
+      let apelido = apelidos.get(chave);
+      if (!apelido) {
+        const r = classificarCidade(nome, uf, "texto");
+        apelido = { cidade_norm: nome, uf_norm: uf || "", ...r };
+        inserir.run(nome, uf || "", r.resultado, r.codigo_ibge, r.metodo, r.confianca, r.distancia,
+          String(c.municipio_texto ?? "").slice(0, 120), agora);
+        apelidos.set(chave, apelido);
+        apelidosNovos++;
+      }
+      const metodo = metodoNaMatricula(apelido);
+      atualizarContato.run(apelido.resultado === "municipio" ? apelido.codigo_ibge : null, metodo, apelido.confianca, c.id);
+      contagem[`contatos_${metodo}`] = (contagem[`contatos_${metodo}`] || 0) + 1;
+    }
     for (const [chave, a] of apelidos) {
       if (a.metodo !== "manual" && !chavesVistas.has(chave)) {
         db.prepare("DELETE FROM municipio_apelidos WHERE cidade_norm = ? AND uf_norm = ?")
@@ -555,8 +604,25 @@ function sugestaoParaRevisao(a, g, sugestoes) {
   return { resultado: null, motivo: "sem sugestão — decidir pelo CEP/estado do cadastro" };
 }
 
+// Contatos da prospecção por chave (cidade, UF) — para a revisão mostrar
+// "N matrículas · M contatos" e a resolução valer para os dois
+function agruparContatosPorChave() {
+  const grupos = new Map();
+  for (const c of db.prepare("SELECT municipio_texto, uf, setor FROM contatos_ativo").all()) {
+    const k = chaveDoContato(c);
+    if (!k) continue;
+    const { chave } = k;
+    const g = grupos.get(chave) ?? grupos.set(chave, { n: 0, amostras: new Set(), setores: new Set() }).get(chave);
+    g.n++;
+    if (g.amostras.size < 3) g.amostras.add(String(c.municipio_texto).replace(/\s+/g, " ").trim());
+    if (g.setores.size < 4) g.setores.add(`${c.uf} · ${c.setor}`);
+  }
+  return grupos;
+}
+
 function pendencias() {
   const grupos = agruparMatriculasPorChave();
+  const contatos = agruparContatosPorChave();
   const apelidos = db
     .prepare(
       `SELECT a.id, a.cidade_norm, a.uf_norm, a.resultado, a.codigo_ibge, a.metodo, a.confianca,
@@ -568,13 +634,16 @@ function pendencias() {
   const montar = (a) => {
     const g = grupos.get(`${a.cidade_norm}|${a.uf_norm}`) ||
       { n: 0, total: 0, receita: 0, amostras: new Set(), estados: new Set(), ceps: new Set() };
+    const ct = contatos.get(`${a.cidade_norm}|${a.uf_norm}`) || { n: 0, amostras: new Set(), setores: new Set() };
     const sugestoes = sugerirCandidatos(a.cidade_norm, a.uf_norm, 4);
+    const amostras = new Set([...g.amostras, ...ct.amostras]);
     return {
       id: a.id, cidadeNorm: a.cidade_norm, ufNorm: a.uf_norm, resultado: a.resultado, metodo: a.metodo,
       confianca: a.confianca, distancia: a.distancia,
-      amostras: g.amostras.size ? [...g.amostras] : [a.amostra_original],
+      amostras: amostras.size ? [...amostras].slice(0, 3) : [a.amostra_original],
       estados: [...g.estados], ceps: [...g.ceps],
       matriculas: g.n, matriculasTotal: g.total, receitaCentavos: g.receita,
+      contatos: ct.n, contatosSetores: [...ct.setores],
       municipio: a.codigo_ibge ? { codigo: a.codigo_ibge, nome: a.municipio_nome, uf: a.municipio_uf } : null,
       sugestoes,
       sugestao: sugestaoParaRevisao(a, g, sugestoes),
@@ -1043,12 +1112,13 @@ module.exports = {
   compartilhados,
   definirRegionalPrincipal,
   lerMapaSvg,
-  // utilitários (testes)
+  // utilitários (testes e prospeccao.js)
   normalizarCidade,
   normalizarUf,
   resolverUf,
   classificarCidade,
   sugerirCandidatos,
+  indiceMunicipios,
   levenshtein,
   FILTRO_MATRICULA_VALIDA,
 };

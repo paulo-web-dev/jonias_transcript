@@ -3,6 +3,9 @@
 const el = {
   arquivoCdr: document.getElementById("arquivo-cdr"),
   arquivoOportunidades: document.getElementById("arquivo-oportunidades"),
+  arquivoProspeccao: document.getElementById("arquivo-prospeccao"),
+  prospeccaoUf: document.getElementById("prospeccao-uf"),
+  prospeccaoStatus: document.getElementById("prospeccao-status"),
   cdrStatus: document.getElementById("cdr-status"),
   oportunidadesStatus: document.getElementById("oportunidades-status"),
   mysqlStatus: document.getElementById("mysql-status"),
@@ -56,7 +59,35 @@ async function chamarApi(url, opcoes) {
 
 // ---------- Relatório de importação ----------
 
-const NOMES_TIPO = { cdr: "CDR do PABX", oportunidades: "Oportunidades (Omie)", mysql: "MySQL Unyflex" };
+const NOMES_TIPO = { cdr: "CDR do PABX", oportunidades: "Oportunidades (Omie)", mysql: "MySQL Unyflex", prospeccao: "Prospecção ativa (planilha)" };
+
+// Relatório por aba da planilha de prospecção (uma linha por aba, com o que casou e o que não)
+function blocoAbasProspeccao(abas) {
+  if (!abas?.length) return "";
+  const linhas = abas.map((a) => {
+    if (a.motivo) {
+      return `<tr class="sem-clique"><td class="celula-nome">${escapeHtml(a.aba)}</td><td colspan="7" class="relatorio-erro">não importada — ${escapeHtml(a.motivo)}</td></tr>`;
+    }
+    const cols = Object.entries(a.colunas || {}).map(([campo, rotulo]) => `${escapeHtml(campo)}←"${escapeHtml(rotulo)}"`).join(", ");
+    const nao = (a.naoReconhecidas || []).map((r) => `<code>${escapeHtml(r)}</code>`).join(" ");
+    const t = a.telefones || {};
+    return `<tr class="sem-clique"><td class="celula-nome">${escapeHtml(a.aba)}${a.oculta ? ' <span class="chip">aba oculta</span>' : ""}</td>
+      <td>${a.importadas}</td><td>${a.ocultas || 0}</td><td>${t.validos || 0} / ${t.invalidos || 0} / ${t.vazios || 0}</td>
+      <td>${Object.keys(a.cores || {}).length}</td><td><strong>${a.novos ?? 0}</strong> / ${a.atualizados ?? 0} / ${a.identicos ?? 0}</td>
+      <td style="text-align:left" class="texto-suave relatorio-colunas">${cols}</td>
+      <td style="text-align:left">${nao || '<span class="texto-suave">—</span>'}</td></tr>`;
+  }).join("");
+  return `<h4>Abas (${abas.length})</h4><div class="tabela-scroll"><table class="tabela-metricas relatorio-abas">
+    <thead><tr><th>Aba</th><th>Linhas</th><th>Ocultas</th><th>Tel. válidos / inválidos / vazios</th><th>Cores</th><th>Novos / atualiz. / idênticos</th>
+    <th style="text-align:left">Colunas casadas</th><th style="text-align:left">Não reconhecidas (em extras)</th></tr></thead><tbody>${linhas}</tbody></table></div>`;
+}
+
+function blocoNaoReconhecidas(lista) {
+  if (!lista?.length) return "";
+  return `<h4>Colunas não reconhecidas no arquivo (preservadas em extras)</h4><ul>${lista
+    .map((c) => `<li><code>${escapeHtml(c.rotulo)}</code> — ${c.abas.length} aba(s), ${c.linhas} valor(es): <span class="texto-suave">${c.abas.slice(0, 6).map(escapeHtml).join(", ")}${c.abas.length > 6 ? "…" : ""}</span></li>`)
+    .join("")}</ul>`;
+}
 
 function blocoOcorrencias(titulo, grupo) {
   const chaves = Object.keys(grupo || {});
@@ -101,6 +132,16 @@ function mostrarRelatorio(titulo, resultado) {
         `${escapeHtml(periodo.de)} a ${escapeHtml(periodo.ate)}.</p>`
     );
   }
+  if (resultado.tipo === "prospeccao" || d.abas) {
+    const m = d.municipios || {};
+    linhas.push(
+      `<p>Município casado: <strong>${m.casado || 0}</strong> · pendente: ${m.pendente || 0} · sem cidade: ${m.sem_cidade || 0}` +
+        `${m.fora ? ` · fora da UF: ${m.fora}` : ""} — pendências na revisão de <a href="/territorio">/territorio</a>; ` +
+        `cores em <a href="/prospeccao">/prospeccao</a>.</p>`
+    );
+    linhas.push(blocoAbasProspeccao(resultado.abas || d.abas));
+    linhas.push(blocoNaoReconhecidas(d.colunasNaoReconhecidas));
+  }
   linhas.push(blocoOcorrencias("Linhas ignoradas (por quê)", d.motivos));
   linhas.push(blocoOcorrencias("Linhas mantidas com ressalva", d.problemas));
   if (d.avisos?.length) {
@@ -118,7 +159,7 @@ function mostrarRelatorio(titulo, resultado) {
 
 // binario = true envia o arquivo como está (planilha .xlsx do Omie);
 // caso contrário o conteúdo vai como texto (CSV do CDR).
-async function enviarArquivo(input, rota, statusEl, rotulo, binario) {
+async function enviarArquivo(input, rota, statusEl, rotulo, binario, queryExtra = "") {
   const arquivo = input.files?.[0];
   if (!arquivo) return;
   input.value = ""; // permite reenviar o mesmo arquivo
@@ -127,7 +168,7 @@ async function enviarArquivo(input, rota, statusEl, rotulo, binario) {
     const corpo = binario ? await arquivo.arrayBuffer() : await arquivo.text();
     const tipo = binario ? "application/octet-stream" : "text/plain;charset=utf-8";
     const resultado = await chamarApi(
-      `${rota}?arquivo=${encodeURIComponent(arquivo.name)}`,
+      `${rota}?arquivo=${encodeURIComponent(arquivo.name)}${queryExtra}`,
       { method: "POST", headers: { "Content-Type": tipo }, body: corpo }
     );
     statusEl.textContent =
@@ -152,6 +193,16 @@ el.arquivoOportunidades.addEventListener("change", () =>
     el.oportunidadesStatus,
     "Oportunidades (Omie)",
     true
+  )
+);
+el.arquivoProspeccao?.addEventListener("change", () =>
+  enviarArquivo(
+    el.arquivoProspeccao,
+    "/api/importacoes/prospeccao",
+    el.prospeccaoStatus,
+    `Prospecção ativa (${el.prospeccaoUf.value})`,
+    true,
+    `&uf=${encodeURIComponent(el.prospeccaoUf.value)}`
   )
 );
 

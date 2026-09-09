@@ -863,4 +863,10 @@ module.exports = {
   dinheiroParaCentavos,
   normalizarTelefone,
   dataCelulaIso,
+  // reuso pelo importador de prospecção (prospeccao.js)
+  valorCelula,
+  novoRelatorio,
+  registrarOcorrencia,
+  registrarImportacaoErro,
+  avisarSeReimportacao,
 };

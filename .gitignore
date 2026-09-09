@@ -4,3 +4,11 @@ aula-ai.db
 aula-ai.db-journal
 aula-ai.db-wal
 aula-ai.db-shm
+
+# planilhas de prospecção (contêm dados pessoais de servidores) — nunca versionar
+*.xlsx
+*.xls
+dados/*.xlsx
+*.db-shm
+*.db-wal
+*.db-journal

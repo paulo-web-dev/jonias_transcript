@@ -768,7 +768,7 @@ function linhaRevisao(p, aproximado) {
     <td class="celula-nome">${p.amostras.map(escapeHtml).join("<br>")}
       <div class="texto-suave territorio-descricao">${cadastro || "sem estado/CEP no cadastro"}</div></td>
     <td>${escapeHtml(uf)}</td>${meio}
-    <td>${inteiro(p.matriculas)}${p.matriculasTotal > p.matriculas ? `<small class="texto-suave"> +${p.matriculasTotal - p.matriculas} canc.</small>` : ""}</td>
+    <td>${inteiro(p.matriculas)}${p.matriculasTotal > p.matriculas ? `<small class="texto-suave"> +${p.matriculasTotal - p.matriculas} canc.</small>` : ""}${p.contatos ? `<div class="texto-suave territorio-descricao" title="${escapeHtml((p.contatosSetores || []).join(", "))}">${inteiro(p.contatos)} contato(s) da prospecção</div>` : ""}</td>
     <td>${reais(p.receitaCentavos)}</td>
     <td style="text-align:left">${sugestaoTexto}<div class="texto-suave territorio-descricao">${escapeHtml(s.motivo || "")}</div></td>
     ${celulaResolver(p)}

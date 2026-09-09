@@ -28,6 +28,7 @@ const {
 } = require("./metricas.js");
 const { prepararFatosFeedback, gerarFeedbackMarkdown } = require("./feedback.js");
 const territorio = require("./territorio.js");
+const prospeccao = require("./prospeccao.js");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -330,6 +331,9 @@ app.get("/metas", exigirLoginPagina, (req, res) =>
 app.get("/territorio", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "territorio.html"))
 );
+app.get("/prospeccao", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "prospeccao.html"))
+);
 
 // ---------- CRUD de aulas ----------
 
@@ -626,7 +630,7 @@ const corpoXlsx = express.raw({
     "application/octet-stream",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ],
-  limit: "25mb",
+  limit: "50mb", // planilhas de prospecção têm dezenas de abas (PR: 2,6 MB) — folga
 });
 
 app.post("/api/importacoes/cdr", corpoCsv, (req, res) => {
@@ -651,6 +655,33 @@ app.post("/api/importacoes/oportunidades", corpoXlsx, async (req, res) => {
   const resultado = await importarOportunidadesOmie(req.body, arquivo, req.usuario.id);
   if (resultado.status !== "erro") emitirEventoTv("oportunidades");
   res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
+});
+
+// Prospecção ativa: planilha de carteiras por setor (uma aba por setor); a UF
+// é escolhida no upload — nunca deduzida do nome do arquivo.
+app.post("/api/importacoes/prospeccao", corpoXlsx, async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({ error: "Corpo vazio — envie a planilha .xlsx como application/octet-stream." });
+  }
+  const uf = String(req.query.uf || "").toUpperCase();
+  if (!prospeccao.UFS_ACEITAS.includes(uf)) {
+    return res.status(400).json({ error: `Informe a UF da planilha em ?uf= (${prospeccao.UFS_ACEITAS.join(", ")}).` });
+  }
+  const arquivo = String(req.query.arquivo || "prospeccao.xlsx").slice(0, 200);
+  const resultado = await prospeccao.importarProspeccao(req.body, arquivo, uf, req.usuario.id);
+  res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
+});
+
+app.get("/api/prospeccao/cobertura", (req, res) => res.json(prospeccao.coberturaProspeccao()));
+
+app.get("/api/prospeccao/cores", (req, res) => res.json({ cores: prospeccao.listarCores() }));
+app.put("/api/prospeccao/cores/:hex", (req, res) => {
+  try {
+    res.json(prospeccao.definirStatusCor(req.params.hex, req.body || {}, req.usuario.id));
+  } catch (err) {
+    if (err.validacao) return res.status(400).json({ error: err.message });
+    tratarErro("prospeccao/cores", err, res);
+  }
 });
 
 app.post("/api/sincronizacoes/mysql", async (req, res) => {
