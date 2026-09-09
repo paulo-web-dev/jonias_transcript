@@ -770,11 +770,363 @@ function erro(mensagem) {
   return e;
 }
 
+// ======================================================================
+// Fase 2 — tela de trabalho: payload compacto, edição, histórico, criação,
+// status novos e exportação .xlsx
+// ======================================================================
+
+// Ordem das colunas do payload compacto (array de arrays: 16 k linhas ≈ 2 MB)
+const CAMPOS_TRABALHO = [
+  "id", "setor", "orgao", "municipio_texto", "codigo_ibge", "responsavel", "cargo", "telefone",
+  "telefone_original", "whatsapp", "email", "data_ultimo_contato", "observacoes", "curso",
+  "consultor_planilha", "pessoa_id", "cor_linha", "contato_inexistente", "cadastro_crm", "linha_oculta",
+  "origem", "editado_em", "telefone_valido",
+];
+const SQL_LINHA_TRABALHO = `SELECT ${CAMPOS_TRABALHO.join(", ")} FROM contatos_ativo`;
+const linhaCompacta = (r) => CAMPOS_TRABALHO.map((c) => r[c] ?? null);
+
+// Vendedor: identidade de terceiros mascarada NO SQL — pessoa_id de outro
+// consultor vira -1 ("outro consultor") e o texto do consultor da planilha não
+// sai do banco. Admin: colunas como estão.
+function sqlLinhaTrabalho(escopo) {
+  if (!escopo) return { sql: SQL_LINHA_TRABALHO, valores: [] };
+  const colunas = CAMPOS_TRABALHO.map((c) => {
+    if (c === "pessoa_id") return "CASE WHEN pessoa_id IS NULL THEN NULL WHEN pessoa_id = ? THEN pessoa_id ELSE -1 END AS pessoa_id";
+    if (c === "consultor_planilha") return "NULL AS consultor_planilha";
+    return c;
+  });
+  return { sql: `SELECT ${colunas.join(", ")} FROM contatos_ativo`, valores: [escopo.pessoaId ?? -2] };
+}
+
+function statusDisponiveis() {
+  return db.prepare(
+    `SELECT cor_hex hex, status_nome nome, significado, linhas, origem FROM cores_prospeccao
+     WHERE status_nome IS NOT NULL AND ignorar = 0 ORDER BY ordem, linhas DESC`
+  ).all();
+}
+
+// escopo (escopo.js): null = admin (UF inteira); vendedor = só municípios das
+// regionais dele — o filtro entra no SQL, e as listas auxiliares (regionais,
+// municípios, setores, consultores) também são cortadas.
+function payloadTrabalho(uf, usuario, escopo = null) {
+  uf = String(uf || "").toUpperCase();
+  if (!UFS_ACEITAS.includes(uf)) throw erro("UF inválida.");
+  const cm = clausulaMunicipios(escopo);
+  const sl = sqlLinhaTrabalho(escopo);
+  const linhas = db.prepare(`${sl.sql} WHERE uf = ? AND ${cm.sql} ORDER BY setor, linha_origem, id`)
+    .all(...sl.valores, uf, ...cm.valores).map(linhaCompacta);
+  const regionais = escopo
+    ? db.prepare(`SELECT id, sigla, nome FROM regionais WHERE uf = ? AND id IN (${escopo.regionais.map(() => "?").join(",") || "NULL"}) ORDER BY sigla`).all(uf, ...escopo.regionais)
+    : db.prepare("SELECT id, sigla, nome FROM regionais WHERE uf = ? ORDER BY sigla").all(uf);
+  const municipios = Object.fromEntries(
+    db.prepare(`SELECT codigo_ibge codigo, nome, regional_principal_id regional FROM municipios WHERE uf = ? AND ${cm.sql} ORDER BY nome`)
+      .all(uf, ...cm.valores).map((m) => [m.codigo, [m.nome, m.regional]])
+  );
+  const setores = db.prepare(`SELECT DISTINCT setor FROM contatos_ativo WHERE uf = ? AND ${cm.sql} ORDER BY setor`).all(uf, ...cm.valores).map((s) => s.setor);
+  const consultores = escopo
+    ? (escopo.pessoaId ? db.prepare("SELECT id, nome FROM pessoas WHERE id = ?").all(escopo.pessoaId) : [])
+    : consultoresAtuais();
+  return {
+    uf, campos: CAMPOS_TRABALHO, linhas, status: statusDisponiveis(), setores, regionais, municipios, consultores,
+    usuario: { id: usuario.id, nome: usuario.nome || usuario.login, papel: usuario.papel, pessoaId: usuario.pessoa_id ?? null },
+    escopo: escopo ? { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio } : null,
+    geradoEm: new Date().toISOString(),
+  };
+}
+
+const hojeIso = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const RE_DATA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+const texto = (v, max = 4000) => {
+  if (v === null || v === undefined) return null;
+  const t = String(v).replace(/\s+$/g, "").trim();
+  return t ? t.slice(0, max) : null;
+};
+
+// Validadores por campo editável: devolvem { colunas: {coluna: valor}, log: valorNovo }
+const EDITAVEIS = {
+  responsavel: (v) => ({ responsavel: texto(v, 200) }),
+  cargo: (v) => ({ cargo: texto(v, 200) }),
+  email: (v) => ({ email: texto(v, 200) }),
+  observacoes: (v) => ({ observacoes: texto(v) }),
+  curso: (v) => ({ curso: texto(v, 300) }),
+  setor: (v) => {
+    const s = texto(v, 120);
+    if (!s) throw erro("Setor não pode ficar vazio.");
+    return { setor: s, orgao: orgaoDaAba(s) };
+  },
+  telefone: (v) => {
+    const t = normalizarTelefoneOriginal(texto(v, 100));
+    return { telefone_original: t.original, telefone: t.digitos, telefone_valido: t.valido };
+  },
+  whatsapp: (v) => {
+    const t = normalizarTelefoneOriginal(texto(v, 100));
+    return { whatsapp_original: t.original, whatsapp: t.digitos };
+  },
+  data_ultimo_contato: (v) => {
+    const d = texto(v, 10);
+    if (d && !RE_DATA_ISO.test(d)) throw erro("Data inválida — use AAAA-MM-DD.");
+    return { data_ultimo_contato: d };
+  },
+  cor_linha: (v) => {
+    const hex = v === null || v === "" ? null : String(v).toUpperCase();
+    if (hex && !db.prepare("SELECT 1 FROM cores_prospeccao WHERE cor_hex = ? AND status_nome IS NOT NULL AND ignorar = 0").get(hex)) {
+      throw erro("Status inválido — escolha um da lista (cor nomeada em /prospeccao).");
+    }
+    return { cor_linha: hex };
+  },
+  pessoa_id: (v) => {
+    const id = v === null || v === "" ? null : Number(v);
+    if (id !== null && !consultoresAtuais().some((c) => c.id === id)) throw erro("Consultor inválido — só a equipe atual.");
+    return { pessoa_id: id };
+  },
+  contato_inexistente: (v) => ({ contato_inexistente: v ? 1 : 0 }),
+  cadastro_crm: (v) => ({ cadastro_crm: v === null || v === "" ? null : v ? 1 : 0 }),
+  linha_oculta: (v) => ({ linha_oculta: v ? 1 : 0 }),
+  codigo_ibge: (v, linha) => {
+    const codigo = v === null || v === "" ? null : Number(v);
+    if (codigo === null) return { codigo_ibge: null, municipio_metodo: "manual_ignorar", municipio_confianca: "manual" };
+    const m = db.prepare("SELECT nome, uf FROM municipios WHERE codigo_ibge = ?").get(codigo);
+    if (!m) throw erro("Município inexistente.");
+    if (m.uf !== linha.uf) throw erro(`Município de ${m.uf}; a carteira é de ${linha.uf}.`);
+    return { codigo_ibge: codigo, municipio_texto: m.nome, municipio_metodo: "manual", municipio_confianca: "manual" };
+  },
+};
+const CAMPOS_STATUS = new Set(["cor_linha", "contato_inexistente"]);
+
+const inserirHistorico = db.prepare(
+  `INSERT INTO contatos_ativo_historico (contato_id, tipo, canal, campo, valor_anterior, valor_novo, observacao, usuario_id, registrado_em)
+   VALUES (@contato_id, @tipo, @canal, @campo, @valor_anterior, @valor_novo, @observacao, @usuario_id, @registrado_em)`
+);
+
+// Linha fora do escopo do vendedor responde como inexistente (404) — não
+// revela que o id existe
+function buscarLinha(id, escopo = null) {
+  const linha = db.prepare("SELECT * FROM contatos_ativo WHERE id = ?").get(Number(id));
+  if (!linha || !dentroDoEscopo(escopo, linha.codigo_ibge)) throw Object.assign(new Error("Contato não encontrado."), { naoEncontrado: true });
+  return linha;
+}
+
+function linhaCompactaDe(id, escopo = null) {
+  const sl = sqlLinhaTrabalho(escopo);
+  return linhaCompacta(db.prepare(`${sl.sql} WHERE id = ?`).get(...sl.valores, Number(id)));
+}
+
+// PATCH: { campo: valor, ... } — valida tudo, grava, registra histórico por campo
+function atualizarContato(id, mudancas, usuarioId, escopo = null) {
+  const linha = buscarLinha(id, escopo);
+  const campos = Object.keys(mudancas || {}).filter((c) => c !== "id");
+  if (!campos.length) throw erro("Nenhum campo para alterar.");
+  const desconhecido = campos.find((c) => !EDITAVEIS[c]);
+  if (desconhecido) throw erro(`Campo não editável: ${desconhecido}.`);
+  if (escopo) {
+    // vendedor: só atribui a si mesmo (ou tira), e não move a linha para fora da regional
+    if (campos.includes("pessoa_id") && mudancas.pessoa_id !== null && mudancas.pessoa_id !== "" && Number(mudancas.pessoa_id) !== escopo.pessoaId) {
+      throw erro("Você só pode atribuir o contato a você mesmo.");
+    }
+    if (campos.includes("codigo_ibge") && mudancas.codigo_ibge && !dentroDoEscopo(escopo, mudancas.codigo_ibge)) {
+      throw erro("Município fora da sua regional.");
+    }
+  }
+  const agora = new Date().toISOString();
+  const colunas = {};
+  const registros = [];
+  for (const campo of campos) {
+    const novas = EDITAVEIS[campo](mudancas[campo], linha);
+    Object.assign(colunas, novas);
+    const chaveLog = campo === "telefone" ? "telefone_original" : campo === "whatsapp" ? "whatsapp_original" : campo === "codigo_ibge" ? "municipio_texto" : campo;
+    const anterior = linha[chaveLog] ?? null;
+    const novo = novas[chaveLog] ?? null;
+    if (String(anterior ?? "") !== String(novo ?? "")) {
+      registros.push({ contato_id: linha.id, tipo: CAMPOS_STATUS.has(campo) ? "status" : "edicao", canal: null, campo,
+        valor_anterior: anterior === null ? null : String(anterior), valor_novo: novo === null ? null : String(novo),
+        observacao: null, usuario_id: usuarioId, registrado_em: agora });
+    }
+  }
+  db.transaction(() => {
+    if (registros.length) {
+      const sets = Object.keys(colunas).map((c) => `${c} = @${c}`).join(", ");
+      db.prepare(`UPDATE contatos_ativo SET ${sets}, editado_em = @agora, editado_por = @usuario, atualizado_em = @agora WHERE id = @id`)
+        .run({ ...colunas, agora, usuario: usuarioId, id: linha.id });
+      for (const r of registros) inserirHistorico.run(r);
+    }
+  })();
+  return { linha: linhaCompactaDe(linha.id, escopo), alteracoes: registros.length };
+}
+
+const CANAIS = ["ligacao", "whatsapp", "email", "visita", "outro"];
+
+// Registrar contato: histórico + data do último contato + status (opcional)
+function registrarContato(id, { canal, observacao, statusHex, data }, usuarioId, escopo = null) {
+  const linha = buscarLinha(id, escopo);
+  if (!CANAIS.includes(canal)) throw erro(`Canal inválido — use ${CANAIS.join(", ")}.`);
+  const dia = texto(data, 10) || hojeIso();
+  if (!RE_DATA_ISO.test(dia)) throw erro("Data inválida — use AAAA-MM-DD.");
+  const obs = texto(observacao);
+  const agora = new Date().toISOString();
+  let statusNovo;
+  if (statusHex !== undefined && statusHex !== null && statusHex !== "") statusNovo = EDITAVEIS.cor_linha(statusHex).cor_linha;
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE contatos_ativo SET data_ultimo_contato = ?, cor_linha = COALESCE(?, cor_linha),
+         editado_em = ?, editado_por = ?, atualizado_em = ? WHERE id = ?`
+    ).run(dia, statusNovo ?? null, agora, usuarioId, agora, linha.id);
+    inserirHistorico.run({ contato_id: linha.id, tipo: "contato", canal, campo: null,
+      valor_anterior: linha.cor_linha ?? null, valor_novo: statusNovo ?? linha.cor_linha ?? null,
+      observacao: obs, usuario_id: usuarioId, registrado_em: agora });
+    if (statusNovo !== undefined && statusNovo !== linha.cor_linha) {
+      inserirHistorico.run({ contato_id: linha.id, tipo: "status", canal: null, campo: "cor_linha",
+        valor_anterior: linha.cor_linha ?? null, valor_novo: statusNovo, observacao: null, usuario_id: usuarioId, registrado_em: agora });
+    }
+  })();
+  return { linha: linhaCompactaDe(linha.id, escopo), historico: historicoDoContato(linha.id) };
+}
+
+function historicoDoContato(id, escopo = null) {
+  if (escopo) buscarLinha(id, escopo); // 404 fora do escopo
+  return db.prepare(
+    `SELECT h.id, h.tipo, h.canal, h.campo, h.valor_anterior valorAnterior, h.valor_novo valorNovo, h.observacao,
+            h.registrado_em registradoEm, COALESCE(NULLIF(u.nome, ''), u.login) usuario,
+            ca.status_nome statusAnterior, cn.status_nome statusNovo
+     FROM contatos_ativo_historico h
+     JOIN usuarios u ON u.id = h.usuario_id
+     LEFT JOIN cores_prospeccao ca ON ca.cor_hex = h.valor_anterior AND (h.campo = 'cor_linha' OR h.tipo = 'contato')
+     LEFT JOIN cores_prospeccao cn ON cn.cor_hex = h.valor_novo AND (h.campo = 'cor_linha' OR h.tipo = 'contato')
+     WHERE h.contato_id = ? ORDER BY h.registrado_em DESC, h.id DESC`
+  ).all(Number(id));
+}
+
+// Novo contato manual
+function criarContato(dados, usuarioId, escopo = null) {
+  const uf = String(dados.uf || "").toUpperCase();
+  if (!UFS_ACEITAS.includes(uf)) throw erro("UF inválida.");
+  const setor = texto(dados.setor, 120);
+  if (!setor) throw erro("Informe o setor (aba/carteira).");
+  if (escopo) {
+    // vendedor: município obrigatório e dentro da regional dele; consultor só ele
+    if (!dados.codigo_ibge) {
+      const nome = normalizarCidade(texto(dados.municipio_texto) || "").nome;
+      const cand = (indiceMunicipios().porNome.get(nome) || []).find((m) => m.uf === uf && escopo.municipios.has(m.codigo));
+      if (!cand) throw erro("Informe um município da sua regional.");
+      dados = { ...dados, codigo_ibge: cand.codigo };
+    } else if (!dentroDoEscopo(escopo, dados.codigo_ibge)) throw erro("Município fora da sua regional.");
+    if (dados.pessoa_id !== undefined && dados.pessoa_id !== null && dados.pessoa_id !== "" && Number(dados.pessoa_id) !== escopo.pessoaId) {
+      throw erro("Você só pode atribuir o contato a você mesmo.");
+    }
+  }
+  // linha_origem é NOT NULL e faz parte da chave natural: linhas manuais usam
+  // sequência NEGATIVA por (uf, setor) — nunca colidem com as da planilha (positivas)
+  const proxima = db.prepare("SELECT COALESCE(MIN(linha_origem), 0) m FROM contatos_ativo WHERE uf = ? AND setor = ? AND linha_origem < 0").get(uf, setor).m;
+  const base = { uf, setor, linha_origem: Math.min(proxima, 0) - 1, orgao: orgaoDaAba(setor), origem: "manual" };
+  const linhaFalsa = { uf };
+  for (const campo of ["responsavel", "cargo", "email", "observacoes", "curso", "telefone", "whatsapp", "data_ultimo_contato", "cor_linha", "pessoa_id", "contato_inexistente", "cadastro_crm"]) {
+    if (dados[campo] !== undefined) Object.assign(base, EDITAVEIS[campo](dados[campo], linhaFalsa));
+  }
+  if (dados.codigo_ibge) Object.assign(base, EDITAVEIS.codigo_ibge(dados.codigo_ibge, linhaFalsa));
+  else if (texto(dados.municipio_texto)) base.municipio_texto = texto(dados.municipio_texto, 200);
+  if (!base.municipio_texto && !base.responsavel && !base.telefone) throw erro("Informe ao menos município, responsável ou telefone.");
+  const agora = new Date().toISOString();
+  base.criado_em = agora; base.editado_em = agora; base.editado_por = usuarioId; base.contato_inexistente = base.contato_inexistente ?? 0;
+  const id = db.transaction(() => {
+    const colunas = Object.keys(base);
+    const info = db.prepare(`INSERT INTO contatos_ativo (${colunas.join(", ")}) VALUES (${colunas.map((c) => "@" + c).join(", ")})`).run(base);
+    inserirHistorico.run({ contato_id: info.lastInsertRowid, tipo: "criacao", canal: null, campo: null, valor_anterior: null,
+      valor_novo: null, observacao: "criado na tela de trabalho", usuario_id: usuarioId, registrado_em: agora });
+    return info.lastInsertRowid;
+  })();
+  if (!base.codigo_ibge && base.municipio_texto) cruzarMunicipios(); // casa o texto livre como na importação
+  return linhaCompactaDe(id, escopo);
+}
+
+function criarStatus({ nome, corHex, significado }, usuarioId) {
+  const n = texto(nome, 60);
+  const hex = String(corHex || "").replace(/^#/, "").toUpperCase();
+  if (!n) throw erro("Informe o nome do status.");
+  if (!/^[0-9A-F]{6}$/.test(hex)) throw erro("Cor inválida — use 6 hex (ex.: 2AB5C2).");
+  if (db.prepare("SELECT 1 FROM cores_prospeccao WHERE cor_hex = ?").get(hex)) throw erro("Já existe uma cor com esse hex — nomeie-a na lista em vez de criar outra.");
+  if (db.prepare("SELECT 1 FROM cores_prospeccao WHERE lower(status_nome) = lower(?)").get(n)) throw erro("Já existe um status com esse nome.");
+  db.prepare(
+    `INSERT INTO cores_prospeccao (cor_hex, origem, status_nome, significado, ignorar, atualizado_em, usuario_id)
+     VALUES (?, 'criado', ?, ?, 0, ?, ?)`
+  ).run(hex, n, texto(significado, 300), new Date().toISOString(), usuarioId);
+  return listarCores().find((c) => c.hex === hex);
+}
+
+// Exportação .xlsx: uma aba por setor (como o original), linha pintada com a cor do status
+async function exportarXlsx(uf, ids, escopo = null) {
+  uf = String(uf || "").toUpperCase();
+  if (!UFS_ACEITAS.includes(uf)) throw erro("UF inválida.");
+  const cm = clausulaMunicipios(escopo); // vendedor: ids ∩ escopo, ou a carteira dele
+  let linhas;
+  if (Array.isArray(ids) && ids.length) {
+    const numeros = ids.map(Number).filter(Number.isInteger);
+    linhas = [];
+    for (let i = 0; i < numeros.length; i += 900) {
+      const lote = numeros.slice(i, i + 900);
+      linhas.push(...db.prepare(`SELECT * FROM contatos_ativo WHERE uf = ? AND ${cm.sql} AND id IN (${lote.map(() => "?").join(",")})`).all(uf, ...cm.valores, ...lote));
+    }
+    linhas.sort((a, b) => a.setor.localeCompare(b.setor) || (a.linha_origem ?? 1e9) - (b.linha_origem ?? 1e9) || a.id - b.id);
+  } else {
+    linhas = db.prepare(`SELECT * FROM contatos_ativo WHERE uf = ? AND ${cm.sql} ORDER BY setor, linha_origem, id`).all(uf, ...cm.valores);
+  }
+  const status = new Map(db.prepare("SELECT cor_hex, status_nome, ignorar FROM cores_prospeccao").all().map((c) => [c.cor_hex, c]));
+  const municipios = new Map(db.prepare("SELECT m.codigo_ibge c, m.nome, r.sigla FROM municipios m LEFT JOIN regionais r ON r.id = m.regional_principal_id").all().map((m) => [m.c, m]));
+  const consultores = new Map(consultoresAtuais().map((c) => [c.id, c.nome]));
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "jonIAs";
+  const cabecalho = ["Município", "Regional", "Órgão", "Responsável", "Cargo", "Telefone", "WhatsApp", "E-mail", "Último contato",
+    "Status", "Consultor", "Curso", "Observações", "Contato inexistente", "Cadastro CRM", "Oculta na planilha", "Consultor (planilha)", "ID jonIAs"];
+  const nomesUsados = new Set();
+  const nomeAba = (setor) => {
+    let base = String(setor).replace(/[\[\]:*?/\\]/g, " ").trim().slice(0, 28) || "Setor";
+    let nome = base, n = 2;
+    while (nomesUsados.has(nome.toLowerCase())) nome = `${base} ${n++}`;
+    nomesUsados.add(nome.toLowerCase());
+    return nome;
+  };
+  let ws = null, setorAtual = null;
+  for (const l of linhas) {
+    if (l.setor !== setorAtual) {
+      setorAtual = l.setor;
+      ws = wb.addWorksheet(nomeAba(l.setor));
+      ws.addRow(cabecalho).font = { bold: true };
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+      ws.columns = cabecalho.map((h, i) => ({ width: [24, 12, 8, 26, 18, 18, 18, 30, 14, 20, 12, 28, 40, 14, 10, 8, 14, 10][i] || 14 }));
+    }
+    const m = l.codigo_ibge ? municipios.get(l.codigo_ibge) : null;
+    const st = l.cor_linha ? status.get(l.cor_linha) : null;
+    const statusTexto = l.contato_inexistente ? "Contato inexistente" : st?.status_nome || "";
+    const row = ws.addRow([
+      m?.nome || l.municipio_texto || "", m?.sigla || "", l.orgao || "", l.responsavel || "", l.cargo || "",
+      l.telefone_original || "", l.whatsapp_original || "", l.email || "", l.data_ultimo_contato || "",
+      statusTexto, l.pessoa_id ? consultores.get(l.pessoa_id) || "" : "", l.curso || "", l.observacoes || "",
+      l.contato_inexistente ? "Sim" : "", l.cadastro_crm === 1 ? "Sim" : l.cadastro_crm === 0 ? "Não" : "",
+      l.linha_oculta ? "Sim" : "", l.consultor_planilha || "", l.id,
+    ]);
+    if (l.cor_linha && !(st?.ignorar)) {
+      row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + l.cor_linha } };
+    }
+  }
+  if (!ws) wb.addWorksheet("Vazio").addRow(["Nenhum contato no filtro"]);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
 module.exports = {
   importarProspeccao,
   coberturaProspeccao,
   listarCores,
   definirStatusCor,
+  // Fase 2
+  payloadTrabalho,
+  atualizarContato,
+  registrarContato,
+  historicoDoContato,
+  criarContato,
+  criarStatus,
+  exportarXlsx,
+  CONSULTORES_ATUAIS,
   // utilitários (testes)
   normalizarTelefoneOriginal,
   aplicarTint,

@@ -772,6 +772,55 @@ const MIGRACOES = [
     `);
   },
 
+  // 22 — Prospecção, Fase 2 (tela de trabalho, 2026-09-09): consultor atual
+  // por pessoa_id (decisão do usuário: só Frederico, Renato, Eduardo, Agnes e
+  // Bianca; toda outra grafia fica sem consultor — o texto segue em
+  // consultor_planilha), quem editou, origem da linha (planilha | manual) e o
+  // histórico de contatos/edições por linha. "Fred" entra como grafia do
+  // Frederico (625 linhas da planilha).
+  () => {
+    db.exec(`
+      ALTER TABLE contatos_ativo ADD COLUMN pessoa_id   INTEGER REFERENCES pessoas(id);
+      ALTER TABLE contatos_ativo ADD COLUMN editado_por INTEGER REFERENCES usuarios(id);
+      ALTER TABLE contatos_ativo ADD COLUMN origem      TEXT NOT NULL DEFAULT 'planilha';
+      CREATE INDEX idx_contatos_pessoa ON contatos_ativo(pessoa_id);
+      CREATE INDEX idx_contatos_data   ON contatos_ativo(data_ultimo_contato);
+      CREATE TABLE contatos_ativo_historico (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        contato_id     INTEGER NOT NULL REFERENCES contatos_ativo(id) ON DELETE CASCADE,
+        tipo           TEXT    NOT NULL CHECK (tipo IN ('contato', 'edicao', 'status', 'criacao')),
+        canal          TEXT    CHECK (canal IN ('ligacao', 'whatsapp', 'email', 'visita', 'outro')),
+        campo          TEXT,
+        valor_anterior TEXT,
+        valor_novo     TEXT,
+        observacao     TEXT,
+        usuario_id     INTEGER NOT NULL REFERENCES usuarios(id),
+        registrado_em  TEXT    NOT NULL
+      );
+      CREATE INDEX idx_historico_contato ON contatos_ativo_historico(contato_id, registrado_em);
+    `);
+    const fred = db.prepare("SELECT id, nomes_alternativos FROM pessoas WHERE nome = 'Frederico'").get();
+    if (fred) {
+      const alts = JSON.parse(fred.nomes_alternativos || "[]");
+      if (!alts.includes("Fred")) {
+        db.prepare("UPDATE pessoas SET nomes_alternativos = ? WHERE id = ?").run(JSON.stringify([...alts, "Fred"]), fred.id);
+      }
+    }
+    // Backfill restrito: nome normalizado da planilha = nome/grafia de um dos 5
+    const norm = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+    const mapa = new Map();
+    for (const p of db.prepare("SELECT id, nome, wallet_nome, nomes_alternativos FROM pessoas WHERE nome IN ('Frederico','Renato','Eduardo','Agnes','Bianca')").all()) {
+      for (const n of [p.nome, p.wallet_nome, ...JSON.parse(p.nomes_alternativos || "[]")]) if (n) mapa.set(norm(n), p.id);
+    }
+    let casados = 0;
+    const atualizar = db.prepare("UPDATE contatos_ativo SET pessoa_id = ? WHERE lower(trim(consultor_planilha)) = ?");
+    for (const r of db.prepare("SELECT DISTINCT consultor_planilha c FROM contatos_ativo WHERE consultor_planilha IS NOT NULL").all()) {
+      const id = mapa.get(norm(r.c));
+      if (id) casados += atualizar.run(id, String(r.c).trim().toLowerCase()).changes;
+    }
+    console.log(`migração 22: ${casados} contato(s) com consultor atual atribuído (5 nomes); os demais ficam sem consultor.`);
+  },
+
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

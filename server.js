@@ -674,6 +674,71 @@ app.post("/api/importacoes/prospeccao", corpoXlsx, async (req, res) => {
 
 app.get("/api/prospeccao/cobertura", (req, res) => res.json(prospeccao.coberturaProspeccao()));
 
+// ---------- Prospecção, Fase 2: tela de trabalho ----------
+function responderErroProspeccao(rota, err, res) {
+  if (err.validacao) return res.status(400).json({ error: err.message });
+  if (err.naoEncontrado) return res.status(404).json({ error: err.message });
+  tratarErro(rota, err, res);
+}
+
+app.get("/api/prospeccao/contatos", (req, res) => {
+  try {
+    res.json(prospeccao.payloadTrabalho(req.query.uf, req.usuario));
+  } catch (err) {
+    responderErroProspeccao("prospeccao/contatos", err, res);
+  }
+});
+
+app.post("/api/prospeccao/contatos", (req, res) => {
+  try {
+    res.status(201).json({ linha: prospeccao.criarContato(req.body || {}, req.usuario.id) });
+  } catch (err) {
+    responderErroProspeccao("prospeccao/contatos", err, res);
+  }
+});
+
+app.patch("/api/prospeccao/contatos/:id", (req, res) => {
+  try {
+    res.json(prospeccao.atualizarContato(req.params.id, req.body || {}, req.usuario.id));
+  } catch (err) {
+    responderErroProspeccao("prospeccao/contatos/:id", err, res);
+  }
+});
+
+app.post("/api/prospeccao/contatos/:id/contatos", (req, res) => {
+  try {
+    res.status(201).json(prospeccao.registrarContato(req.params.id, req.body || {}, req.usuario.id));
+  } catch (err) {
+    responderErroProspeccao("prospeccao/contatos/:id/contatos", err, res);
+  }
+});
+
+app.get("/api/prospeccao/contatos/:id/historico", (req, res) => {
+  res.json({ historico: prospeccao.historicoDoContato(req.params.id) });
+});
+
+app.post("/api/prospeccao/status", (req, res) => {
+  try {
+    res.status(201).json(prospeccao.criarStatus(req.body || {}, req.usuario.id));
+  } catch (err) {
+    responderErroProspeccao("prospeccao/status", err, res);
+  }
+});
+
+// Exportação .xlsx (POST porque a lista de ids do filtro não cabe na URL)
+app.post("/api/prospeccao/exportar", async (req, res) => {
+  try {
+    const { uf, ids } = req.body || {};
+    const buffer = await prospeccao.exportarXlsx(uf, ids);
+    const nome = `prospeccao_${String(uf || "").toUpperCase()}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.set({
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${nome}"`,
+    }).send(buffer);
+  } catch (err) {
+    responderErroProspeccao("prospeccao/exportar", err, res);
+  }
+});
 app.get("/api/prospeccao/cores", (req, res) => res.json({ cores: prospeccao.listarCores() }));
 app.put("/api/prospeccao/cores/:hex", (req, res) => {
   try {

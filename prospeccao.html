@@ -24,45 +24,158 @@
     </div>
   </header>
 
-  <main class="pagina-lista territorio-pagina">
-    <p class="texto-suave">As carteiras de prospecção (uma aba por setor do órgão) agora vivem aqui. Fase 1: carga com
-      fidelidade total. Antes da tela de trabalho, duas coisas precisam da sua decisão: o que cada <strong>cor</strong>
-      da planilha significa e as cidades que não casaram com município (revisão em <a href="/territorio">/territorio</a>).
-      Nada aqui passa por IA.</p>
+  <main class="pagina-lista territorio-pagina prospeccao-pagina">
+    <nav class="prospeccao-abas" role="tablist">
+      <button type="button" class="aba-btn ativo" data-aba="trabalho">Trabalho</button>
+      <button type="button" class="aba-btn" data-aba="cores">Cores e status <span class="chip" id="chip-cores">—</span></button>
+      <button type="button" class="aba-btn" data-aba="cobertura">Cobertura da carga</button>
+    </nav>
 
-    <h2 class="secao-titulo">Cores encontradas → status <span class="chip" id="chip-cores">—</span></h2>
-    <p class="texto-suave">Cada cor de preenchimento distinta nas planilhas, com quantas linhas a usam e exemplos reais.
-      Dê um nome (vira o status do contato) e um significado. Marque "só formatação" para cores que não carregam
-      informação. Nada foi presumido pelo sistema. Salva ao sair do campo.</p>
-    <div class="lista-controles prospeccao-controles">
-      <label class="territorio-periodo"><input type="checkbox" id="mostrar-ignoradas" /> mostrar cores marcadas como só formatação</label>
-      <span class="texto-suave" id="resumo-cores"></span>
-    </div>
-    <div class="tabela-scroll">
-      <table class="tabela-metricas prospeccao-cores" id="tabela-cores">
-        <thead>
-          <tr><th>Cor</th><th>Hex / origem</th><th>Linhas</th><th>Células</th><th style="text-align:left">Onde aparece</th><th style="text-align:left">Exemplos</th><th style="text-align:left">Nome do status</th><th style="text-align:left">Significado</th><th>Só formatação</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <!-- ===================== TRABALHO ===================== -->
+    <section id="aba-trabalho" class="aba-painel">
+      <div class="trab-filtros">
+        <select id="f-uf" class="campo-select" title="UF da carteira">
+          <option value="PR">PR</option><option value="SC">SC</option>
+        </select>
+        <input type="search" id="f-busca" class="campo-select trab-busca" placeholder="buscar: município, responsável, telefone, e-mail, observação, curso…  (/)" autocomplete="off" />
+        <input type="text" id="f-municipio" class="campo-select" list="lista-municipios-uf" placeholder="município" autocomplete="off" />
+        <datalist id="lista-municipios-uf"></datalist>
+        <select id="f-regional" class="campo-select"><option value="">regional: todas</option></select>
+        <select id="f-setor" class="campo-select"><option value="">setor: todos</option></select>
+        <select id="f-consultor" class="campo-select"><option value="">consultor: todos</option></select>
+        <div class="trab-status-filtro" id="f-status" title="clique para filtrar por status (vários)"></div>
+        <label class="trab-flag"><input type="checkbox" id="f-ocultas" /> mostrar ocultas</label>
+        <label class="trab-flag"><input type="checkbox" id="f-sem-telefone" /> sem telefone</label>
+        <label class="trab-flag"><input type="checkbox" id="f-inexistente" /> contato inexistente</label>
+        <label class="trab-flag"><input type="checkbox" id="f-nunca" /> nunca tocado</label>
+        <label class="trab-flag">último contato de <input type="date" id="f-de" class="campo-select" /> até <input type="date" id="f-ate" class="campo-select" /></label>
+        <button type="button" class="btn-mini" id="btn-limpar-filtros">limpar</button>
+        <span class="trab-contador" id="trab-contador">—</span>
+        <span class="trab-acoes">
+          <button type="button" class="btn-mini btn-primario" id="btn-novo-contato">+ Novo contato</button>
+          <button type="button" class="btn-mini" id="btn-exportar-filtro">Exportar filtro (.xlsx)</button>
+          <button type="button" class="btn-mini" id="btn-exportar-tudo">Exportar UF</button>
+        </span>
+      </div>
+      <p class="texto-suave trab-dicas">Clique numa célula para editar (Enter/Tab salva, Esc cancela). Clique no status para trocar.
+        📞 registra contato (ou tecla <kbd>R</kbd> na linha selecionada); ▸ abre detalhes e histórico (<kbd>D</kbd>). <kbd>↑</kbd><kbd>↓</kbd> navegam.</p>
+      <div class="trab-corpo">
+        <div class="trab-scroll" id="trab-scroll" tabindex="0">
+          <table class="tabela-metricas trab-tabela" id="trab-tabela">
+            <colgroup>
+              <col class="c-status"><col class="c-municipio"><col class="c-regional"><col class="c-setor"><col class="c-responsavel"><col class="c-cargo">
+              <col class="c-telefone"><col class="c-whats"><col class="c-email"><col class="c-data"><col class="c-consultor"><col class="c-curso"><col class="c-obs"><col class="c-acoes">
+            </colgroup>
+            <thead>
+              <tr>
+                <th data-ordem="statusNome">Status</th><th data-ordem="municipioNome">Município</th><th data-ordem="regionalSigla">Regional</th>
+                <th data-ordem="setor">Setor</th><th data-ordem="responsavel">Responsável</th><th data-ordem="cargo">Cargo</th>
+                <th data-ordem="telefone_original">Telefone</th><th data-ordem="whatsapp">WhatsApp</th><th data-ordem="email">E-mail</th>
+                <th data-ordem="data_ultimo_contato">Último contato</th><th data-ordem="consultorNome">Consultor</th>
+                <th data-ordem="curso">Curso</th><th data-ordem="observacoes">Observações</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="trab-corpo-tabela"></tbody>
+          </table>
+        </div>
+        <aside class="trab-gaveta oculto" id="gaveta">
+          <div class="trab-gaveta-cabecalho">
+            <h3 id="gaveta-titulo">Contato</h3>
+            <button type="button" class="btn-fechar" id="btn-fechar-gaveta" title="Fechar (Esc)">✕</button>
+          </div>
+          <div id="gaveta-conteudo"></div>
+        </aside>
+      </div>
+      <div id="popover-contato" class="trab-popover oculto" role="dialog" aria-label="Registrar contato">
+        <h4>Registrar contato <span class="texto-suave" id="popover-quem"></span></h4>
+        <div class="trab-popover-canais" id="popover-canais">
+          <label><input type="radio" name="canal" value="ligacao" checked /> 📞 ligação</label>
+          <label><input type="radio" name="canal" value="whatsapp" /> 💬 WhatsApp</label>
+          <label><input type="radio" name="canal" value="email" /> ✉ e-mail</label>
+          <label><input type="radio" name="canal" value="visita" /> 🚗 visita</label>
+          <label><input type="radio" name="canal" value="outro" /> outro</label>
+        </div>
+        <div class="trab-popover-linha">
+          <select id="popover-status" class="campo-select"><option value="">status: manter</option></select>
+          <input type="date" id="popover-data" class="campo-select" />
+        </div>
+        <textarea id="popover-obs" class="campo-select" rows="3" placeholder="resultado / observação (Ctrl+Enter salva)"></textarea>
+        <div class="trab-popover-rodape">
+          <button type="button" class="btn-mini" id="popover-cancelar">Cancelar (Esc)</button>
+          <button type="button" class="btn-mini btn-primario" id="popover-salvar">Salvar (Ctrl+Enter)</button>
+        </div>
+      </div>
+      <div id="menu-status" class="trab-menu oculto" role="listbox"></div>
+    </section>
 
-    <h2 class="secao-titulo">Cobertura da carga</h2>
-    <div class="grade-metricas" id="cards-cobertura"></div>
-    <div class="tabela-scroll">
-      <table class="tabela-metricas" id="tabela-abas">
-        <thead>
-          <tr><th>UF</th><th style="text-align:left">Aba (setor)</th><th>Órgão</th><th>Linhas</th><th>Ocultas</th><th>Tel. válido</th><th>%</th><th>WhatsApp</th><th>E-mail</th><th>Município casado</th><th>%</th><th>Pendentes</th><th>Sem cidade</th><th>Cores</th><th>Editadas</th></tr>
-        </thead>
-        <tbody></tbody>
-        <tfoot></tfoot>
-      </table>
-    </div>
+    <!-- ===================== CORES E STATUS ===================== -->
+    <section id="aba-cores" class="aba-painel oculto">
+      <h2 class="secao-titulo">Cores encontradas → status</h2>
+      <p class="texto-suave">Cada cor de preenchimento distinta nas planilhas, com quantas linhas a usam e exemplos reais.
+        Dê um nome (vira o status do contato) e um significado. Marque "só formatação" para cores que não carregam
+        informação. Salva ao sair do campo. "Contato inexistente" é um status fixo do sistema e prevalece sobre a cor.</p>
+      <div class="lista-controles prospeccao-controles">
+        <label class="territorio-periodo"><input type="checkbox" id="mostrar-ignoradas" /> mostrar cores marcadas como só formatação</label>
+        <span class="texto-suave" id="resumo-cores"></span>
+        <span class="trab-acoes">
+          <input type="text" id="novo-status-nome" class="campo-select" placeholder="novo status: nome" />
+          <input type="color" id="novo-status-cor" value="#2ab5c2" title="cor do status novo" />
+          <input type="text" id="novo-status-sig" class="campo-select" placeholder="significado" />
+          <button type="button" class="btn-mini btn-primario" id="btn-novo-status">+ Status</button>
+        </span>
+      </div>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas prospeccao-cores" id="tabela-cores">
+          <thead>
+            <tr><th>Cor</th><th>Hex / origem</th><th>Linhas</th><th>Células</th><th style="text-align:left">Onde aparece</th><th style="text-align:left">Exemplos</th><th style="text-align:left">Nome do status</th><th style="text-align:left">Significado</th><th>Só formatação</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
 
-    <h3 class="secao-titulo">Colunas não reconhecidas (preservadas em extras)</h3>
-    <p class="texto-suave">Cabeçalhos que não casaram com o dicionário de sinônimos. Os valores estão guardados linha a
-      linha em <code>extras_json</code>; nada foi descartado. Se alguma deveria ser um campo do sistema, é só dizer.</p>
-    <div id="nao-reconhecidas"></div>
+    <!-- ===================== COBERTURA ===================== -->
+    <section id="aba-cobertura" class="aba-painel oculto">
+      <h2 class="secao-titulo">Cobertura da carga</h2>
+      <div class="grade-metricas" id="cards-cobertura"></div>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-abas">
+          <thead>
+            <tr><th>UF</th><th style="text-align:left">Aba (setor)</th><th>Órgão</th><th>Linhas</th><th>Ocultas</th><th>Tel. válido</th><th>%</th><th>WhatsApp</th><th>E-mail</th><th>Município casado</th><th>%</th><th>Pendentes</th><th>Sem cidade</th><th>Cores</th><th>Editadas</th></tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <h3 class="secao-titulo">Colunas não reconhecidas (preservadas em extras)</h3>
+      <div id="nao-reconhecidas"></div>
+    </section>
+
+    <!-- modal: novo contato -->
+    <div id="modal-novo" class="modal oculto">
+      <div class="modal-caixa">
+        <div class="modal-cabecalho"><h3>Novo contato</h3><button type="button" class="btn-fechar" data-fechar="modal-novo">✕</button></div>
+        <div class="modal-conteudo trab-form">
+          <label class="campo"><span>UF</span><select id="n-uf" class="campo-select"><option value="PR">PR</option><option value="SC">SC</option></select></label>
+          <label class="campo"><span>Setor (carteira)</span><input type="text" id="n-setor" list="lista-setores" class="campo-select" placeholder="existente ou novo" /><datalist id="lista-setores"></datalist></label>
+          <label class="campo"><span>Município</span><input type="text" id="n-municipio" list="lista-municipios-uf" class="campo-select" placeholder="nome do município" /></label>
+          <label class="campo"><span>Responsável</span><input type="text" id="n-responsavel" class="campo-select" /></label>
+          <label class="campo"><span>Cargo</span><input type="text" id="n-cargo" class="campo-select" /></label>
+          <label class="campo"><span>Telefone</span><input type="text" id="n-telefone" class="campo-select" placeholder="(45) 3000-0000" /></label>
+          <label class="campo"><span>WhatsApp</span><input type="text" id="n-whatsapp" class="campo-select" /></label>
+          <label class="campo"><span>E-mail</span><input type="text" id="n-email" class="campo-select" /></label>
+          <label class="campo"><span>Curso</span><input type="text" id="n-curso" class="campo-select" /></label>
+          <label class="campo"><span>Status</span><select id="n-status" class="campo-select"><option value="">sem status</option></select></label>
+          <label class="campo"><span>Consultor</span><select id="n-consultor" class="campo-select"><option value="">sem consultor</option></select></label>
+          <label class="campo campo-largo"><span>Observações</span><textarea id="n-obs" class="campo-select" rows="2"></textarea></label>
+          <p id="modal-novo-erro" class="login-erro oculto"></p>
+        </div>
+        <div class="modal-rodape">
+          <button type="button" class="btn btn-secundario" data-fechar="modal-novo">Cancelar</button>
+          <button type="button" class="btn btn-primario" id="btn-salvar-novo">Salvar contato</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <div id="aviso" class="aviso" role="status"></div>
