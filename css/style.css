@@ -12,7 +12,20 @@
   --amarelo: #ffc857;
   --raio: 16px;
   --grad: linear-gradient(135deg, var(--acento), var(--acento-2));
+  --fundo-lista: #161b2b; /* fundo SÓLIDO das listas nativas (option não aceita translúcido) */
 }
+
+/* ============ Widgets nativos em modo escuro ============
+   A lista aberta do <select>, o calendário do input de data, a lista do
+   <datalist>, o seletor de cor e o desenho de checkbox/rádio são pintados pelo
+   próprio Chrome e ignoram o CSS da página. `color-scheme: dark` na raiz é o
+   que faz o Chrome desenhá-los escuros em TODAS as telas; o fundo/cor explícitos
+   em option cobrem a lista do select (sem eles, o fundo translúcido do
+   .campo-select vira branco na lista, com o texto claro herdado — ilegível). */
+:root { color-scheme: dark; }
+select, option, optgroup { color: var(--texto); }
+option, optgroup { background-color: var(--fundo-lista); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--acento-2); }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 

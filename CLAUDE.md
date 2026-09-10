@@ -505,6 +505,18 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 
 ## Decisões de design importantes
 
+- **Widgets nativos em modo escuro (2026-09-10)**: a lista aberta do `<select>`,
+  o calendário do `input[type=date]`, a lista do `<datalist>`, o seletor de cor
+  e checkbox/rádio são desenhados pelo Chrome e **ignoram o CSS da página**.
+  `:root { color-scheme: dark }` em `css/style.css` faz o Chrome desenhá-los
+  escuros em todas as telas, e `option`/`optgroup` têm fundo sólido
+  (`--fundo-lista`) e cor explícitos. Sem isso, o fundo translúcido do
+  `.campo-select` virava branco na lista aberta, com texto claro herdado, e
+  ficava ilegível. Checkbox e rádio usam `accent-color: var(--acento-2)`.
+  **Tela nova não precisa de nada**: basta usar `style.css`. Não sobrescrever
+  `color-scheme` para `light` em nenhum elemento. Conferir sempre com a lista
+  ABERTA: o screenshot da aba não captura o popup nativo, só uma captura da
+  tela do Windows captura.
 - **jonIAs (o robô assistente)** em CSS puro, estados via `data-estado`: `idle`,
   `listening`, `processing`, `paused`; nome exibido sob o robô com "IA" em gradiente.
 - **Blocos de ~400 palavras** (`PALAVRAS_POR_BLOCO`); nunca há dois blocos em voo
