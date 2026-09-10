@@ -9,6 +9,7 @@ const crypto = require("crypto");
 const { parse } = require("csv-parse/sync");
 const ExcelJS = require("exceljs");
 const db = require("./db.js");
+const { cruzarLigacoes } = require("./cruzamento.js");
 
 const AMOSTRAS_MAX = 20;
 
@@ -392,10 +393,16 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
       return { importacaoId, novos, atualizados, identicos };
     })();
 
+    // Fase 4: classifica cada ligação (prospecção / cliente / lead…) — derivado, fora da transação da carga
+    const cruzamento = cruzarLigacoes();
+    relatorio.cruzamento = cruzamento;
+    db.prepare("UPDATE importacoes SET detalhes_json = ? WHERE id = ?").run(JSON.stringify(relatorio), resultado.importacaoId);
+
     return {
       status: "concluida",
       importacaoId: resultado.importacaoId,
       tipo: "cdr",
+      cruzamento,
       arquivo: arquivoNome,
       linhasLidas: lidas,
       linhasValidas: lidas - ignoradas,
@@ -830,10 +837,14 @@ async function importarOportunidadesOmie(buffer, arquivoNome, usuarioId) {
       return { importacaoId, novos, atualizados, identicos };
     })();
 
+    // Fase 4: telefones novos/alterados podem casar ligações do CDR (classe 'lead')
+    const cruzamento = cruzarLigacoes();
+
     return {
       status: "concluida",
       importacaoId: resultado.importacaoId,
       tipo: "oportunidades",
+      cruzamento,
       arquivo: arquivoNome,
       linhasLidas: lidas,
       linhasValidas: lidas - ignoradas,

@@ -24,6 +24,7 @@ const {
 } = require("./importacao.js");
 const { cruzarMunicipios, normalizarCidade, indiceMunicipios } = require("./territorio.js");
 const { clausulaMunicipios, dentroDoEscopo } = require("./escopo.js");
+const cdr = require("./cruzamento.js");
 
 const UFS_ACEITAS = ["PR", "SC", "SP", "RS", "MS", "MG", "RJ", "ES", "GO", "MT", "DF", "BA"];
 const MAX_LINHAS_CABECALHO = 5;
@@ -641,6 +642,10 @@ async function importarProspeccao(buffer, arquivoNome, uf, usuarioId) {
     return registrarImportacaoErro("prospeccao", arquivoNome, hash, usuarioId, iniciadoEm, `Falha ao gravar no banco: ${err.message}`);
   }
 
+  // Fase 4: telefones novos/alterados mudam a classificação das ligações do CDR
+  relatorio.ligacoes = cdr.cruzarLigacoes();
+  db.prepare("UPDATE importacoes SET detalhes_json = ? WHERE id = ?").run(JSON.stringify(relatorio), resultado.importacaoId);
+
   return {
     status: "concluida", importacaoId: resultado.importacaoId, tipo: "prospeccao", arquivo: arquivoNome, uf,
     linhasLidas: lidas, linhasValidas: importadas, linhasIgnoradas: lidas - importadas,
@@ -829,6 +834,8 @@ function payloadTrabalho(uf, usuario, escopo = null) {
     : consultoresAtuais();
   return {
     uf, campos: CAMPOS_TRABALHO, linhas, status: statusDisponiveis(), setores, regionais, municipios, consultores,
+    // Fase 4 (só leitura): por município [última, total, atendidas, quem ligou por último]; por contato [última, total]
+    cdr: cdr.cdrPorMunicipio(uf, escopo),
     usuario: { id: usuario.id, nome: usuario.nome || usuario.login, papel: usuario.papel, pessoaId: usuario.pessoa_id ?? null },
     escopo: escopo ? { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio } : null,
     geradoEm: new Date().toISOString(),
@@ -954,6 +961,10 @@ function atualizarContato(id, mudancas, usuarioId, escopo = null) {
       for (const r of registros) inserirHistorico.run(r);
     }
   })();
+  // Fase 4: telefone/WhatsApp/município alterados reclassificam só as ligações desses números
+  if (registros.length && campos.some((c) => ["telefone", "whatsapp", "codigo_ibge"].includes(c))) {
+    cdr.cruzarLigacoes({ numeros: [linha.telefone, linha.whatsapp, colunas.telefone, colunas.whatsapp].filter(Boolean) });
+  }
   return { linha: linhaCompactaDe(linha.id, escopo), alteracoes: registros.length };
 }
 
@@ -1038,7 +1049,15 @@ function criarContato(dados, usuarioId, escopo = null) {
     return info.lastInsertRowid;
   })();
   if (!base.codigo_ibge && base.municipio_texto) cruzarMunicipios(); // casa o texto livre como na importação
+  if (base.telefone || base.whatsapp) cdr.cruzarLigacoes({ numeros: [base.telefone, base.whatsapp].filter(Boolean) });
   return linhaCompactaDe(id, escopo);
+}
+
+// Fase 4: ligações do CDR para o número do contato e para o município dele
+// (só leitura; linha fora do escopo = 404 como em buscarLinha)
+function ligacoesDoContato(id, escopo = null) {
+  const linha = buscarLinha(id, escopo);
+  return cdr.ligacoesDoContato(linha, escopo);
 }
 
 function criarStatus({ nome, corHex, significado }, usuarioId) {
@@ -1244,6 +1263,7 @@ module.exports = {
   atualizarContato,
   registrarContato,
   historicoDoContato,
+  ligacoesDoContato,
   criarContato,
   criarStatus,
   exportarXlsx,

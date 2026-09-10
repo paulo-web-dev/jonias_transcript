@@ -74,6 +74,7 @@ aula-ai/
 ├── feedback.js      # Etapa 3: dossiê de fatos + prompt do feedback individual (IA)
 ├── territorio.js    # território: referência PR/SC, casamento cidade→município, cobertura
 ├── prospeccao.js    # prospecção ativa: importação, tela de trabalho, carteiras, gerencial
+├── cruzamento.js    # Fase 4: CDR × prospecção/Omie/matrículas (classe por ligação, painéis)
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
 ├── escopo.js        # papéis (admin | vendedor) e escopo por regional — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
@@ -117,7 +118,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **20**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **24**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -411,6 +412,35 @@ abandonado). Fase 1 = carga com fidelidade total:
   2026-09-09 com um vendedor de teste (AMOP/AMSOP): zero nomes de terceiros
   nos payloads, 404/403 onde previsto. Menu por papel em `js/nav.js`
   (`/api/sessao`; esconde links `.so-admin` — conveniência, não proteção).
+- **Migração 24 (Fase 4, 2026-09-10) — CDR × prospecção** (`cruzamento.js`,
+  **zero IA, só leitura**). Colunas DERIVADAS em `ligacoes`, recalculáveis:
+  `numero_externo` (dígitos sem 0/55 iniciais; saída = `numero_b`, entrada =
+  `numero_a`), `classe`, `codigo_ibge`, `contato_id`, `oportunidade_id`,
+  `matricula_id`, `cruzamento_metodo` (`exato` | `nono_digito` — única
+  variante aceita: celular com/sem o 9), `cruzado_em`. Classe, na ordem:
+  `interna` (< 8 dígitos) → `prospeccao` (número em `contatos_ativo` e todos
+  os contatos no MESMO município; `contato_id` só quando o número é único —
+  **o telefone da prefeitura é compartilhado por dezenas de setores, então o
+  elo confiável é ligação → município**) → `ambigua` (número em 2+ municípios:
+  **não conta em nenhum, fica listada para revisão** — decisão do usuário; na
+  base de ago/26 são 173 ligações/127 números, quase sempre uma linha da
+  planilha no município errado, códigos IBGE vizinhos) → `cliente`
+  (`matriculas.aluno_telefone`) → `lead` (telefone/celulares do Omie) →
+  `desconhecida`. `oportunidade_id`/`matricula_id` são preenchidos sempre que
+  batem, mesmo com outra classe. **Decisão do usuário: o cruzamento NUNCA
+  altera `data_ultimo_contato` nem o histórico** — o CDR é evidência ao lado
+  do registro humano. Roda inteiro ao fim de cada importação do CDR, do Omie,
+  da prospecção e do sync da Unyflex (~0,5 s para 1,6 k ligações × 26 k
+  contatos); edição de telefone/WhatsApp/município de um contato reprocessa só
+  as ligações desses números; a migração marca `configuracoes.
+  cdr_cruzar_pendente` e o boot cruza uma vez (`cruzarSePendente`). Medido em
+  2026-09-10 (CDR 10–18/08, 1.558 ligações): 1.131 prospecção (72,6%, 537
+  municípios distintos), 173 ambíguas, 16 clientes, 24 leads, 204
+  desconhecidas (DDDs 42, 14, 41, 47, 18…), 10 internas; 3 ligações "fora da
+  carteira" (consultor sem vínculo na regional do município). Escopo: vendedor
+  recebe só as regionais dele, só as ligações dele nos totais por classe,
+  terceiros como "outros"/"outro consultor"/-1 (no SQL), sem ambíguas/DDD/por
+  consultor; `POST …/recruzar` é só admin.
 
 ## Rotas
 
@@ -461,6 +491,9 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET/POST /api/usuarios`, `PATCH /api/usuarios/:id`, `POST /api/usuarios/:id/senha-inicial` | admin: lista + consultores; cria (`login` minúsculo, `papel`, `pessoaId` obrigatório para vendedor) com **senha inicial gerada, devolvida uma vez**; PATCH nome/ativo/pessoa/papel (não desativa nem rebaixa a si mesmo; desativar apaga sessões); nova senha inicial |
 | `GET /api/carteiras`, `PUT /api/carteiras/:regionalId` | admin: regionais com titular/apoios, contatos e sem consultor; PUT `{titularPessoaId, apoios}` → grava e atribui os sem-consultor ao titular, devolve `{atribuidos}` |
 | `GET /api/prospeccao/gerencial` | admin: por regional — titular, apoios, contatos, telefone válido, sem consultor, trabalhados, nunca tocados, inexistentes, último contato, editados; totais por UF e "sem regional" |
+| `GET /api/prospeccao/cdr?de&ate` | Fase 4: `total`, `classes` (ligações/atendidas/municípios por classe), `regionais` (ligações, atendidas, municípios ligados × com contatos, nunca ligados, fora da carteira, `porConsultor`); admin ainda `ambiguas` (número, ligações, última, UF, municípios com linhas e ids), `desconhecidasPorDdd`, `semRegional`, `porConsultor`; vendedor ainda `nuncaLigados` (municípios da carteira sem ligação no período). Período inválido → 400 |
+| `GET /api/prospeccao/contatos/:id/ligacoes` | ligações do CDR para o número do contato (`doNumero`) e para o município dele (`doMunicipio`, `totalMunicipio`) — data, atendida, tempo de conversa, falha, consultor (vendedor: terceiros = "outro consultor"); fora do escopo → 404 |
+| `POST /api/prospeccao/cdr/recruzar` | admin: reclassifica todas as ligações (derivado, idempotente) e devolve as contagens |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
@@ -809,9 +842,21 @@ fases, cada uma aprovada antes da seguinte:
   aba Gerencial na prospecção (admin). Estoque medido antes de repartir:
   20.671 contatos sem consultor (13.549 nunca tocados) — tabela por regional
   no plano da fase.
-- ⏳ **Fase 4 — cruzamento com o CDR**: `ligacoes.numero_b` × `telefone`
-  (dígitos puros) → municípios ligados por ramal/consultor; painel gerencial
-  por regional: contatos, trabalhados, nunca tocados.
+- ✅ **Fase 4 — cruzamento com o CDR** (2026-09-10, migração 24): cada
+  ligação classificada por número (ver "Migração 24" em Banco de dados).
+  Telas: aba Gerencial ganhou "Ligações do CDR × carteiras" (período, cartões
+  por classe, tabela por regional com municípios ligados/com contatos/nunca
+  ligados/fora da carteira e quem ligou, tabela por consultor, lista de
+  números ambíguos com clique que abre os contatos na aba Trabalho na UF
+  certa para corrigir o município, desconhecidas por DDD, botão "Recalcular
+  cruzamento"); aba Trabalho ganhou a coluna **📟 CDR** (data×quantidade da
+  última ligação ao número exato — em ciano — ou ao município, com quem ligou
+  no tooltip; ordenável), o filtro "nunca ligado (CDR)" (`flags=nuncaCdr` no
+  hash) e a seção "Ligações do PABX" na gaveta; `/meu-painel` ganhou "Minhas
+  ligações × carteira" (cartões por classe, tabela por regional com "outros
+  consultores" só em número, chips dos municípios da carteira sem ligação no
+  período linkando para a tela de trabalho). Decisões do usuário: ambígua não
+  conta; só leitura; classificação estendida a Omie e matrículas.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

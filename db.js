@@ -849,6 +849,35 @@ const MIGRACOES = [
       CREATE INDEX idx_carteiras_pessoa ON carteiras(pessoa_id);
     `);
   },
+
+  // 24 — Prospecção, Fase 4 (2026-09-10): cruzamento do CDR com a prospecção,
+  // o Omie e as matrículas (cruzamento.js). Colunas DERIVADAS em ligacoes,
+  // recalculáveis a qualquer momento: numero_externo (dígitos normalizados),
+  // classe (interna | prospeccao | ambigua | cliente | lead | desconhecida),
+  // codigo_ibge (município da prospecção — o telefone da prefeitura é
+  // compartilhado por dezenas de setores, então o elo confiável é ligação →
+  // município), contato_id (só quando o número é único), oportunidade_id e
+  // matricula_id (preenchidos sempre que batem). Decisões do usuário: número
+  // em 2 municípios = 'ambigua' (não conta, fica para revisão); o cruzamento
+  // é SÓ LEITURA — nunca altera data_ultimo_contato nem o histórico. A marca
+  // cdr_cruzar_pendente faz o boot cruzar tudo uma vez (cruzarSePendente).
+  () => {
+    db.exec(`
+      ALTER TABLE ligacoes ADD COLUMN numero_externo    TEXT;
+      ALTER TABLE ligacoes ADD COLUMN classe            TEXT CHECK (classe IN ('interna', 'prospeccao', 'ambigua', 'cliente', 'lead', 'desconhecida'));
+      ALTER TABLE ligacoes ADD COLUMN codigo_ibge       INTEGER REFERENCES municipios(codigo_ibge);
+      ALTER TABLE ligacoes ADD COLUMN contato_id        INTEGER REFERENCES contatos_ativo(id);
+      ALTER TABLE ligacoes ADD COLUMN oportunidade_id   INTEGER REFERENCES oportunidades(id);
+      ALTER TABLE ligacoes ADD COLUMN matricula_id      INTEGER REFERENCES matriculas(id);
+      ALTER TABLE ligacoes ADD COLUMN cruzamento_metodo TEXT;
+      ALTER TABLE ligacoes ADD COLUMN cruzado_em        TEXT;
+      CREATE INDEX idx_ligacoes_classe_municipio ON ligacoes(classe, codigo_ibge, data_hora);
+      CREATE INDEX idx_ligacoes_numero_externo   ON ligacoes(numero_externo);
+      CREATE INDEX idx_ligacoes_contato          ON ligacoes(contato_id);
+      INSERT INTO configuracoes (chave, valor) VALUES ('cdr_cruzar_pendente', '1')
+        ON CONFLICT(chave) DO UPDATE SET valor = '1';
+    `);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

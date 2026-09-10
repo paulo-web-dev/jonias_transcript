@@ -265,6 +265,8 @@ async function sincronizarMysql(usuarioId) {
     // Casamento cidade → município (territorio.js): chaves novas são
     // classificadas; resoluções manuais são preservadas.
     const territorio = cruzarMunicipios();
+    // Fase 4 da prospecção: telefones de alunos novos podem casar ligações (classe 'cliente')
+    const ligacoes = require("./cruzamento.js").cruzarLigacoes();
     if (copiaForcada) {
       db.prepare("DELETE FROM configuracoes WHERE chave = 'sync_completo_pendente'").run();
     }
@@ -316,6 +318,7 @@ async function sincronizarMysql(usuarioId) {
       periodo: { de: periodoDe, ate: periodoAte },
       cruzamento,
       territorio,
+      ligacoes,
     };
 
     const info = db

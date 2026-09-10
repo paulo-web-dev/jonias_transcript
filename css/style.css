@@ -1407,7 +1407,14 @@ main.territorio-pagina { width: min(1380px, 100%); }
 .trab-vazio { padding: 2rem !important; text-align: center !important; }
 col.c-status { width: 150px; } col.c-municipio { width: 170px; } col.c-regional { width: 90px; } col.c-setor { width: 150px; } col.c-responsavel { width: 170px; }
 col.c-cargo { width: 130px; } col.c-telefone { width: 135px; } col.c-whats { width: 120px; } col.c-email { width: 200px; } col.c-data { width: 105px; }
-col.c-consultor { width: 100px; } col.c-curso { width: 160px; } col.c-obs { width: 260px; } col.c-acoes { width: 64px; }
+col.c-consultor { width: 100px; } col.c-curso { width: 160px; } col.c-obs { width: 260px; } col.c-acoes { width: 64px; } col.c-cdr { width: 110px; }
+.trab-cdr { white-space: nowrap; cursor: help; }
+.trab-cdr small { color: var(--texto-suave); margin-left: 0.2rem; }
+.trab-cdr-contato { color: var(--acento-2); }
+.trab-ligacoes li { padding: 0.15rem 0; font-size: 0.78rem; display: flex; gap: 0.5rem; }
+.trab-ligacoes .lig-ok { color: var(--verde); } .trab-ligacoes .lig-falha { color: var(--texto-suave); }
+.cdr-quem { font-size: 0.78rem; color: var(--texto-suave); }
+.cdr-ddd-chip { display: inline-block; margin: 0.15rem 0.3rem 0.15rem 0; }
 .chip-st { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; padding: 0.15rem 0.5rem; font-size: 0.72rem; font-weight: 700; cursor: pointer; }
 .chip-st-vazio { background: rgba(255, 255, 255, 0.06); color: var(--texto-suave); font-weight: 400; }
 .trab-sem-match, .trab-invalido { color: var(--amarelo); font-weight: 700; cursor: help; }

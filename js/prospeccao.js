@@ -66,11 +66,11 @@ const COR_INEXISTENTE = "6b7280";
 const trab = {
   uf: "PR", dados: null, linhas: [], filtradas: [], porId: new Map(),
   ordem: { campo: "municipioNome", dir: 1 }, selecionado: null, editando: null,
-  filtros: { busca: "", municipio: "", regional: "", setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, de: "", ate: "" },
+  filtros: { busca: "", municipio: "", regional: "", setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" },
   primeiraVisivel: -1, ultimaVisivel: -1,
 };
 const el = {};
-for (const id of ["f-uf", "f-busca", "f-municipio", "f-regional", "f-setor", "f-consultor", "f-status", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-de", "f-ate",
+for (const id of ["f-uf", "f-busca", "f-municipio", "f-regional", "f-setor", "f-consultor", "f-status", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate",
   "trab-contador", "trab-scroll", "trab-tabela", "trab-corpo-tabela", "gaveta", "gaveta-titulo", "gaveta-conteudo", "popover-contato", "popover-quem", "popover-status", "popover-data", "popover-obs",
   "menu-status", "modal-novo", "modal-novo-erro", "lista-municipios-uf", "lista-setores", "n-uf", "n-setor", "n-municipio", "n-status", "n-consultor"]) {
   el[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
@@ -95,6 +95,14 @@ function enriquecer(o) {
   o.statusNome = o.contato_inexistente ? "Contato inexistente" : o.cor_linha ? d.statusPorHex.get(o.cor_linha)?.nome || "" : "";
   o.statusHexVisual = o.contato_inexistente ? COR_INEXISTENTE : o.cor_linha && d.statusPorHex.has(o.cor_linha) ? o.cor_linha : null;
   o.busca = normalizar([o.municipioNome, o.municipio_texto, o.responsavel, o.cargo, o.telefone, o.telefone_original, o.whatsapp, o.email, o.observacoes, o.curso, o.setor, o.consultor_planilha].filter(Boolean).join(" | "));
+  // Fase 4 (só leitura): ligação do CDR ao número exato (contato único) ou ao município
+  const cm = o.codigo_ibge && d.cdr ? d.cdr.municipios[o.codigo_ibge] : null;
+  const cc = d.cdr ? d.cdr.contatos[o.id] : null;
+  o.cdrContato = !!cc;
+  o.cdrUltima = cc ? cc[0] : cm ? cm[0] : null;
+  o.cdrTotal = cc ? cc[1] : cm ? cm[1] : 0;
+  o.cdrMunicipioTotal = cm ? cm[1] : 0;
+  o.cdrQuem = cm ? (cm[3] === -1 ? "outro consultor" : cm[3] === 0 || cm[3] === null ? "" : d.consultoresPorId.get(cm[3]) || "") : "";
   return o;
 }
 
@@ -145,7 +153,7 @@ function preencherFiltrosEstaticos() {
   // refletir filtros no formulário
   const f = trab.filtros;
   el.fBusca.value = f.busca; el.fMunicipio.value = f.municipio; el.fRegional.value = f.regional; el.fSetor.value = f.setor; el.fConsultor.value = f.consultor;
-  el.fOcultas.checked = f.ocultas; el.fSemTelefone.checked = f.semTelefone; el.fInexistente.checked = f.inexistente; el.fNunca.checked = f.nunca; el.fDe.value = f.de; el.fAte.value = f.ate;
+  el.fOcultas.checked = f.ocultas; el.fSemTelefone.checked = f.semTelefone; el.fInexistente.checked = f.inexistente; el.fNunca.checked = f.nunca; el.fNuncaCdr.checked = f.nuncaCdr; el.fDe.value = f.de; el.fAte.value = f.ate;
 }
 
 // ---------- filtros ----------
@@ -153,7 +161,7 @@ function preencherFiltrosEstaticos() {
 function lerFiltros() {
   const f = trab.filtros;
   f.busca = el.fBusca.value.trim(); f.municipio = el.fMunicipio.value.trim(); f.regional = el.fRegional.value; f.setor = el.fSetor.value; f.consultor = el.fConsultor.value;
-  f.ocultas = el.fOcultas.checked; f.semTelefone = el.fSemTelefone.checked; f.inexistente = el.fInexistente.checked; f.nunca = el.fNunca.checked; f.de = el.fDe.value; f.ate = el.fAte.value;
+  f.ocultas = el.fOcultas.checked; f.semTelefone = el.fSemTelefone.checked; f.inexistente = el.fInexistente.checked; f.nunca = el.fNunca.checked; f.nuncaCdr = el.fNuncaCdr.checked; f.de = el.fDe.value; f.ate = el.fAte.value;
 }
 
 function aplicarFiltros() {
@@ -173,6 +181,7 @@ function aplicarFiltros() {
     if (f.semTelefone && o.telefone) return false;
     if (f.inexistente && !o.contato_inexistente) return false;
     if (f.nunca && o.data_ultimo_contato) return false;
+    if (f.nuncaCdr && o.cdrUltima) return false;
     if (f.de && (!o.data_ultimo_contato || o.data_ultimo_contato < f.de)) return false;
     if (f.ate && (!o.data_ultimo_contato || o.data_ultimo_contato > f.ate)) return false;
     if (status.size) {
@@ -220,7 +229,7 @@ function serializarFiltros() {
   q.set("uf", trab.uf);
   if (f.busca) q.set("q", f.busca); if (f.municipio) q.set("mun", f.municipio); if (f.regional) q.set("reg", f.regional); if (f.setor) q.set("setor", f.setor);
   if (f.consultor) q.set("cons", f.consultor); if (f.status.size) q.set("st", [...f.status].join(","));
-  const flags = ["ocultas", "semTelefone", "inexistente", "nunca"].filter((k) => f[k]); if (flags.length) q.set("flags", flags.join(","));
+  const flags = ["ocultas", "semTelefone", "inexistente", "nunca", "nuncaCdr"].filter((k) => f[k]); if (flags.length) q.set("flags", flags.join(","));
   if (f.de) q.set("de", f.de); if (f.ate) q.set("ate", f.ate);
   if (trab.ordem.campo !== "municipioNome" || trab.ordem.dir !== 1) q.set("ord", `${trab.ordem.campo}:${trab.ordem.dir}`);
   return q.toString();
@@ -240,10 +249,10 @@ function lerHash() {
   f.busca = q.get("q") || ""; f.municipio = q.get("mun") || ""; f.regional = q.get("reg") || ""; f.setor = q.get("setor") || ""; f.consultor = q.get("cons") || "";
   f.status = new Set((q.get("st") || "").split(",").filter((s) => s !== "" || (q.get("st") || "").includes(",")));
   if (q.get("st") === "") f.status = new Set([""]);
-  const flags = new Set((q.get("flags") || "").split(",")); f.ocultas = flags.has("ocultas"); f.semTelefone = flags.has("semTelefone"); f.inexistente = flags.has("inexistente"); f.nunca = flags.has("nunca");
+  const flags = new Set((q.get("flags") || "").split(",")); f.ocultas = flags.has("ocultas"); f.semTelefone = flags.has("semTelefone"); f.inexistente = flags.has("inexistente"); f.nunca = flags.has("nunca"); f.nuncaCdr = flags.has("nuncaCdr");
   f.de = q.get("de") || ""; f.ate = q.get("ate") || "";
   const ord = (q.get("ord") || "").split(":"); if (ord[0]) trab.ordem = { campo: ord[0], dir: Number(ord[1]) === -1 ? -1 : 1 };
-  return ["trabalho", "cores", "cobertura"].includes(aba) ? aba : "trabalho";
+  return ["trabalho", "gerencial", "cores", "cobertura"].includes(aba) ? aba : "trabalho";
 }
 
 // ---------- tabela virtual ----------
@@ -259,6 +268,9 @@ const COLUNAS = [
   { campo: "whatsapp", render: (o) => escapeHtml(o.whatsapp || ""), editavel: "texto", valor: (o) => o.whatsapp },
   { campo: "email", render: (o) => escapeHtml(o.email || ""), editavel: "texto" },
   { campo: "data_ultimo_contato", render: (o) => (o.data_ultimo_contato ? escapeHtml(dataBr(o.data_ultimo_contato)) : '<span class="trab-nunca">nunca</span>'), editavel: "data" },
+  { campo: "cdrUltima", render: (o) => (o.cdrUltima
+    ? `<span class="trab-cdr${o.cdrContato ? " trab-cdr-contato" : ""}" title="${o.cdrContato ? `${o.cdrTotal} ligação(ões) do PABX para ESTE número` : `${o.cdrMunicipioTotal} ligação(ões) do PABX para o município (número compartilhado)`}${o.cdrQuem ? ` — última por ${escapeHtml(o.cdrQuem)}` : ""}">${escapeHtml(dataBr(o.cdrUltima))}<small>×${o.cdrTotal}</small></span>`
+    : '<span class="trab-nunca" title="nenhuma ligação do PABX para este município">—</span>') },
   { campo: "pessoa_id", render: (o) => escapeHtml(o.consultorNome) || (o.consultor_planilha ? `<span class="texto-suave" title="na planilha: ${escapeHtml(o.consultor_planilha)}">—</span>` : ""), editavel: "consultor" },
   { campo: "curso", render: (o) => escapeHtml(o.curso || ""), editavel: "texto" },
   { campo: "observacoes", render: (o) => escapeHtml(o.observacoes || ""), editavel: "texto" },
@@ -536,7 +548,8 @@ async function abrirGaveta(id, historico = null) {
     ${o.observacoes ? `<p class="trab-obs-completa">${escapeHtml(o.observacoes)}</p>` : ""}
     <div class="trab-gaveta-acoes"><button type="button" class="btn-mini btn-primario" data-acao="registrar" data-id="${o.id}">📞 Registrar contato</button>
       <label class="trab-flag"><input type="checkbox" id="gaveta-oculta" ${o.linha_oculta ? "checked" : ""} /> oculta</label></div>
-    <h4>Histórico</h4><div id="gaveta-historico" class="texto-suave">carregando…</div>`;
+    <h4>Histórico</h4><div id="gaveta-historico" class="texto-suave">carregando…</div>
+    <h4 title="ligações do PABX (CDR) — só leitura, não altera o último contato">Ligações do PABX (CDR)</h4><div id="gaveta-cdr" class="texto-suave">carregando…</div>`;
   try {
     const h = historico || (await chamarApi(`/api/prospeccao/contatos/${id}/historico`)).historico;
     document.getElementById("gaveta-historico").innerHTML = h.length
@@ -544,6 +557,20 @@ async function abrirGaveta(id, historico = null) {
       : `<p class="texto-suave">Nenhum registro ainda — a linha veio da planilha como está.</p>`;
   } catch (err) {
     document.getElementById("gaveta-historico").textContent = "não foi possível carregar o histórico";
+  }
+  try {
+    const l = await chamarApi(`/api/prospeccao/contatos/${id}/ligacoes`);
+    const alvo = document.getElementById("gaveta-cdr");
+    if (!alvo) return;
+    const item = (x) => `<li><span class="texto-suave">${escapeHtml(dataHoraBr(x.dataHora))}</span><span class="${x.atendida ? "lig-ok" : "lig-falha"}">${x.atendida ? `atendida${x.conversaSeg ? ` · ${Math.round(x.conversaSeg / 60)} min` : ""}` : x.eventoFalha ? escapeHtml(x.eventoFalha.toLowerCase()) : "não atendida"}</span><span>${escapeHtml(x.consultor || "sem consultor")}</span>${x.sentido !== "S" ? '<span class="texto-suave">recebida</span>' : ""}</li>`;
+    const partes = [];
+    if (l.doNumero.length) partes.push(`<p class="texto-suave">Para este número (${l.doNumero.length}${l.doNumero.length >= 30 ? "+" : ""}):</p><ul class="trab-ligacoes">${l.doNumero.map(item).join("")}</ul>`);
+    const outras = l.doMunicipio.filter((x) => !l.doNumero.some((y) => y.id === x.id));
+    if (outras.length) partes.push(`<p class="texto-suave">Para o município (${inteiro(l.totalMunicipio)} no total; últimas ${outras.length}):</p><ul class="trab-ligacoes">${outras.slice(0, 10).map(item).join("")}</ul>`);
+    alvo.innerHTML = partes.join("") || `<p class="texto-suave">Nenhuma ligação do PABX para este número ou município.</p>`;
+  } catch (err) {
+    const alvo = document.getElementById("gaveta-cdr");
+    if (alvo) alvo.textContent = "não foi possível carregar as ligações";
   }
 }
 
@@ -708,7 +735,7 @@ document.addEventListener("keydown", (ev) => {
 let debounceBusca = 0;
 el.fBusca.addEventListener("input", () => { clearTimeout(debounceBusca); debounceBusca = setTimeout(() => { lerFiltros(); aplicarFiltros(); }, 90); });
 el.fMunicipio.addEventListener("input", () => { clearTimeout(debounceBusca); debounceBusca = setTimeout(() => { lerFiltros(); aplicarFiltros(); }, 120); });
-for (const id of ["f-regional", "f-setor", "f-consultor", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-de", "f-ate"]) {
+for (const id of ["f-regional", "f-setor", "f-consultor", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate"]) {
   document.getElementById(id).addEventListener("change", () => { lerFiltros(); aplicarFiltros(); });
 }
 el.fUf.addEventListener("change", async () => { trab.uf = el.fUf.value; trab.filtros.status = new Set(); trab.filtros.regional = ""; trab.filtros.setor = ""; el.gaveta.classList.add("oculto"); try { await carregarTrabalho(); } catch (e) { avisar("⚠ " + e.message, true); } });
@@ -721,7 +748,7 @@ el.fStatus.addEventListener("click", (ev) => {
   aplicarFiltros();
 });
 document.getElementById("btn-limpar-filtros").addEventListener("click", () => {
-  Object.assign(trab.filtros, { busca: "", municipio: "", regional: "", setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, de: "", ate: "" });
+  Object.assign(trab.filtros, { busca: "", municipio: "", regional: "", setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
   preencherFiltrosEstaticos(); aplicarFiltros();
 });
 document.getElementById("btn-novo-contato").addEventListener("click", abrirModalNovo);
@@ -887,10 +914,91 @@ document.getElementById("tabela-gerencial").addEventListener("click", async (ev)
   const tr = ev.target.closest("tr[data-regional]");
   if (!tr) return;
   const uf = tr.dataset.uf;
-  Object.assign(trab.filtros, { busca: "", municipio: "", regional: tr.dataset.regional, setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, de: "", ate: "" });
+  Object.assign(trab.filtros, { busca: "", municipio: "", regional: tr.dataset.regional, setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
   mostrarAba("trabalho");
   if (trab.uf !== uf) { trab.uf = uf; el.fUf.value = uf; await carregarTrabalho().catch((e) => avisar("⚠ " + e.message, true)); }
   else { preencherFiltrosEstaticos(); aplicarFiltros(); }
+});
+
+// ---------- Gerencial (admin): CDR × carteiras (Fase 4, só leitura) ----------
+
+const cdrUi = { de: "", ate: "" };
+function periodoCdr(tipo) {
+  const hoje = new Date();
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  if (tipo === "mes") return [iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), iso(hoje)];
+  if (tipo === "mes-anterior") return [iso(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)), iso(new Date(hoje.getFullYear(), hoje.getMonth(), 0))];
+  const d = new Date(hoje); d.setDate(hoje.getDate() - 30); return [iso(d), iso(hoje)];
+}
+const CLASSE_ROTULO = { prospeccao: "Prospecção", ambigua: "Ambíguas (2 municípios)", cliente: "Clientes (alunos)", lead: "Leads (Omie)", desconhecida: "Desconhecidas", interna: "Internas", nao_cruzada: "Não cruzadas" };
+
+async function carregarCdr(de = cdrUi.de, ate = cdrUi.ate) {
+  if (!de || !ate) [de, ate] = periodoCdr("mes");
+  cdrUi.de = de; cdrUi.ate = ate;
+  document.getElementById("cdr-de").value = de; document.getElementById("cdr-ate").value = ate;
+  document.getElementById("cdr-legenda").textContent = `${dataBr(de)} a ${dataBr(ate)}`;
+  const g = await chamarApi(`/api/prospeccao/cdr?de=${de}&ate=${ate}`);
+  const cl = g.classes;
+  const card = (rotulo, valor, extra = "") => `<div class="metrica-card"><span class="metrica-rotulo">${rotulo}</span><span class="metrica-valor">${valor}</span><span class="metrica-extra">${extra}</span></div>`;
+  const pros = cl.prospeccao || { ligacoes: 0, atendidas: 0, municipios: 0 };
+  document.getElementById("cdr-cards").innerHTML = [
+    card("Ligações no período", inteiro(g.total), `${inteiro(g.semRegional || 0)} de prospecção sem regional`),
+    card("Prospecção", `${inteiro(pros.ligacoes)} <small>${pctDe(pros.ligacoes, g.total)}</small>`, `${inteiro(pros.atendidas)} atendidas · ${inteiro(pros.municipios)} municípios distintos`),
+    ...["ambigua", "cliente", "lead", "desconhecida"].map((k) => card(CLASSE_ROTULO[k], `${inteiro(cl[k]?.ligacoes)} <small>${pctDe(cl[k]?.ligacoes || 0, g.total)}</small>`, `${inteiro(cl[k]?.atendidas)} atendidas`)),
+  ].join("");
+  const regs = g.regionais;
+  const soma = (k) => regs.reduce((s, r) => s + (r[k] || 0), 0);
+  document.querySelector("#tabela-cdr-regionais tbody").innerHTML = regs.map((r) => `<tr data-regional="${r.id}" data-uf="${escapeHtml(r.uf)}" title="abrir na aba Trabalho">
+    <td>${escapeHtml(r.uf)}</td><td class="celula-nome">${escapeHtml(r.sigla)}<div class="texto-suave territorio-descricao">${escapeHtml(r.nome || "")}</div></td>
+    <td>${inteiro(r.ligacoes)}</td><td>${inteiro(r.atendidas)}</td><td>${inteiro(r.municipiosLigados)}</td><td>${inteiro(r.municipiosComContatos)}</td>
+    <td class="${r.municipiosComContatos && r.municipiosLigados / r.municipiosComContatos >= 0.6 ? "pct-ok" : r.municipiosComContatos && r.municipiosLigados / r.municipiosComContatos >= 0.3 ? "pct-meio" : "pct-baixo"}">${pctDe(r.municipiosLigados, r.municipiosComContatos)}</td>
+    <td>${r.nuncaLigados ? `<span class="pct-meio">${inteiro(r.nuncaLigados)}</span>` : "0"}</td><td>${r.foraDaCarteira ? `<span class="pct-baixo">${inteiro(r.foraDaCarteira)}</span>` : "0"}</td>
+    <td style="text-align:left" class="cdr-quem">${r.porConsultor.map((c) => `${escapeHtml(c.nome)} ${inteiro(c.ligacoes)}`).join(" · ") || "—"}</td></tr>`).join("");
+  document.querySelector("#tabela-cdr-regionais tfoot").innerHTML = `<tr><td colspan="2">Total (${regs.length} regionais)</td><td>${inteiro(soma("ligacoes"))}</td><td>${inteiro(soma("atendidas"))}</td>
+    <td>${inteiro(soma("municipiosLigados"))}</td><td>${inteiro(soma("municipiosComContatos"))}</td><td>${pctDe(soma("municipiosLigados"), soma("municipiosComContatos"))}</td><td>${inteiro(soma("nuncaLigados"))}</td><td>${inteiro(soma("foraDaCarteira"))}</td><td></td></tr>`;
+  document.querySelector("#tabela-cdr-consultores tbody").innerHTML = (g.porConsultor || []).map((c) => `<tr class="sem-clique"><td style="text-align:left">${escapeHtml(c.nome || "sem consultor (ramal sem dono)")}</td>
+    <td>${inteiro(c.ligacoes)}</td><td>${inteiro(c.prospeccao)}</td><td>${pctDe(c.prospeccao, c.ligacoes)}</td><td>${inteiro(c.municipios)}</td>
+    <td>${c.ambiguas ? `<span class="pct-meio">${inteiro(c.ambiguas)}</span>` : "0"}</td><td>${inteiro(c.clientes)}</td><td>${inteiro(c.leads)}</td><td>${inteiro(c.desconhecidas)}</td></tr>`).join("")
+    || `<tr class="sem-clique"><td colspan="9" class="texto-suave">Nenhuma ligação no período.</td></tr>`;
+  const amb = g.ambiguas || [];
+  document.getElementById("chip-ambiguas").textContent = `${amb.length} número(s)`;
+  document.querySelector("#tabela-cdr-ambiguas tbody").innerHTML = amb.map((a) => `<tr class="sem-clique"><td style="text-align:left"><a href="#trabalho?uf=${escapeHtml(a.uf || trab.uf)}&q=${escapeHtml(a.numero)}" data-cdr-numero="${escapeHtml(a.numero)}" data-uf="${escapeHtml(a.uf || "")}">${escapeHtml(a.numero)}</a></td>
+    <td>${inteiro(a.ligacoes)}</td><td>${escapeHtml(dataHoraBr(a.ultima))}</td>
+    <td style="text-align:left">${a.municipios.map((m) => `${escapeHtml(m.municipio)} <small class="texto-suave">(${m.linhas})</small>`).join(" · ")}</td></tr>`).join("")
+    || `<tr class="sem-clique"><td colspan="4" class="texto-suave">Nenhuma ligação ambígua no período.</td></tr>`;
+  document.getElementById("cdr-ddd").innerHTML = (g.desconhecidasPorDdd || []).map((d) => `<span class="chip cdr-ddd-chip">DDD ${escapeHtml(d.ddd)} <strong>${inteiro(d.n)}</strong> <small>${inteiro(d.atendidas)} atend.</small></span>`).join("")
+    || "Nenhuma ligação desconhecida no período.";
+}
+
+document.querySelector("#tabela-cdr-regionais tbody").addEventListener("click", (ev) => {
+  const tr = ev.target.closest("tr[data-regional]");
+  if (tr) document.querySelector(`#tabela-gerencial tr[data-regional="${tr.dataset.regional}"]`)?.click();
+});
+document.querySelector("#tabela-cdr-ambiguas tbody").addEventListener("click", async (ev) => {
+  const a = ev.target.closest("a[data-cdr-numero]");
+  if (!a) return;
+  ev.preventDefault();
+  // abre a aba Trabalho na UF dos contatos, com a busca pelo número — as linhas aparecem com os municípios divergentes
+  Object.assign(trab.filtros, { busca: a.dataset.cdrNumero, municipio: "", regional: "", setor: "", consultor: "", status: new Set(), ocultas: true, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
+  mostrarAba("trabalho");
+  const uf = a.dataset.uf;
+  if (uf && uf !== trab.uf) { trab.uf = uf; el.fUf.value = uf; await carregarTrabalho().catch((e) => avisar("⚠ " + e.message, true)); }
+  else { preencherFiltrosEstaticos(); aplicarFiltros(); }
+  if (!trab.filtradas.length) avisar("Nenhum contato com esse número nesta UF.");
+});
+for (const b of document.querySelectorAll("button[data-cdr-periodo]")) b.addEventListener("click", () => carregarCdr(...periodoCdr(b.dataset.cdrPeriodo)).catch((e) => avisar("⚠ " + e.message, true)));
+document.getElementById("cdr-aplicar").addEventListener("click", () => {
+  const de = document.getElementById("cdr-de").value, ate = document.getElementById("cdr-ate").value;
+  if (!de || !ate || ate < de) return avisar("Informe um intervalo válido.", true);
+  carregarCdr(de, ate).catch((e) => avisar("⚠ " + e.message, true));
+});
+document.getElementById("cdr-recruzar").addEventListener("click", async () => {
+  try {
+    const r = await postJson("/api/prospeccao/cdr/recruzar", {});
+    avisar(`Cruzamento recalculado: ${inteiro(r.ligacoes)} ligações — ${inteiro(r.prospeccao)} prospecção, ${inteiro(r.ambigua)} ambíguas, ${inteiro(r.cliente)} clientes, ${inteiro(r.lead)} leads, ${inteiro(r.desconhecida)} desconhecidas (${r.ms} ms).`);
+    await carregarCdr();
+    if (trab.dados) { trab.dados = null; await carregarTrabalho(); }
+  } catch (e) { avisar("⚠ " + e.message, true); }
 });
 
 (async () => {
@@ -907,7 +1015,7 @@ document.getElementById("tabela-gerencial").addEventListener("click", async (ev)
   }
   el.fUf.value = trab.uf;
   try {
-    await Promise.all(vendedor ? [carregarTrabalho()] : [carregarTrabalho(), carregarCores(), carregarCobertura(), carregarGerencial()]);
+    await Promise.all(vendedor ? [carregarTrabalho()] : [carregarTrabalho(), carregarCores(), carregarCobertura(), carregarGerencial(), carregarCdr()]);
   } catch (e) {
     avisar("⚠ Não foi possível carregar. (" + e.message + ")", true);
   }

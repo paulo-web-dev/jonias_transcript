@@ -47,6 +47,48 @@
           <tfoot></tfoot>
         </table>
       </div>
+
+      <h2 class="secao-titulo">Ligações do CDR × carteiras</h2>
+      <p class="texto-suave">Cada ligação do PABX é classificada pelo número discado: <strong>prospecção</strong> (número de um contato
+        das carteiras — como o telefone da prefeitura é compartilhado por dezenas de setores, o elo confiável é ligação → município),
+        <strong>ambígua</strong> (número que a planilha tem em dois municípios — não conta em nenhum, revisar abaixo),
+        <strong>cliente</strong> (telefone de aluno), <strong>lead</strong> (telefone no Omie) ou <strong>desconhecida</strong>.
+        Só leitura: nada disso altera o "último contato" registrado pelo consultor.</p>
+      <div class="lista-controles territorio-filtro">
+        <button type="button" class="btn-mini" data-cdr-periodo="mes">este mês</button>
+        <button type="button" class="btn-mini" data-cdr-periodo="mes-anterior">mês passado</button>
+        <button type="button" class="btn-mini" data-cdr-periodo="30">últimos 30 dias</button>
+        <label class="territorio-periodo">De <input type="date" id="cdr-de" class="campo-select" /> até <input type="date" id="cdr-ate" class="campo-select" /></label>
+        <button type="button" class="btn-mini btn-primario" id="cdr-aplicar">Aplicar</button>
+        <button type="button" class="btn-mini" id="cdr-recruzar" title="reclassifica todas as ligações (derivado, idempotente)">Recalcular cruzamento</button>
+        <span class="texto-suave" id="cdr-legenda"></span>
+      </div>
+      <div class="grade-metricas" id="cdr-cards"></div>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-cdr-regionais">
+          <thead><tr><th>UF</th><th style="text-align:left">Regional</th><th>Ligações</th><th>Atendidas</th><th>Munic. ligados</th><th>com contatos</th><th>%</th><th>Nunca ligados</th><th>Fora da carteira</th><th style="text-align:left">Quem ligou</th></tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <h3 class="secao-titulo">Por consultor</h3>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-cdr-consultores">
+          <thead><tr><th style="text-align:left">Consultor</th><th>Ligações</th><th>Prospecção</th><th>%</th><th>Municípios</th><th>Ambíguas</th><th>Clientes</th><th>Leads</th><th>Desconhecidas</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <h3 class="secao-titulo">Números em dois municípios (ambíguas — revisar na planilha ou no contato) <span class="chip" id="chip-ambiguas">—</span></h3>
+      <p class="texto-suave">O mesmo telefone aparece em contatos de municípios diferentes; quase sempre uma linha da planilha está no município errado.
+        Clique no número para abrir os contatos na aba Trabalho e corrigir o município — a ligação é reclassificada na hora.</p>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-cdr-ambiguas">
+          <thead><tr><th style="text-align:left">Número</th><th>Ligações</th><th>Última</th><th style="text-align:left">Municípios (linhas na planilha)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <h3 class="secao-titulo">Desconhecidas por DDD</h3>
+      <div id="cdr-ddd" class="texto-suave"></div>
     </section>
 
     <!-- ===================== TRABALHO ===================== -->
@@ -66,6 +108,7 @@
         <label class="trab-flag"><input type="checkbox" id="f-sem-telefone" /> sem telefone</label>
         <label class="trab-flag"><input type="checkbox" id="f-inexistente" /> contato inexistente</label>
         <label class="trab-flag"><input type="checkbox" id="f-nunca" /> nunca tocado</label>
+        <label class="trab-flag" title="município sem nenhuma ligação no CDR importado"><input type="checkbox" id="f-nunca-cdr" /> nunca ligado (CDR)</label>
         <label class="trab-flag">último contato de <input type="date" id="f-de" class="campo-select" /> até <input type="date" id="f-ate" class="campo-select" /></label>
         <button type="button" class="btn-mini" id="btn-limpar-filtros">limpar</button>
         <span class="trab-contador" id="trab-contador">—</span>
@@ -82,14 +125,14 @@
           <table class="tabela-metricas trab-tabela" id="trab-tabela">
             <colgroup>
               <col class="c-status"><col class="c-municipio"><col class="c-regional"><col class="c-setor"><col class="c-responsavel"><col class="c-cargo">
-              <col class="c-telefone"><col class="c-whats"><col class="c-email"><col class="c-data"><col class="c-consultor"><col class="c-curso"><col class="c-obs"><col class="c-acoes">
+              <col class="c-telefone"><col class="c-whats"><col class="c-email"><col class="c-data"><col class="c-cdr"><col class="c-consultor"><col class="c-curso"><col class="c-obs"><col class="c-acoes">
             </colgroup>
             <thead>
               <tr>
                 <th data-ordem="statusNome">Status</th><th data-ordem="municipioNome">Município</th><th data-ordem="regionalSigla">Regional</th>
                 <th data-ordem="setor">Setor</th><th data-ordem="responsavel">Responsável</th><th data-ordem="cargo">Cargo</th>
                 <th data-ordem="telefone_original">Telefone</th><th data-ordem="whatsapp">WhatsApp</th><th data-ordem="email">E-mail</th>
-                <th data-ordem="data_ultimo_contato">Último contato</th><th data-ordem="consultorNome">Consultor</th>
+                <th data-ordem="data_ultimo_contato">Último contato</th><th data-ordem="cdrUltima" title="última ligação do PABX (CDR) para este número ou, se o número é compartilhado, para o município — só leitura">📟 CDR</th><th data-ordem="consultorNome">Consultor</th>
                 <th data-ordem="curso">Curso</th><th data-ordem="observacoes">Observações</th><th></th>
               </tr>
             </thead>

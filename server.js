@@ -30,6 +30,7 @@ const {
 const { prepararFatosFeedback, gerarFeedbackMarkdown } = require("./feedback.js");
 const territorio = require("./territorio.js");
 const prospeccao = require("./prospeccao.js");
+const cruzamento = require("./cruzamento.js");
 const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
 const { hashSenha, gerarSenhaInicial, validarSenhaNova } = require("./auth.js");
 
@@ -249,6 +250,7 @@ app.use("/api", (req, res, next) => {
     PREFIXOS_SO_ADMIN.some((p) => caminho === p || caminho.startsWith(p + "/")) ||
     (escrita && (caminho === "/api/metas" || caminho.startsWith("/api/metas/"))) ||
     (escrita && caminho.startsWith("/api/prospeccao/cores")) ||
+    (escrita && caminho.startsWith("/api/prospeccao/cdr")) ||
     (escrita && /^\/api\/territorio\/municipios\/[^/]+\/principal$/.test(caminho));
   if (soAdmin) return exigirAdmin(req, res, next);
   next();
@@ -769,6 +771,32 @@ app.get("/api/prospeccao/contatos/:id/historico", (req, res) => {
   } catch (err) {
     responderErroProspeccao("prospeccao/contatos/:id/historico", err, res);
   }
+});
+
+// Fase 4 — CDR × prospecção (só leitura). Ligações do número do contato e do
+// município dele; vendedor vê terceiros como "outro consultor".
+app.get("/api/prospeccao/contatos/:id/ligacoes", (req, res) => {
+  try {
+    res.json(prospeccao.ligacoesDoContato(req.params.id, escopoDe(req.usuario)));
+  } catch (err) {
+    responderErroProspeccao("prospeccao/contatos/:id/ligacoes", err, res);
+  }
+});
+
+// Painel do CDR por regional no período: admin vê tudo (+ ambíguas para
+// revisão, desconhecidas por DDD, por consultor); vendedor só as regionais e
+// ligações dele (filtrado no SQL)
+app.get("/api/prospeccao/cdr", (req, res) => {
+  try {
+    res.json(cruzamento.painelCdr(req.query.de, req.query.ate, escopoDe(req.usuario)));
+  } catch (err) {
+    responderErroProspeccao("prospeccao/cdr", err, res);
+  }
+});
+
+// Recalcular o cruzamento inteiro (admin) — derivado, idempotente
+app.post("/api/prospeccao/cdr/recruzar", (req, res) => {
+  res.json(cruzamento.cruzarLigacoes());
 });
 
 app.post("/api/prospeccao/status", (req, res) => {
@@ -1295,6 +1323,12 @@ function tratarErro(rota, err, res) {
   for (const aviso of ref.avisos) console.warn("⚠  território:", aviso);
   const recruzado = territorio.recruzarSePendente();
   if (recruzado) console.log(`território: casamento reprocessado no boot (migração pendente) — ${recruzado.matriculas} matrícula(s).`);
+  const cdrCruzado = cruzamento.cruzarSePendente();
+  if (cdrCruzado) {
+    console.log(`prospecção: CDR cruzado no boot (migração pendente) — ${cdrCruzado.ligacoes} ligação(ões): ` +
+      `${cdrCruzado.prospeccao} prospecção, ${cdrCruzado.ambigua} ambígua(s), ${cdrCruzado.cliente} cliente, ${cdrCruzado.lead} lead, ` +
+      `${cdrCruzado.desconhecida} desconhecida(s), ${cdrCruzado.interna} interna(s) em ${cdrCruzado.ms} ms.`);
+  }
   app.listen(PORT, () => {
     console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
   });

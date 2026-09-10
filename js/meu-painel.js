@@ -46,6 +46,32 @@ async function carregar(de, ate) {
     card("Receita", reais(eu.receitaCentavos), eu.receita.meta != null ? `meta ${reais(eu.receita.meta)} · ${pct(eu.receita.atingimento)}` : "sem meta de receita cadastrada", classePct(eu.receita.atingimento)),
     card("Dias úteis no período", inteiro(m.diasUteis), "seg–sex, sem feriados"),
   ].join("");
+  await carregarCdr(de, ate);
+}
+
+// Fase 4: minhas ligações do PABX × municípios da carteira (só leitura; o servidor corta pelo escopo)
+async function carregarCdr(de, ate) {
+  const g = await chamarApi(`/api/prospeccao/cdr?de=${de}&ate=${ate}`);
+  const cl = g.classes, pros = cl.prospeccao || { ligacoes: 0, atendidas: 0, municipios: 0 };
+  const pc = (v) => (g.total ? Math.round((v / g.total) * 1000) / 10 : null);
+  document.getElementById("cdr-cards").innerHTML = [
+    card("Minhas ligações", inteiro(g.total), "no período, pelo CDR"),
+    card("Prospecção", `${inteiro(pros.ligacoes)}<small>${pc(pros.ligacoes) != null ? " · " + pct(pc(pros.ligacoes)) : ""}</small>`, `${inteiro(pros.atendidas)} atendidas · ${inteiro(pros.municipios)} municípios distintos`),
+    card("Clientes (alunos)", inteiro(cl.cliente?.ligacoes), `${inteiro(cl.cliente?.atendidas)} atendidas`),
+    card("Leads (Omie)", inteiro(cl.lead?.ligacoes), `${inteiro(cl.lead?.atendidas)} atendidas`),
+    card("Desconhecidas", inteiro(cl.desconhecida?.ligacoes), cl.ambigua?.ligacoes ? `+ ${inteiro(cl.ambigua.ligacoes)} ambíguas (número em 2 municípios)` : ""),
+  ].join("");
+  document.querySelector("#tabela-cdr tbody").innerHTML = g.regionais.map((r) => {
+    const minhas = r.porConsultor.find((c) => c.pessoaId !== -1) || { ligacoes: 0, atendidas: 0 };
+    const outros = r.porConsultor.find((c) => c.pessoaId === -1);
+    return `<tr class="sem-clique"><td>${escapeHtml(r.uf)}</td><td style="text-align:left">${escapeHtml(r.sigla)} <span class="texto-suave">${escapeHtml(r.nome || "")}</span></td>
+      <td>${inteiro(minhas.ligacoes)}</td><td>${inteiro(minhas.atendidas)}</td><td>${inteiro(r.municipiosLigados)}</td><td>${inteiro(r.municipiosComContatos)}</td>
+      <td>${r.nuncaLigados ? `<span class="pct-meio">${inteiro(r.nuncaLigados)}</span>` : "0"}</td><td style="text-align:left" class="texto-suave">${outros ? `${inteiro(outros.ligacoes)} ligação(ões)` : "—"}</td></tr>`;
+  }).join("") || `<tr class="sem-clique"><td colspan="8" class="texto-suave">Nenhuma regional atribuída.</td></tr>`;
+  const nunca = g.nuncaLigados || [];
+  document.getElementById("cdr-nunca").innerHTML = nunca.length
+    ? nunca.map((m) => `<a class="chip chip-cliente" href="/prospeccao#trabalho?uf=${encodeURIComponent(m.uf)}&mun=${encodeURIComponent(m.nome)}" title="${escapeHtml(m.regional)} · ${inteiro(m.contatos)} contato(s)">${escapeHtml(m.nome)} <small>${inteiro(m.contatos)}</small></a>`).join(" ")
+    : "Todos os municípios da carteira receberam ao menos uma ligação no período.";
 }
 
 function aplicar() {
