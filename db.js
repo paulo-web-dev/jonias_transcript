@@ -878,6 +878,24 @@ const MIGRACOES = [
         ON CONFLICT(chave) DO UPDATE SET valor = '1';
     `);
   },
+
+  // 25 — Marcação pessoal da prospecção (2026-09-16). Camada visual separada
+  // do status importado (cor_linha) e do registro de contato: cada usuário
+  // pinta a linha de verde ou vermelho para si mesmo. Uma linha por
+  // (usuário, contato); sem marcação = sem linha. Não mexe em editado_em nem
+  // no histórico — não bloqueia reimportação e não é edição do contato.
+  () => {
+    db.exec(`
+      CREATE TABLE marcacoes_prospeccao (
+        usuario_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        contato_id  INTEGER NOT NULL REFERENCES contatos_ativo(id) ON DELETE CASCADE,
+        cor         TEXT NOT NULL CHECK (cor IN ('verde', 'vermelho')),
+        marcado_em  TEXT NOT NULL,
+        PRIMARY KEY (usuario_id, contato_id)
+      ) WITHOUT ROWID;
+      CREATE INDEX idx_marcacoes_contato ON marcacoes_prospeccao(contato_id);
+    `);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

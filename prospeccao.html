@@ -103,6 +103,10 @@
         <select id="f-regional" class="campo-select"><option value="">regional: todas</option></select>
         <select id="f-setor" class="campo-select"><option value="">setor: todos</option></select>
         <select id="f-consultor" class="campo-select"><option value="">consultor: todos</option></select>
+        <select id="f-marca" class="campo-select" title="sua marcação pessoal (só você vê)">
+          <option value="">marcação: todas</option><option value="verde">🟢 só verdes</option><option value="vermelho">🔴 só vermelhas</option><option value="sem">sem marcação</option>
+        </select>
+        <select id="f-marcas-de" class="campo-select oculto" title="administrador: ver as marcações de outro usuário (só leitura)"></select>
         <div class="trab-status-filtro" id="f-status" title="clique para filtrar por status (vários)"></div>
         <label class="trab-flag"><input type="checkbox" id="f-ocultas" /> mostrar ocultas</label>
         <label class="trab-flag"><input type="checkbox" id="f-sem-telefone" /> sem telefone</label>
@@ -118,18 +122,19 @@
           <button type="button" class="btn-mini" id="btn-exportar-tudo">Exportar UF</button>
         </span>
       </div>
-      <p class="texto-suave trab-dicas">Clique numa célula para editar (Enter/Tab salva, Esc cancela). Clique no status para trocar.
+      <p class="texto-suave trab-dicas">Clique numa célula para editar (Enter/Tab salva, Esc cancela). Clique no status para trocar. Os círculos 🟢 🔴 no início da linha são a sua marcação pessoal
+        (só você vê; <kbd>1</kbd> verde, <kbd>2</kbd> vermelho, a mesma tecla ou <kbd>0</kbd> limpa).
         📞 registra contato (ou tecla <kbd>R</kbd> na linha selecionada); ▸ abre detalhes e histórico (<kbd>D</kbd>). <kbd>↑</kbd><kbd>↓</kbd> navegam.</p>
       <div class="trab-corpo">
         <div class="trab-scroll" id="trab-scroll" tabindex="0">
           <table class="tabela-metricas trab-tabela" id="trab-tabela">
             <colgroup>
-              <col class="c-status"><col class="c-municipio"><col class="c-regional"><col class="c-setor"><col class="c-responsavel"><col class="c-cargo">
+              <col class="c-marca"><col class="c-status"><col class="c-municipio"><col class="c-regional"><col class="c-setor"><col class="c-responsavel"><col class="c-cargo">
               <col class="c-telefone"><col class="c-whats"><col class="c-email"><col class="c-data"><col class="c-cdr"><col class="c-consultor"><col class="c-curso"><col class="c-obs"><col class="c-acoes">
             </colgroup>
             <thead>
               <tr>
-                <th data-ordem="statusNome">Status</th><th data-ordem="municipioNome">Município</th><th data-ordem="regionalSigla">Regional</th>
+                <th data-ordem="marca" class="th-marca" title="sua marcação pessoal — só você vê">●</th><th data-ordem="statusNome">Status</th><th data-ordem="municipioNome">Município</th><th data-ordem="regionalSigla">Regional</th>
                 <th data-ordem="setor">Setor</th><th data-ordem="responsavel">Responsável</th><th data-ordem="cargo">Cargo</th>
                 <th data-ordem="telefone_original">Telefone</th><th data-ordem="whatsapp">WhatsApp</th><th data-ordem="email">E-mail</th>
                 <th data-ordem="data_ultimo_contato">Último contato</th><th data-ordem="cdrUltima" title="última ligação do PABX (CDR) para este número ou, se o número é compartilhado, para o município — só leitura">📟 CDR</th><th data-ordem="consultorNome">Consultor</th>

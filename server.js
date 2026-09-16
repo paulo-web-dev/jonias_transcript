@@ -239,7 +239,7 @@ function emitirEventoTv(fonte, tipo = "dados") {
 app.use("/api", exigirLoginApi, exigirSenhaTrocada);
 const PREFIXOS_SO_ADMIN = [
   "/api/importacoes", "/api/sincronizacoes", "/api/config", "/api/periodos", "/api/saude",
-  "/api/usuarios", "/api/carteiras", "/api/prospeccao/cobertura", "/api/prospeccao/gerencial",
+  "/api/usuarios", "/api/carteiras", "/api/prospeccao/cobertura", "/api/prospeccao/gerencial", "/api/prospeccao/marcacoes",
   "/api/prospeccao/status", "/api/territorio/cobertura", "/api/territorio/pendencias",
   "/api/territorio/apelidos", "/api/resumo",
 ];
@@ -770,6 +770,25 @@ app.get("/api/prospeccao/contatos/:id/historico", (req, res) => {
     res.json({ historico: prospeccao.historicoDoContato(req.params.id, escopoDe(req.usuario)) });
   } catch (err) {
     responderErroProspeccao("prospeccao/contatos/:id/historico", err, res);
+  }
+});
+
+// Marcação pessoal verde/vermelho (migração 25): sempre do usuário da sessão;
+// vendedor só marca contatos do escopo (404 fora)
+app.put("/api/prospeccao/contatos/:id/marcacao", (req, res) => {
+  try {
+    res.json(prospeccao.marcarContato(req.params.id, (req.body || {}).cor ?? null, req.usuario.id, escopoDe(req.usuario)));
+  } catch (err) {
+    responderErroProspeccao("prospeccao/contatos/:id/marcacao", err, res);
+  }
+});
+
+// Admin: marcações de outro usuário (só leitura) — prefixo em PREFIXOS_SO_ADMIN
+app.get("/api/prospeccao/marcacoes", (req, res) => {
+  try {
+    res.json(prospeccao.marcacoesDeOutro(req.query.uf, req.query.usuario));
+  } catch (err) {
+    responderErroProspeccao("prospeccao/marcacoes", err, res);
   }
 });
 

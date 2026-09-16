@@ -66,11 +66,13 @@ const COR_INEXISTENTE = "6b7280";
 const trab = {
   uf: "PR", dados: null, linhas: [], filtradas: [], porId: new Map(),
   ordem: { campo: "municipioNome", dir: 1 }, selecionado: null, editando: null,
-  filtros: { busca: "", municipio: "", regional: "", setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" },
+  filtros: { busca: "", municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" },
   primeiraVisivel: -1, ultimaVisivel: -1,
+  // marcação pessoal (verde/vermelho): as MINHAS vêm no payload; admin pode ver as de outro usuário (só leitura)
+  marcas: new Map(), verDe: null, marcasOutro: new Map(),
 };
 const el = {};
-for (const id of ["f-uf", "f-busca", "f-municipio", "f-regional", "f-setor", "f-consultor", "f-status", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate",
+for (const id of ["f-uf", "f-busca", "f-municipio", "f-regional", "f-setor", "f-consultor", "f-marca", "f-marcas-de", "f-status", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate",
   "trab-contador", "trab-scroll", "trab-tabela", "trab-corpo-tabela", "gaveta", "gaveta-titulo", "gaveta-conteudo", "popover-contato", "popover-quem", "popover-status", "popover-data", "popover-obs",
   "menu-status", "modal-novo", "modal-novo-erro", "lista-municipios-uf", "lista-setores", "n-uf", "n-setor", "n-municipio", "n-status", "n-consultor"]) {
   el[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
@@ -92,6 +94,7 @@ function enriquecer(o) {
   o.regionalId = m ? m[1] : null;
   o.regionalSigla = o.regionalId ? d.regionaisPorId.get(o.regionalId)?.sigla || "" : "";
   o.consultorNome = o.pessoa_id === -1 ? "outro consultor" : o.pessoa_id ? d.consultoresPorId.get(o.pessoa_id) || "" : "";
+  o.marca = (trab.verDe ? trab.marcasOutro : trab.marcas).get(o.id) || null;
   o.statusNome = o.contato_inexistente ? "Contato inexistente" : o.cor_linha ? d.statusPorHex.get(o.cor_linha)?.nome || "" : "";
   o.statusHexVisual = o.contato_inexistente ? COR_INEXISTENTE : o.cor_linha && d.statusPorHex.has(o.cor_linha) ? o.cor_linha : null;
   o.busca = normalizar([o.municipioNome, o.municipio_texto, o.responsavel, o.cargo, o.telefone, o.telefone_original, o.whatsapp, o.email, o.observacoes, o.curso, o.setor, o.consultor_planilha].filter(Boolean).join(" | "));
@@ -115,6 +118,9 @@ async function carregarTrabalho() {
   d.consultoresPorId = new Map(d.consultores.map((c) => [c.id, c.nome]));
   d.statusPorHex = new Map(d.status.map((s) => [s.hex, s]));
   trab.dados = d;
+  trab.marcas = new Map(Object.entries(d.marcacoes || {}).map(([id, cor]) => [Number(id), cor]));
+  trab.verDe = null; trab.marcasOutro = new Map();
+  preencherMarcasDe(d);
   trab.linhas = d.linhas.map(montarLinha);
   trab.porId = new Map(trab.linhas.map((o) => [o.id, o]));
   aplicarEscopoNaTela(d);
@@ -152,7 +158,7 @@ function preencherFiltrosEstaticos() {
   el.nConsultor.innerHTML = `<option value="">sem consultor</option>` + d.consultores.map((c) => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join("");
   // refletir filtros no formulário
   const f = trab.filtros;
-  el.fBusca.value = f.busca; el.fMunicipio.value = f.municipio; el.fRegional.value = f.regional; el.fSetor.value = f.setor; el.fConsultor.value = f.consultor;
+  el.fBusca.value = f.busca; el.fMunicipio.value = f.municipio; el.fRegional.value = f.regional; el.fSetor.value = f.setor; el.fConsultor.value = f.consultor; el.fMarca.value = f.marca;
   el.fOcultas.checked = f.ocultas; el.fSemTelefone.checked = f.semTelefone; el.fInexistente.checked = f.inexistente; el.fNunca.checked = f.nunca; el.fNuncaCdr.checked = f.nuncaCdr; el.fDe.value = f.de; el.fAte.value = f.ate;
 }
 
@@ -160,7 +166,7 @@ function preencherFiltrosEstaticos() {
 
 function lerFiltros() {
   const f = trab.filtros;
-  f.busca = el.fBusca.value.trim(); f.municipio = el.fMunicipio.value.trim(); f.regional = el.fRegional.value; f.setor = el.fSetor.value; f.consultor = el.fConsultor.value;
+  f.busca = el.fBusca.value.trim(); f.municipio = el.fMunicipio.value.trim(); f.regional = el.fRegional.value; f.setor = el.fSetor.value; f.consultor = el.fConsultor.value; f.marca = el.fMarca.value;
   f.ocultas = el.fOcultas.checked; f.semTelefone = el.fSemTelefone.checked; f.inexistente = el.fInexistente.checked; f.nunca = el.fNunca.checked; f.nuncaCdr = el.fNuncaCdr.checked; f.de = el.fDe.value; f.ate = el.fAte.value;
 }
 
@@ -178,6 +184,7 @@ function aplicarFiltros() {
     if (regional && o.regionalId !== regional) return false;
     if (municipio && !normalizar(o.municipioNome).includes(municipio) && !normalizar(o.municipio_texto).includes(municipio)) return false;
     if (consultor === "sem" ? o.pessoa_id : consultor && o.pessoa_id !== consultor) return false;
+    if (f.marca && (f.marca === "sem" ? o.marca : o.marca !== f.marca)) return false;
     if (f.semTelefone && o.telefone) return false;
     if (f.inexistente && !o.contato_inexistente) return false;
     if (f.nunca && o.data_ultimo_contato) return false;
@@ -192,13 +199,20 @@ function aplicarFiltros() {
     return true;
   });
   ordenar();
-  el.trabContador.textContent = `${inteiro(trab.filtradas.length)} de ${inteiro(trab.linhas.length)}`;
+  atualizarContador();
   el.trabScroll.scrollTop = 0;
   trab.primeiraVisivel = -1;
   renderizarJanela(true);
   gravarHash();
   const ms = performance.now() - t0;
   if (ms > 80) console.warn(`[prospeccao] filtro levou ${Math.round(ms)} ms`);
+}
+
+function atualizarContador() {
+  let verdes = 0, vermelhas = 0;
+  for (const cor of (trab.verDe ? trab.marcasOutro : trab.marcas).values()) { if (cor === "verde") verdes++; else vermelhas++; }
+  el.trabContador.textContent = `${inteiro(trab.filtradas.length)} de ${inteiro(trab.linhas.length)}` +
+    (verdes || vermelhas ? ` · ${trab.verDe ? `de ${trab.verDe.nome}: ` : ""}🟢 ${inteiro(verdes)} 🔴 ${inteiro(vermelhas)}` : "");
 }
 
 function ordenar() {
@@ -228,7 +242,7 @@ function serializarFiltros() {
   const q = new URLSearchParams();
   q.set("uf", trab.uf);
   if (f.busca) q.set("q", f.busca); if (f.municipio) q.set("mun", f.municipio); if (f.regional) q.set("reg", f.regional); if (f.setor) q.set("setor", f.setor);
-  if (f.consultor) q.set("cons", f.consultor); if (f.status.size) q.set("st", [...f.status].join(","));
+  if (f.consultor) q.set("cons", f.consultor); if (f.marca) q.set("marca", f.marca); if (f.status.size) q.set("st", [...f.status].join(","));
   const flags = ["ocultas", "semTelefone", "inexistente", "nunca", "nuncaCdr"].filter((k) => f[k]); if (flags.length) q.set("flags", flags.join(","));
   if (f.de) q.set("de", f.de); if (f.ate) q.set("ate", f.ate);
   if (trab.ordem.campo !== "municipioNome" || trab.ordem.dir !== 1) q.set("ord", `${trab.ordem.campo}:${trab.ordem.dir}`);
@@ -246,7 +260,7 @@ function lerHash() {
   const q = new URLSearchParams(query);
   const f = trab.filtros;
   if (q.get("uf")) trab.uf = q.get("uf").toUpperCase();
-  f.busca = q.get("q") || ""; f.municipio = q.get("mun") || ""; f.regional = q.get("reg") || ""; f.setor = q.get("setor") || ""; f.consultor = q.get("cons") || "";
+  f.busca = q.get("q") || ""; f.municipio = q.get("mun") || ""; f.regional = q.get("reg") || ""; f.setor = q.get("setor") || ""; f.consultor = q.get("cons") || ""; f.marca = ["verde", "vermelho", "sem"].includes(q.get("marca")) ? q.get("marca") : "";
   f.status = new Set((q.get("st") || "").split(",").filter((s) => s !== "" || (q.get("st") || "").includes(",")));
   if (q.get("st") === "") f.status = new Set([""]);
   const flags = new Set((q.get("flags") || "").split(",")); f.ocultas = flags.has("ocultas"); f.semTelefone = flags.has("semTelefone"); f.inexistente = flags.has("inexistente"); f.nunca = flags.has("nunca"); f.nuncaCdr = flags.has("nuncaCdr");
@@ -258,6 +272,9 @@ function lerHash() {
 // ---------- tabela virtual ----------
 
 const COLUNAS = [
+  { campo: "marca", render: (o) => ["verde", "vermelho"].map((cor) =>
+    `<button type="button" class="marca-btn marca-${cor}${o.marca === cor ? " ativo" : ""}" data-acao="marca" data-cor="${cor}"${trab.verDe ? " disabled" : ""}
+      title="${trab.verDe ? `marcação de ${escapeHtml(trab.verDe.nome)} (só leitura)` : `${cor} (tecla ${cor === "verde" ? 1 : 2}) — clique de novo limpa`}"></button>`).join("") },
   { campo: "status", render: (o) => chipStatus(o), editavel: "status" },
   { campo: "municipioNome", render: (o) => escapeHtml(o.municipioNome) + (o.codigo_ibge ? "" : o.municipio_texto ? ' <span class="trab-sem-match" title="não casou com município oficial">?</span>' : ""), editavel: "municipio" },
   { campo: "regionalSigla", render: (o) => escapeHtml(o.regionalSigla) },
@@ -285,7 +302,7 @@ function chipStatus(o) {
 }
 
 function htmlLinha(o, idx) {
-  const classes = ["trab-linha", o.linha_oculta ? "trab-oculta" : "", o.id === trab.selecionado ? "trab-selecionada" : "", o.editado_em ? "trab-editada" : ""].filter(Boolean).join(" ");
+  const classes = ["trab-linha", o.marca ? `trab-marca-${o.marca}` : "", o.linha_oculta ? "trab-oculta" : "", o.id === trab.selecionado ? "trab-selecionada" : "", o.editado_em ? "trab-editada" : ""].filter(Boolean).join(" ");
   return `<tr class="${classes}" data-id="${o.id}" data-idx="${idx}">${COLUNAS.map((c) => `<td class="c-${c.campo}${c.editavel ? " editavel" : ""}" data-campo="${c.campo}">${c.render(o)}</td>`).join("")}</tr>`;
 }
 
@@ -336,6 +353,73 @@ function atualizarLinhaLocal(arr) {
   const atual = trab.porId.get(o.id);
   if (atual) Object.assign(atual, o); else { trab.linhas.unshift(o); trab.porId.set(o.id, o); }
   return trab.porId.get(o.id);
+}
+
+// ---------- marcação pessoal (verde / vermelho) ----------
+// Otimista e sem travar: a linha pinta na hora; o PUT leva o estado FINAL
+// desejado (idempotente). Uma requisição por contato em voo; cliques durante o
+// voo só atualizam o desejado e o laço reenvia até bater com o confirmado.
+
+const marcaSync = new Map(); // id → { confirmada, desejada, emVoo }
+
+function aplicarMarcaLocal(id, cor) {
+  if (cor) trab.marcas.set(id, cor); else trab.marcas.delete(id);
+  if (trab.verDe) return;
+  const o = trab.porId.get(id);
+  if (o) o.marca = cor;
+  rerenderLinha(id);
+  atualizarContador();
+}
+
+function marcar(id, cor) {
+  if (trab.verDe) return avisar(`Você está vendo as marcações de ${trab.verDe.nome} — volte para "minhas" para marcar.`, true);
+  if (!trab.porId.has(id)) return;
+  const atual = trab.marcas.get(id) || null;
+  const nova = atual === cor ? null : cor;
+  let s = marcaSync.get(id);
+  if (!s) { s = { confirmada: atual, desejada: atual, emVoo: false }; marcaSync.set(id, s); }
+  s.desejada = nova;
+  aplicarMarcaLocal(id, nova);
+  if (!s.emVoo) enviarMarca(id, s);
+}
+
+async function enviarMarca(id, s) {
+  s.emVoo = true;
+  while (s.desejada !== s.confirmada) {
+    const alvo = s.desejada;
+    try {
+      const r = await postJson(`/api/prospeccao/contatos/${id}/marcacao`, { cor: alvo }, "PUT");
+      s.confirmada = r.cor;
+    } catch (err) {
+      s.desejada = s.confirmada;
+      aplicarMarcaLocal(id, s.confirmada);
+      avisar("⚠ Marcação não salva: " + err.message, true);
+      break;
+    }
+  }
+  s.emVoo = false;
+  marcaSync.delete(id);
+}
+
+// Admin: seletor "marcações de" (as minhas ou as de outro usuário, só leitura)
+function preencherMarcasDe(d) {
+  if (!d.marcacoesDe) { el.fMarcasDe.classList.add("oculto"); return; }
+  el.fMarcasDe.innerHTML = `<option value="">marcações: minhas</option>` +
+    d.marcacoesDe.map((u) => `<option value="${u.id}">marcações de ${escapeHtml(u.nome)} (${inteiro(u.n)})</option>`).join("");
+  el.fMarcasDe.value = "";
+  el.fMarcasDe.classList.remove("oculto");
+}
+
+async function verMarcacoesDe(usuarioId) {
+  if (!usuarioId) { trab.verDe = null; trab.marcasOutro = new Map(); }
+  else {
+    const r = await chamarApi(`/api/prospeccao/marcacoes?uf=${trab.uf}&usuario=${usuarioId}`);
+    const u = trab.dados.marcacoesDe.find((x) => x.id === Number(usuarioId));
+    trab.marcasOutro = new Map(Object.entries(r.marcacoes).map(([id, cor]) => [Number(id), cor]));
+    trab.verDe = { id: Number(usuarioId), nome: u ? u.nome : "outro usuário" };
+  }
+  for (const o of trab.linhas) o.marca = (trab.verDe ? trab.marcasOutro : trab.marcas).get(o.id) || null;
+  aplicarFiltros();
 }
 
 // ---------- seleção e teclado ----------
@@ -640,6 +724,12 @@ el.trabCorpoTabela.addEventListener("click", (ev) => {
   if (!tr) return;
   const id = Number(tr.dataset.id);
   if (btn) {
+    if (btn.dataset.acao === "marca") {
+      if (trab.selecionado !== id) selecionar(id);
+      marcar(id, btn.dataset.cor);
+      el.trabScroll.focus({ preventScroll: true }); // o botão saiu do DOM no re-render: manter o teclado na tabela
+      return;
+    }
     if (btn.dataset.acao === "registrar") abrirPopover(id, btn);
     if (btn.dataset.acao === "detalhes") { selecionar(id); abrirGaveta(id); }
     return;
@@ -675,6 +765,12 @@ el.trabScroll.addEventListener("keydown", (ev) => {
   if (trab.editando || ev.target.matches("input, select, textarea")) return;
   if (ev.key === "ArrowDown") { ev.preventDefault(); moverSelecao(1); }
   else if (ev.key === "ArrowUp") { ev.preventDefault(); moverSelecao(-1); }
+  else if (["1", "2", "0"].includes(ev.key) && !ev.ctrlKey && !ev.altKey && !ev.metaKey && trab.selecionado) {
+    ev.preventDefault();
+    const atual = trab.marcas.get(trab.selecionado);
+    if (ev.key === "0") { if (atual) marcar(trab.selecionado, atual); }
+    else marcar(trab.selecionado, ev.key === "1" ? "verde" : "vermelho");
+  }
   else if (ev.key.toLowerCase() === "r" && trab.selecionado) { ev.preventDefault(); abrirPopover(trab.selecionado); }
   else if (ev.key.toLowerCase() === "d" && trab.selecionado) { ev.preventDefault(); abrirGaveta(trab.selecionado); }
   else if (ev.key === "Enter" && trab.selecionado) { const td = el.trabCorpoTabela.querySelector(`tr[data-id="${trab.selecionado}"] td[data-campo="responsavel"]`); if (td) iniciarEdicao(td); }
@@ -735,7 +831,8 @@ document.addEventListener("keydown", (ev) => {
 let debounceBusca = 0;
 el.fBusca.addEventListener("input", () => { clearTimeout(debounceBusca); debounceBusca = setTimeout(() => { lerFiltros(); aplicarFiltros(); }, 90); });
 el.fMunicipio.addEventListener("input", () => { clearTimeout(debounceBusca); debounceBusca = setTimeout(() => { lerFiltros(); aplicarFiltros(); }, 120); });
-for (const id of ["f-regional", "f-setor", "f-consultor", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate"]) {
+el.fMarcasDe.addEventListener("change", () => verMarcacoesDe(el.fMarcasDe.value).catch((e) => { el.fMarcasDe.value = ""; avisar("⚠ " + e.message, true); }));
+for (const id of ["f-regional", "f-setor", "f-consultor", "f-marca", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate"]) {
   document.getElementById(id).addEventListener("change", () => { lerFiltros(); aplicarFiltros(); });
 }
 el.fUf.addEventListener("change", async () => { trab.uf = el.fUf.value; trab.filtros.status = new Set(); trab.filtros.regional = ""; trab.filtros.setor = ""; el.gaveta.classList.add("oculto"); try { await carregarTrabalho(); } catch (e) { avisar("⚠ " + e.message, true); } });
@@ -748,7 +845,7 @@ el.fStatus.addEventListener("click", (ev) => {
   aplicarFiltros();
 });
 document.getElementById("btn-limpar-filtros").addEventListener("click", () => {
-  Object.assign(trab.filtros, { busca: "", municipio: "", regional: "", setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
+  Object.assign(trab.filtros, { busca: "", municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
   preencherFiltrosEstaticos(); aplicarFiltros();
 });
 document.getElementById("btn-novo-contato").addEventListener("click", abrirModalNovo);
@@ -914,7 +1011,7 @@ document.getElementById("tabela-gerencial").addEventListener("click", async (ev)
   const tr = ev.target.closest("tr[data-regional]");
   if (!tr) return;
   const uf = tr.dataset.uf;
-  Object.assign(trab.filtros, { busca: "", municipio: "", regional: tr.dataset.regional, setor: "", consultor: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
+  Object.assign(trab.filtros, { busca: "", municipio: "", regional: tr.dataset.regional, setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
   mostrarAba("trabalho");
   if (trab.uf !== uf) { trab.uf = uf; el.fUf.value = uf; await carregarTrabalho().catch((e) => avisar("⚠ " + e.message, true)); }
   else { preencherFiltrosEstaticos(); aplicarFiltros(); }
@@ -979,7 +1076,7 @@ document.querySelector("#tabela-cdr-ambiguas tbody").addEventListener("click", a
   if (!a) return;
   ev.preventDefault();
   // abre a aba Trabalho na UF dos contatos, com a busca pelo número — as linhas aparecem com os municípios divergentes
-  Object.assign(trab.filtros, { busca: a.dataset.cdrNumero, municipio: "", regional: "", setor: "", consultor: "", status: new Set(), ocultas: true, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
+  Object.assign(trab.filtros, { busca: a.dataset.cdrNumero, municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: true, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
   mostrarAba("trabalho");
   const uf = a.dataset.uf;
   if (uf && uf !== trab.uf) { trab.uf = uf; el.fUf.value = uf; await carregarTrabalho().catch((e) => avisar("⚠ " + e.message, true)); }

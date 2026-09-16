@@ -1411,6 +1411,25 @@ main.territorio-pagina { width: min(1380px, 100%); }
 .trab-tabela tbody tr.trab-linha:hover { background: rgba(255, 255, 255, 0.035); }
 .trab-tabela tbody tr.trab-selecionada { background: rgba(108, 123, 255, 0.14); }
 .trab-tabela tbody tr.trab-oculta td { opacity: 0.45; }
+/* marcação pessoal (verde/vermelho): pinta a linha inteira, por cima de hover e seleção */
+.trab-tabela tbody tr.trab-linha.trab-marca-verde { background: rgba(61, 220, 132, 0.17); }
+.trab-tabela tbody tr.trab-linha.trab-marca-verde:hover { background: rgba(61, 220, 132, 0.23); }
+.trab-tabela tbody tr.trab-linha.trab-marca-verde.trab-selecionada { background: rgba(61, 220, 132, 0.3); }
+.trab-tabela tbody tr.trab-linha.trab-marca-vermelho { background: rgba(255, 92, 114, 0.17); }
+.trab-tabela tbody tr.trab-linha.trab-marca-vermelho:hover { background: rgba(255, 92, 114, 0.23); }
+.trab-tabela tbody tr.trab-linha.trab-marca-vermelho.trab-selecionada { background: rgba(255, 92, 114, 0.3); }
+.trab-tabela tbody tr.trab-marca-verde td.c-marca { box-shadow: inset 4px 0 0 var(--verde); }
+.trab-tabela tbody tr.trab-marca-vermelho td.c-marca { box-shadow: inset 4px 0 0 var(--vermelho); }
+.trab-tabela thead th.th-marca { text-align: center; }
+.trab-tabela td.c-marca { text-align: center; padding: 0 0.2rem; }
+.marca-btn { width: 17px; height: 17px; margin: 0 2px; border-radius: 50%; border: 2px solid; background: transparent; cursor: pointer; vertical-align: middle; opacity: 0.55; padding: 0; }
+.marca-btn:hover { opacity: 1; }
+.marca-btn.marca-verde { border-color: var(--verde); }
+.marca-btn.marca-vermelho { border-color: var(--vermelho); }
+.marca-btn.marca-verde.ativo { background: var(--verde); opacity: 1; }
+.marca-btn.marca-vermelho.ativo { background: var(--vermelho); opacity: 1; }
+.marca-btn:disabled { cursor: not-allowed; }
+.marca-btn:disabled:not(.ativo) { opacity: 0.2; }
 .trab-tabela tbody tr.trab-editada td.c-municipioNome { border-left: 2px solid var(--acento-2); }
 .trab-tabela td.editavel { cursor: text; }
 .trab-tabela td.editavel:hover { box-shadow: inset 0 0 0 1px rgba(56, 214, 224, 0.35); }
@@ -1420,7 +1439,7 @@ main.territorio-pagina { width: min(1380px, 100%); }
 .trab-vazio { padding: 2rem !important; text-align: center !important; }
 col.c-status { width: 150px; } col.c-municipio { width: 170px; } col.c-regional { width: 90px; } col.c-setor { width: 150px; } col.c-responsavel { width: 170px; }
 col.c-cargo { width: 130px; } col.c-telefone { width: 135px; } col.c-whats { width: 120px; } col.c-email { width: 200px; } col.c-data { width: 105px; }
-col.c-consultor { width: 100px; } col.c-curso { width: 160px; } col.c-obs { width: 260px; } col.c-acoes { width: 64px; } col.c-cdr { width: 110px; }
+col.c-marca { width: 58px; } col.c-consultor { width: 100px; } col.c-curso { width: 160px; } col.c-obs { width: 260px; } col.c-acoes { width: 64px; } col.c-cdr { width: 110px; }
 .trab-cdr { white-space: nowrap; cursor: help; }
 .trab-cdr small { color: var(--texto-suave); margin-left: 0.2rem; }
 .trab-cdr-contato { color: var(--acento-2); }

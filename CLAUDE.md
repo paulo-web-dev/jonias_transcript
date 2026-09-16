@@ -118,7 +118,7 @@ para 30 palavras.
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **24**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **25**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -441,6 +441,21 @@ abandonado). Fase 1 = carga com fidelidade total:
   recebe só as regionais dele, só as ligações dele nos totais por classe,
   terceiros como "outros"/"outro consultor"/-1 (no SQL), sem ambíguas/DDD/por
   consultor; `POST …/recruzar` é só admin.
+- **Migração 25 (2026-09-16) — marcação pessoal** (pedido do usuário: as cores
+  importadas são muitas; o vendedor precisa de um "já liguei" simples).
+  `marcacoes_prospeccao(usuario_id, contato_id, cor verde|vermelho,
+  marcado_em, PK(usuario_id, contato_id))`: sem marcação = sem linha. **Por
+  usuário**: cada um vê só as suas; o admin tem as próprias (separadas) e pode
+  VER as de outro usuário, só leitura (seletor "marcações de…"). **Camada
+  separada**: não toca `contatos_ativo` (nem `editado_em` — não bloqueia
+  reimportação), nem `cor_linha`/status, nem o histórico. Na aba Trabalho:
+  coluna ● com dois botões (clicar na mesma cor limpa), linha inteira pintada,
+  filtro "marcação: todas | só verdes | só vermelhas | sem marcação" (`marca=`
+  no hash), contador 🟢/🔴, teclas `1` verde, `2` vermelho (mesma tecla ou `0`
+  limpa). Salvamento otimista: o PUT leva o estado FINAL (idempotente), uma
+  requisição por contato em voo e cliques durante o voo reenviam só o último
+  estado; falha desfaz a pintura com aviso. Marcar com o filtro ativo não tira a
+  linha da tela até o próximo filtro (não embaralha a navegação por ↑↓).
 
 ## Rotas
 
@@ -493,6 +508,8 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/prospeccao/gerencial` | admin: por regional — titular, apoios, contatos, telefone válido, sem consultor, trabalhados, nunca tocados, inexistentes, último contato, editados; totais por UF e "sem regional" |
 | `GET /api/prospeccao/cdr?de&ate` | Fase 4: `total`, `classes` (ligações/atendidas/municípios por classe), `regionais` (ligações, atendidas, municípios ligados × com contatos, nunca ligados, fora da carteira, `porConsultor`); admin ainda `ambiguas` (número, ligações, última, UF, municípios com linhas e ids), `desconhecidasPorDdd`, `semRegional`, `porConsultor`; vendedor ainda `nuncaLigados` (municípios da carteira sem ligação no período). Período inválido → 400 |
 | `GET /api/prospeccao/contatos/:id/ligacoes` | ligações do CDR para o número do contato (`doNumero`) e para o município dele (`doMunicipio`, `totalMunicipio`) — data, atendida, tempo de conversa, falha, consultor (vendedor: terceiros = "outro consultor"); fora do escopo → 404 |
+| `PUT /api/prospeccao/contatos/:id/marcacao` | marcação pessoal `{cor: "verde"\|"vermelho"\|null}` do usuário da sessão; idempotente; contato fora do escopo → 404, cor inválida → 400. As marcações próprias vêm em `marcacoes` no `GET /api/prospeccao/contatos` (admin também recebe `marcacoesDe`: quem mais marcou na UF) |
+| `GET /api/prospeccao/marcacoes?uf=&usuario=` | admin: marcações de outro usuário na UF (só leitura); vendedor → 403 |
 | `POST /api/prospeccao/cdr/recruzar` | admin: reclassifica todas as ligações (derivado, idempotente) e devolve as contagens |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 

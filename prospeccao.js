@@ -836,6 +836,10 @@ function payloadTrabalho(uf, usuario, escopo = null) {
     uf, campos: CAMPOS_TRABALHO, linhas, status: statusDisponiveis(), setores, regionais, municipios, consultores,
     // Fase 4 (só leitura): por município [última, total, atendidas, quem ligou por último]; por contato [última, total]
     cdr: cdr.cdrPorMunicipio(uf, escopo),
+    // marcação pessoal (verde/vermelho) SÓ do usuário logado: { contatoId: cor }
+    marcacoes: marcacoesDoUsuario(uf, usuario.id, escopo),
+    // admin: quem mais marcou nesta UF (para ver as marcações de outro usuário, só leitura)
+    marcacoesDe: escopo ? null : usuariosComMarcacoes(uf, usuario.id),
     usuario: { id: usuario.id, nome: usuario.nome || usuario.login, papel: usuario.papel, pessoaId: usuario.pessoa_id ?? null },
     escopo: escopo ? { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio } : null,
     geradoEm: new Date().toISOString(),
@@ -966,6 +970,58 @@ function atualizarContato(id, mudancas, usuarioId, escopo = null) {
     cdr.cruzarLigacoes({ numeros: [linha.telefone, linha.whatsapp, colunas.telefone, colunas.whatsapp].filter(Boolean) });
   }
   return { linha: linhaCompactaDe(linha.id, escopo), alteracoes: registros.length };
+}
+
+// ---------- marcação pessoal (migração 25) ----------
+// Verde/vermelho por USUÁRIO, independente do status importado e do registro
+// de contato: não toca contatos_ativo (nem editado_em) nem o histórico.
+const CORES_MARCACAO = ["verde", "vermelho"];
+
+function marcacoesDoUsuario(uf, usuarioId, escopo = null) {
+  const cm = clausulaMunicipios(escopo, "c.codigo_ibge");
+  const linhas = db.prepare(
+    `SELECT m.contato_id id, m.cor FROM marcacoes_prospeccao m JOIN contatos_ativo c ON c.id = m.contato_id
+     WHERE m.usuario_id = ? AND c.uf = ? AND ${cm.sql}`
+  ).all(Number(usuarioId), uf, ...cm.valores);
+  return Object.fromEntries(linhas.map((r) => [r.id, r.cor]));
+}
+
+function usuariosComMarcacoes(uf, exceto) {
+  return db.prepare(
+    `SELECT u.id, COALESCE(u.nome, u.login) nome, u.papel, COUNT(*) n FROM marcacoes_prospeccao m
+     JOIN usuarios u ON u.id = m.usuario_id JOIN contatos_ativo c ON c.id = m.contato_id
+     WHERE c.uf = ? AND m.usuario_id <> ? GROUP BY u.id ORDER BY nome`
+  ).all(uf, Number(exceto));
+}
+
+// Admin: marcações de outro usuário numa UF (só leitura)
+function marcacoesDeOutro(uf, usuarioId) {
+  uf = String(uf || "").toUpperCase();
+  if (!UFS_ACEITAS.includes(uf)) throw erro("UF inválida.");
+  const id = Number(usuarioId);
+  if (!Number.isInteger(id) || !db.prepare("SELECT 1 FROM usuarios WHERE id = ?").get(id)) {
+    throw Object.assign(new Error("Usuário não encontrado."), { naoEncontrado: true });
+  }
+  return { uf, usuarioId: id, marcacoes: marcacoesDoUsuario(uf, id) };
+}
+
+// PUT { cor: 'verde' | 'vermelho' | null } — idempotente: grava o estado final
+// pedido pelo cliente (sem alternância no servidor, então requisições repetidas
+// ou reenviadas não invertem a marcação). Contato fora do escopo = 404.
+function marcarContato(id, cor, usuarioId, escopo = null) {
+  const linha = buscarLinha(id, escopo);
+  if (cor !== null && cor !== "" && cor !== undefined && !CORES_MARCACAO.includes(cor)) {
+    throw erro("Marcação inválida — use verde, vermelho ou null.");
+  }
+  if (!cor) {
+    db.prepare("DELETE FROM marcacoes_prospeccao WHERE usuario_id = ? AND contato_id = ?").run(usuarioId, linha.id);
+    return { id: linha.id, cor: null };
+  }
+  db.prepare(
+    `INSERT INTO marcacoes_prospeccao (usuario_id, contato_id, cor, marcado_em) VALUES (?, ?, ?, ?)
+     ON CONFLICT(usuario_id, contato_id) DO UPDATE SET cor = excluded.cor, marcado_em = excluded.marcado_em`
+  ).run(usuarioId, linha.id, cor, new Date().toISOString());
+  return { id: linha.id, cor };
 }
 
 const CANAIS = ["ligacao", "whatsapp", "email", "visita", "outro"];
@@ -1266,6 +1322,8 @@ module.exports = {
   ligacoesDoContato,
   criarContato,
   criarStatus,
+  marcarContato,
+  marcacoesDeOutro,
   exportarXlsx,
   CONSULTORES_ATUAIS,
   // utilitários (testes)
