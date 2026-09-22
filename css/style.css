@@ -1490,3 +1490,11 @@ col.c-marca { width: 58px; } col.c-consultor { width: 100px; } col.c-curso { wid
 .carteira-apoios .trab-flag { margin-right: 0.5rem; }
 .carteira-resultado { white-space: normal; max-width: 260px; font-size: 0.78rem; }
 body[data-papel="vendedor"] .so-admin { display: none !important; }
+
+/* Central: abas da prospecção recusadas por edição no sistema (prévia + sobrescrita) */
+.bloqueio-aba { border: 1px solid var(--borda-painel); border-radius: 10px; padding: 0.6rem 0.9rem; margin: 0.6rem 0; }
+.bloqueio-aba p { margin: 0.3rem 0; }
+.bloqueio-marcar { display: inline-flex; align-items: center; gap: 0.35rem; margin-right: 0.4rem; font-weight: 600; }
+.bloqueio-detalhe summary { cursor: pointer; color: var(--acento-2); margin: 0.3rem 0; }
+.bloqueio-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.8rem; }
+#confirmar-sobrescrita:not(.oculto) { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }

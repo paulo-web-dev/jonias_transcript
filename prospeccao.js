@@ -497,7 +497,89 @@ function linhaIdentica(existente, nova) {
   return true;
 }
 
-async function importarProspeccao(buffer, arquivoNome, uf, usuarioId) {
+// ---------- Abas bloqueadas por edição no sistema ----------
+// Aba com linha editada no jonIAs é recusada na reimportação (o sistema virou a
+// fonte). O admin pode sobrescrever mesmo assim, mas só depois de VER o que se
+// perde: `previaSobrescrita` compara, linha a linha, o valor atual das linhas
+// editadas com o que a planilha traz. Não se perde (e a prévia diz): contato
+// criado no sistema (linha_origem negativa, nenhuma linha da planilha casa),
+// linha editada que sumiu da planilha (nunca há DELETE), histórico e marcações.
+//
+// A `assinatura` (nº de linhas editadas + última edição) amarra a confirmação
+// à prévia que o admin viu: se alguém editou a aba no meio-tempo, a
+// sobrescrita é recusada de novo, com prévia nova — nada some sem ser mostrado.
+const LIMITE_PERDAS_NA_PREVIA = 300;
+
+function assinaturaAba(uf, setor) {
+  const r = db.prepare(
+    "SELECT COUNT(*) n, MAX(editado_em) ultima FROM contatos_ativo WHERE uf = ? AND setor = ? AND editado_em IS NOT NULL"
+  ).get(uf, setor);
+  return `${r.n}:${r.ultima || ""}`;
+}
+
+// pessoa_id: a planilha sem consultor casado NÃO apaga o consultor atual (a
+// atribuição por carteira não marca editado_em e sumiria em silêncio a cada
+// reimportação). Com consultor na planilha, a planilha vale.
+function mesclarConsultor(existente, nova) {
+  if (existente && existente.pessoa_id != null && nova.pessoa_id == null) return { ...nova, pessoa_id: existente.pessoa_id };
+  return nova;
+}
+
+function diferencas(existente, nova) {
+  return COLUNAS_CONTATO.filter((c) => (existente[c] ?? null) !== (nova[c] ?? null));
+}
+
+function previaSobrescrita(uf, aba) {
+  const nomeStatus = new Map(db.prepare("SELECT cor_hex, status_nome FROM cores_prospeccao").all().map((r) => [r.cor_hex, r.status_nome]));
+  const nomePessoa = new Map(db.prepare("SELECT id, nome FROM pessoas").all().map((r) => [r.id, r.nome]));
+  const nomeUsuario = new Map(db.prepare("SELECT id, COALESCE(nome, login) nome FROM usuarios").all().map((r) => [r.id, r.nome]));
+  const legivel = (campo, v) => {
+    if (v === null || v === undefined || v === "") return "";
+    if (campo === "cor_linha") return nomeStatus.get(v) ? `${nomeStatus.get(v)} (#${v})` : `#${v}`;
+    if (campo === "pessoa_id") return nomePessoa.get(v) || `#${v}`;
+    if (["linha_oculta", "contato_inexistente", "cadastro_crm", "telefone_valido"].includes(campo)) return v ? "sim" : "não";
+    return String(v);
+  };
+  const editadas = db.prepare(
+    "SELECT * FROM contatos_ativo WHERE uf = ? AND setor = ? AND editado_em IS NOT NULL ORDER BY linha_origem"
+  ).all(uf, aba.aba);
+  const daPlanilha = new Map(aba.linhas.map((l) => [l.linha_origem, l]));
+  const perdas = [];
+  const porCampo = {};
+  let linhasComPerda = 0, camposPerdidos = 0, manuais = 0, semLinhaNaPlanilha = 0, semPerda = 0;
+  for (const atual of editadas) {
+    if (atual.origem === "manual" || atual.linha_origem < 0) { manuais++; continue; }
+    const nova = daPlanilha.get(atual.linha_origem);
+    if (!nova) { semLinhaNaPlanilha++; continue; }
+    // telefone/whatsapp normalizados, validade e cores por célula mudam junto
+    // com o original — a prévia mostra só o campo que a pessoa vê
+    const campos = diferencas(atual, mesclarConsultor(atual, nova))
+      .filter((c) => !["telefone", "whatsapp", "telefone_valido", "cores_celulas_json"].includes(c));
+    if (!campos.length) { semPerda++; continue; }
+    linhasComPerda++;
+    for (const c of campos) {
+      camposPerdidos++;
+      porCampo[c] = (porCampo[c] || 0) + 1;
+      if (perdas.length < LIMITE_PERDAS_NA_PREVIA) {
+        perdas.push({
+          contatoId: atual.id, linha: atual.linha_origem,
+          contato: [atual.municipio_texto, atual.responsavel].filter(Boolean).join(" · "),
+          campo: c, atual: legivel(c, atual[c]), planilha: legivel(c, nova[c]),
+          editadoEm: atual.editado_em, editadoPor: nomeUsuario.get(atual.editado_por) || null,
+        });
+      }
+    }
+  }
+  return {
+    aba: aba.aba, assinatura: assinaturaAba(uf, aba.aba), editadas: editadas.length,
+    linhasComPerda, camposPerdidos, porCampo, semPerda, manuais, semLinhaNaPlanilha,
+    perdas, truncado: camposPerdidos > perdas.length,
+  };
+}
+
+// opcoes.sobrescrever: { [aba]: assinatura } — SÓ admin (conferido na rota).
+async function importarProspeccao(buffer, arquivoNome, uf, usuarioId, opcoes = {}) {
+  const sobrescrever = opcoes.sobrescrever || {};
   const iniciadoEm = new Date().toISOString();
   const hash = hashSha256(buffer);
   const relatorio = novoRelatorio();
@@ -558,7 +640,8 @@ async function importarProspeccao(buffer, arquivoNome, uf, usuarioId) {
      ON CONFLICT(cor_hex) DO UPDATE SET origem = COALESCE(cores_prospeccao.origem, excluded.origem)`
   );
 
-  let novos = 0, atualizados = 0, identicos = 0, lidas = 0, vazias = 0, importadas = 0;
+  let novos = 0, atualizados = 0, identicos = 0, lidas = 0, vazias = 0, importadas = 0, historicoSobrescrita = 0;
+  const bloqueios = [];
   let resultado;
   try {
     resultado = db.transaction(() => {
@@ -577,20 +660,51 @@ async function importarProspeccao(buffer, arquivoNome, uf, usuarioId) {
           registrarOcorrencia(relatorio.motivos, `aba não importada: ${aba.motivo}`, aba.aba);
           continue;
         }
+        let sobrescrita = false;
         if (bloqueadas.has(aba.aba)) {
-          aba.motivo = "aba tem linha editada no jonIAs — reimportação recusada (o sistema é a fonte)";
-          registrarOcorrencia(relatorio.motivos, "aba com edição no sistema — não sobrescrita", aba.aba);
-          aba.novos = aba.atualizados = aba.identicos = 0;
-          continue;
+          const pedida = sobrescrever[aba.aba];
+          if (pedida && pedida === assinaturaAba(uf, aba.aba)) {
+            sobrescrita = true;
+          } else {
+            aba.bloqueio = "edicao";
+            aba.motivo = pedida
+              ? "a aba foi editada no jonIAs DEPOIS da prévia — sobrescrita recusada; revise a prévia nova"
+              : "aba tem linha editada no jonIAs — reimportação recusada (o sistema é a fonte)";
+            registrarOcorrencia(relatorio.motivos, "aba com edição no sistema — não sobrescrita", aba.aba);
+            aba.novos = aba.atualizados = aba.identicos = 0;
+            bloqueios.push(previaSobrescrita(uf, aba));
+            continue;
+          }
         }
         aba.novos = 0; aba.atualizados = 0; aba.identicos = 0;
-        for (const linha of aba.linhas) {
-          const existente = buscar.get(uf, aba.aba, linha.linha_origem);
+        for (const lida of aba.linhas) {
+          const existente = buscar.get(uf, aba.aba, lida.linha_origem);
+          const linha = mesclarConsultor(existente, lida);
           const registro = { ...linha, arquivo_nome: arquivoNome, importacao_id: importacaoId, criado_em: agora };
           if (!existente) { inserir.run(registro); aba.novos++; novos++; }
           else if (linhaIdentica(existente, linha)) { aba.identicos++; identicos++; }
-          else { atualizar.run(registro); aba.atualizados++; atualizados++; }
+          else {
+            // Sobrescrita confirmada: o valor editado no sistema vai para o
+            // histórico antes de ser trocado — a perda fica auditável.
+            if (sobrescrita && existente.editado_em) {
+              for (const c of diferencas(existente, linha)) {
+                inserirHistorico.run({
+                  contato_id: existente.id, tipo: CAMPOS_STATUS.has(c) ? "status" : "edicao", canal: null, campo: c,
+                  valor_anterior: existente[c] == null ? null : String(existente[c]),
+                  valor_novo: linha[c] == null ? null : String(linha[c]),
+                  observacao: `sobrescrito pela planilha "${arquivoNome}" (importação #${importacaoId}, confirmada pelo admin)`,
+                  usuario_id: usuarioId, registrado_em: agora,
+                });
+                historicoSobrescrita++;
+              }
+            }
+            atualizar.run(registro); aba.atualizados++; atualizados++;
+          }
           importadas++;
+        }
+        if (sobrescrita) {
+          aba.sobrescrita = true;
+          aba.avisos = [...(aba.avisos || []), "aba com edição no sistema SOBRESCRITA por confirmação do admin — valores anteriores no histórico"];
         }
         for (const a of aba.avisos || []) registrarOcorrencia(relatorio.problemas, a, aba.aba);
       }
@@ -624,8 +738,17 @@ async function importarProspeccao(buffer, arquivoNome, uf, usuarioId) {
       relatorio.municipios = coberturaMunicipiosDaImportacao(uf, abas.filter((a) => !a.motivo).map((a) => a.aba));
       tempos.relatorio = Date.now() - marca;
       relatorio.tempos = tempos;
+      relatorio.resumoAbas = {
+        total: abas.length,
+        importadas: abas.filter((a) => !a.motivo).length,
+        recusadasPorEdicao: abas.filter((a) => a.bloqueio === "edicao").length,
+        outrasNaoImportadas: abas.filter((a) => a.motivo && a.bloqueio !== "edicao").length,
+        sobrescritas: abas.filter((a) => a.sobrescrita).map((a) => a.aba),
+        historicoSobrescrita,
+      };
+      relatorio.bloqueios = bloqueios;
       relatorio.avisos.push(
-        `${abas.length} aba(s) no arquivo: ${abas.filter((a) => !a.motivo).length} importada(s), ${abas.filter((a) => a.motivo).length} não importada(s) (listadas em "Linhas ignoradas").`,
+        `${abas.length} aba(s) no arquivo: ${relatorio.resumoAbas.importadas} importada(s), ${relatorio.resumoAbas.recusadasPorEdicao} recusada(s) por edição no sistema, ${relatorio.resumoAbas.outrasNaoImportadas} não importada(s) por outro motivo (listadas em "Linhas ignoradas").`,
         `Cores distintas encontradas: ${contexto.cores.size} — dê nome e significado a cada uma em /prospeccao (nenhum significado foi presumido).`,
         `Casamento cidade → município: ${cruzamento.apelidosNovos} chave(s) nova(s); pendências ficam na revisão de /territorio.`
       );
@@ -650,7 +773,7 @@ async function importarProspeccao(buffer, arquivoNome, uf, usuarioId) {
     status: "concluida", importacaoId: resultado.importacaoId, tipo: "prospeccao", arquivo: arquivoNome, uf,
     linhasLidas: lidas, linhasValidas: importadas, linhasIgnoradas: lidas - importadas,
     registrosNovos: novos, registrosAtualizados: atualizados, registrosIdenticos: identicos,
-    abas: relatorio.abas, detalhes: relatorio,
+    abas: relatorio.abas, resumoAbas: relatorio.resumoAbas, bloqueios: relatorio.bloqueios, detalhes: relatorio,
   };
 }
 

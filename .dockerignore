@@ -1,0 +1,18 @@
+# A imagem NUNCA pode levar um banco: o banco de produção vive no volume
+# (DB_PATH=/app/data/aula-ai.db, ./data:/app/data). Um .db empacotado na imagem
+# é exatamente o que fazia o banco "voltar no tempo" a cada build.
+# "**/" é necessário: no .dockerignore, "*.db" só casa na raiz do contexto.
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.db-journal
+**/*.sqlite
+**/*.sqlite3
+backups/
+data/
+
+# planilhas de prospecção contêm dados pessoais — nunca na imagem
+**/*.xlsx
+**/*.xls
+
+.git

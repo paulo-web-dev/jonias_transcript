@@ -46,6 +46,17 @@ function formatarData(iso) {
         d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+// Resposta sem corpo JSON (proxy na frente do app, por exemplo): ao menos o
+// significado do código, em vez de só o número
+function motivoHttp(status) {
+  const motivos = {
+    413: "arquivo maior que o limite aceito pelo servidor ou pelo proxy",
+    502: "o servidor não respondeu (proxy sem o app)",
+    504: "o servidor demorou demais para responder (tempo limite do proxy)",
+  };
+  return motivos[status] ? `erro ${status}: ${motivos[status]}` : `erro ${status}`;
+}
+
 async function chamarApi(url, opcoes) {
   const resposta = await fetch(url, opcoes);
   if (resposta.status === 401) {
@@ -53,7 +64,10 @@ async function chamarApi(url, opcoes) {
     throw new Error("sessão expirada");
   }
   const corpo = await resposta.json().catch(() => ({}));
-  if (!resposta.ok) throw new Error(corpo.error || `erro ${resposta.status}`);
+  // Importação recusada (422) traz o relatório com o motivo em `erro`: devolve
+  // o corpo para a tela mostrar o relatório inteiro, não só o código HTTP.
+  if (!resposta.ok && corpo.status === "erro" && corpo.erro) return corpo;
+  if (!resposta.ok) throw new Error(corpo.error || corpo.erro || motivoHttp(resposta.status));
   return corpo;
 }
 
@@ -82,6 +96,73 @@ function blocoAbasProspeccao(abas) {
     <th style="text-align:left">Colunas casadas</th><th style="text-align:left">Não reconhecidas (em extras)</th></tr></thead><tbody>${linhas}</tbody></table></div>`;
 }
 
+const ROTULOS_CAMPO = {
+  municipio_texto: "município", telefone_original: "telefone", whatsapp_original: "WhatsApp", responsavel: "responsável",
+  cargo: "cargo", email: "e-mail", data_ultimo_contato: "último contato", observacoes: "observações",
+  consultor_planilha: "consultor (texto)", cor_linha: "status (cor)", linha_oculta: "linha oculta", extras_json: "extras",
+  curso: "curso", contato_inexistente: "contato inexistente", contato_inexistente_texto: "inexistente (texto)",
+  cadastro_crm: "cadastro no CRM", pessoa_id: "consultor", orgao: "órgão",
+};
+const rotuloCampo = (c) => ROTULOS_CAMPO[c] || c;
+
+function blocoResumoAbas(r) {
+  if (!r) return "";
+  const partes = [`<strong>${r.importadas}</strong> de ${r.total} aba(s) importada(s)`];
+  if (r.recusadasPorEdicao) partes.push(`<strong class="relatorio-erro">${r.recusadasPorEdicao}</strong> recusada(s) por edição no sistema`);
+  if (r.outrasNaoImportadas) partes.push(`${r.outrasNaoImportadas} não importada(s) por outro motivo`);
+  if (r.sobrescritas?.length) {
+    partes.push(`sobrescrita(s) por confirmação: ${r.sobrescritas.map(escapeHtml).join(", ")} (${r.historicoSobrescrita} valor(es) anterior(es) guardado(s) no histórico)`);
+  }
+  return `<p>${partes.join(" · ")}.</p>`;
+}
+
+// Abas recusadas por edição no sistema: o que se perderia se a planilha
+// sobrescrevesse, e a opção (só admin — a /central é só de admin, e o
+// servidor confere) de sobrescrever mesmo assim, com confirmação em dois passos.
+function blocoBloqueios(bloqueios, podeSobrescrever) {
+  if (!bloqueios?.length) return "";
+  const itens = bloqueios.map((b, i) => {
+    const campos = Object.entries(b.porCampo || {})
+      .sort((x, y) => y[1] - x[1])
+      .map(([c, n]) => `<span class="chip">${escapeHtml(rotuloCampo(c))}: ${n}</span>`).join(" ");
+    const mantidos = [
+      b.semPerda ? `${b.semPerda} editada(s) já iguais à planilha` : "",
+      b.manuais ? `${b.manuais} contato(s) criado(s) no sistema — mantido(s)` : "",
+      b.semLinhaNaPlanilha ? `${b.semLinhaNaPlanilha} editada(s) que não estão mais na planilha — mantida(s)` : "",
+    ].filter(Boolean).join(" · ");
+    const perdas = (b.perdas || []).map((p) => `<tr class="sem-clique">
+        <td>${p.linha}</td><td class="celula-nome">${escapeHtml(p.contato || "—")}</td><td>${escapeHtml(rotuloCampo(p.campo))}</td>
+        <td style="text-align:left"><strong>${escapeHtml(p.atual || "(vazio)")}</strong><br><span class="texto-suave">${escapeHtml(p.editadoPor || "?")} · ${escapeHtml(formatarData(p.editadoEm))}</span></td>
+        <td style="text-align:left">${escapeHtml(p.planilha || "(vazio)")}</td></tr>`).join("");
+    const tabela = b.camposPerdidos
+      ? `<details class="bloqueio-detalhe"><summary>Ver as ${b.camposPerdidos} edição(ões) que seriam perdidas</summary>
+          <div class="tabela-scroll"><table class="tabela-metricas"><thead><tr><th>Linha</th><th>Contato</th><th>Campo</th>
+          <th style="text-align:left">Hoje no jonIAs (vai para o histórico)</th><th style="text-align:left">Na planilha</th></tr></thead>
+          <tbody>${perdas}</tbody></table></div>
+          ${b.truncado ? `<p class="texto-suave">Mostrando as primeiras ${b.perdas.length} de ${b.camposPerdidos}.</p>` : ""}</details>`
+      : `<p class="texto-suave">Nenhum valor editado seria trocado nesta aba.</p>`;
+    const marcar = podeSobrescrever
+      ? `<label class="bloqueio-marcar"><input type="checkbox" data-bloqueio="${i}"> sobrescrever mesmo assim</label>`
+      : "";
+    return `<div class="bloqueio-aba">
+      <p>${marcar} <strong>${escapeHtml(b.aba)}</strong> — ${b.editadas} linha(s) editada(s) no jonIAs;
+        <strong>${b.linhasComPerda}</strong> perderiam ${b.camposPerdidos} valor(es).</p>
+      ${campos ? `<p>${campos}</p>` : ""}${mantidos ? `<p class="texto-suave">${mantidos}.</p>` : ""}${tabela}</div>`;
+  }).join("");
+  const acoes = podeSobrescrever
+    ? `<div class="bloqueio-acoes">
+        <button type="button" class="btn btn-secundario" id="btn-sobrescrever" disabled>Sobrescrever as abas marcadas…</button>
+        <span id="confirmar-sobrescrita" class="oculto"><span id="texto-sobrescrita" class="relatorio-erro"></span>
+          <button type="button" class="btn btn-perigo" id="btn-confirmar-sobrescrita">Confirmar sobrescrita</button>
+          <button type="button" class="btn btn-secundario" id="btn-cancelar-sobrescrita">Cancelar</button></span>
+      </div>`
+    : "";
+  return `<h4>Abas recusadas por edição no sistema (${bloqueios.length})</h4>
+    <p class="texto-suave">As outras abas do arquivo foram importadas normalmente. Sobrescrever troca os valores editados no jonIAs
+    pelos da planilha; o valor atual de cada campo fica guardado no histórico do contato. Contatos criados no sistema, marcações e
+    histórico não são tocados.</p>${itens}${acoes}`;
+}
+
 function blocoNaoReconhecidas(lista) {
   if (!lista?.length) return "";
   return `<h4>Colunas não reconhecidas no arquivo (preservadas em extras)</h4><ul>${lista
@@ -107,6 +188,7 @@ function blocoOcorrencias(titulo, grupo) {
 
 function mostrarRelatorio(titulo, resultado) {
   const d = resultado.detalhes || {};
+  bloqueiosAtuais = resultado.bloqueios || d.bloqueios || [];
   const linhas = [];
   if (resultado.status === "erro") {
     linhas.push(`<p class="relatorio-erro">✕ ${escapeHtml(resultado.erro)}</p>`);
@@ -139,6 +221,8 @@ function mostrarRelatorio(titulo, resultado) {
         `${m.fora ? ` · fora da UF: ${m.fora}` : ""} — pendências na revisão de <a href="/territorio">/territorio</a>; ` +
         `cores em <a href="/prospeccao">/prospeccao</a>.</p>`
     );
+    linhas.push(blocoResumoAbas(resultado.resumoAbas || d.resumoAbas));
+    linhas.push(blocoBloqueios(resultado.bloqueios || d.bloqueios, resultado.status !== "erro" && !!ultimoEnvioProspeccao));
     linhas.push(blocoAbasProspeccao(resultado.abas || d.abas));
     linhas.push(blocoNaoReconhecidas(d.colunasNaoReconhecidas));
   }
@@ -159,29 +243,75 @@ function mostrarRelatorio(titulo, resultado) {
 
 // binario = true envia o arquivo como está (planilha .xlsx do Omie);
 // caso contrário o conteúdo vai como texto (CSV do CDR).
+// Último envio da planilha de prospecção (conteúdo em memória): a sobrescrita
+// de abas bloqueadas reenvia exatamente o mesmo arquivo, com a confirmação.
+let ultimoEnvioProspeccao = null;
+let bloqueiosAtuais = [];
+
 async function enviarArquivo(input, rota, statusEl, rotulo, binario, queryExtra = "") {
   const arquivo = input.files?.[0];
   if (!arquivo) return;
   input.value = ""; // permite reenviar o mesmo arquivo
-  statusEl.textContent = `jonIAs está importando "${arquivo.name}"…`;
+  const corpo = binario ? await arquivo.arrayBuffer() : await arquivo.text();
+  const envio = { nome: arquivo.name, corpo, rota, statusEl, rotulo, binario, queryExtra };
+  if (rota === "/api/importacoes/prospeccao") ultimoEnvioProspeccao = envio;
+  await postarArquivo(envio);
+}
+
+async function postarArquivo(envio, queryAdicional = "") {
+  const { nome, corpo, rota, statusEl, rotulo, binario, queryExtra } = envio;
+  statusEl.textContent = `jonIAs está importando "${nome}"… (${(corpo.byteLength ?? corpo.length) > 1048576 ? ((corpo.byteLength ?? corpo.length) / 1048576).toFixed(1) + " MB" : "arquivo pequeno"})`;
   try {
-    const corpo = binario ? await arquivo.arrayBuffer() : await arquivo.text();
     const tipo = binario ? "application/octet-stream" : "text/plain;charset=utf-8";
     const resultado = await chamarApi(
-      `${rota}?arquivo=${encodeURIComponent(arquivo.name)}${queryExtra}`,
+      `${rota}?arquivo=${encodeURIComponent(nome)}${queryExtra}${queryAdicional}`,
       { method: "POST", headers: { "Content-Type": tipo }, body: corpo }
     );
+    const recusadas = resultado.resumoAbas?.recusadasPorEdicao;
     statusEl.textContent =
       resultado.status === "erro"
-        ? `Falha na importação de "${arquivo.name}".`
-        : `Última importação: "${arquivo.name}" — ${resultado.registrosNovos} novo(s), ${resultado.registrosAtualizados} atualizado(s).`;
-    mostrarRelatorio(`${rotulo} — ${arquivo.name}`, resultado);
+        ? `Importação de "${nome}" recusada: ${resultado.erro}`
+        : `Última importação: "${nome}" — ${resultado.registrosNovos} novo(s), ${resultado.registrosAtualizados} atualizado(s)` +
+          (recusadas ? ` · ${recusadas} aba(s) recusada(s) por edição no sistema (veja o relatório).` : ".");
+    mostrarRelatorio(`${rotulo} — ${nome}`, resultado);
   } catch (erro) {
-    statusEl.textContent = `Falha na importação de "${arquivo.name}".`;
-    mostrarAviso(`Não foi possível importar. (${erro.message})`);
+    statusEl.textContent = `Importação de "${nome}" recusada: ${erro.message}`;
+    mostrarAviso(`Não foi possível importar "${nome}": ${erro.message}`);
   }
   carregarImportacoes();
 }
+
+// Sobrescrita: marcar → "Sobrescrever…" mostra quanto se perde → "Confirmar"
+// reenvia com ?sobrescrever={aba: assinatura da prévia}
+function abasMarcadas() {
+  return [...el.relatorioConteudo.querySelectorAll("input[data-bloqueio]:checked")]
+    .map((cx) => bloqueiosAtuais[Number(cx.dataset.bloqueio)]).filter(Boolean);
+}
+el.relatorioConteudo.addEventListener("change", (ev) => {
+  if (!ev.target.matches("input[data-bloqueio]")) return;
+  const botao = document.getElementById("btn-sobrescrever");
+  if (botao) botao.disabled = abasMarcadas().length === 0;
+  document.getElementById("confirmar-sobrescrita")?.classList.add("oculto");
+});
+el.relatorioConteudo.addEventListener("click", async (ev) => {
+  const confirmar = document.getElementById("confirmar-sobrescrita");
+  if (ev.target.id === "btn-sobrescrever") {
+    const abas = abasMarcadas();
+    const valores = abas.reduce((t, b) => t + b.camposPerdidos, 0);
+    const linhas = abas.reduce((t, b) => t + b.linhasComPerda, 0);
+    document.getElementById("texto-sobrescrita").textContent =
+      `${valores} valor(es) editado(s) em ${linhas} linha(s) de ${abas.length} aba(s) serão trocados pelos da planilha. `;
+    confirmar.classList.remove("oculto");
+  } else if (ev.target.id === "btn-cancelar-sobrescrita") {
+    confirmar.classList.add("oculto");
+  } else if (ev.target.id === "btn-confirmar-sobrescrita") {
+    const abas = abasMarcadas();
+    if (!abas.length || !ultimoEnvioProspeccao) return;
+    ev.target.disabled = true;
+    const pedido = Object.fromEntries(abas.map((b) => [b.aba, b.assinatura]));
+    await postarArquivo(ultimoEnvioProspeccao, `&sobrescrever=${encodeURIComponent(JSON.stringify(pedido))}`);
+  }
+});
 
 el.arquivoCdr.addEventListener("change", () =>
   enviarArquivo(el.arquivoCdr, "/api/importacoes/cdr", el.cdrStatus, "CDR do PABX", false)

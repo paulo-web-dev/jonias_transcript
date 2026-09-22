@@ -1,9 +1,70 @@
 "use strict";
 
+const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
 
-const db = new Database(path.join(__dirname, "aula-ai.db"));
+// ---------- Caminho do banco ----------
+// Em produção (Docker) o banco PRECISA ficar dentro do diretório montado como
+// volume (ex.: DB_PATH=/app/data/aula-ai.db com ./data:/app/data) — senão cada
+// `docker compose build` recria o container e o banco volta ao que estava na
+// imagem. DB_PATH aponta para um ARQUIVO dentro de um DIRETÓRIO montado (nunca
+// bind de arquivo único): o SQLite cria -wal e -shm ao lado do .db, e eles têm
+// de viver no mesmo lugar. Sem DB_PATH (desenvolvimento local) vale o caminho
+// histórico, na raiz do projeto.
+//
+// Com DB_PATH definido o boot falha ALTO — melhor não subir que criar um banco
+// vazio em silêncio num lugar que some no próximo deploy:
+//   - diretório inexistente ou não gravável → sai;
+//   - arquivo inexistente → sai, a não ser que DB_CRIAR_NOVO=1 (primeira
+//     instalação de verdade, feita de propósito).
+function falharBanco(msg) {
+  console.error(`\n✖  BANCO: ${msg}\n   O servidor NÃO vai subir (nenhum banco foi criado).\n`);
+  process.exit(1);
+}
+
+function resolverCaminhoBanco() {
+  const bruto = (process.env.DB_PATH || "").trim();
+  if (!bruto) {
+    // Em produção o caminho padrão fica DENTRO do container — some no rebuild
+    if (process.env.NODE_ENV === "production") {
+      falharBanco("NODE_ENV=production sem DB_PATH — o banco ficaria dentro do container e sumiria no próximo build. Defina DB_PATH=/app/data/aula-ai.db (ver DEPLOY.md).");
+    }
+    const padrao = path.join(__dirname, "aula-ai.db");
+    if (!fs.existsSync(padrao)) console.warn(`⚠  BANCO: ${padrao} não existia — criando um banco NOVO e vazio.`);
+    return padrao;
+  }
+
+  const caminho = path.resolve(bruto);
+  const dir = path.dirname(caminho);
+  let st;
+  try {
+    st = fs.statSync(dir);
+  } catch {
+    falharBanco(`DB_PATH=${bruto} — o diretório ${dir} não existe (o volume está montado?).`);
+  }
+  if (!st.isDirectory()) falharBanco(`DB_PATH=${bruto} — ${dir} não é um diretório.`);
+  // access(W_OK) nem sempre reflete o volume real; a prova é gravar de fato.
+  const sonda = path.join(dir, `.teste-escrita-${process.pid}`);
+  try {
+    fs.writeFileSync(sonda, "ok");
+    fs.unlinkSync(sonda);
+  } catch (e) {
+    falharBanco(`DB_PATH=${bruto} — o diretório ${dir} não é gravável (${e.code || e.message}).`);
+  }
+  if (fs.existsSync(caminho)) {
+    if (!fs.statSync(caminho).isFile()) falharBanco(`DB_PATH=${bruto} — ${caminho} existe e não é um arquivo.`);
+  } else if (process.env.DB_CRIAR_NOVO !== "1") {
+    falharBanco(
+      `DB_PATH=${bruto} — o arquivo ${caminho} não existe. Se o banco foi movido, confira o volume.\n` +
+        `   Para criar um banco NOVO e vazio de propósito, suba uma vez com DB_CRIAR_NOVO=1.`
+    );
+  }
+  return caminho;
+}
+
+const CAMINHO_BANCO = resolverCaminhoBanco();
+const db = new Database(CAMINHO_BANCO);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
@@ -956,6 +1017,18 @@ const OCULTOS_TEMPORARIOS_TV = ["Hirlan", "Douglas"];
        ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`
     ).run(CHAVE, JSON.stringify(OCULTOS_TEMPORARIOS_TV));
   })();
+}
+
+
+// ---------- Identificação no boot ----------
+// Caminho absoluto, versão do esquema e contagem de contatos: a primeira coisa
+// a conferir depois de um deploy (se a contagem cair, o banco é outro).
+{
+  const contatos = db.prepare("SELECT COUNT(*) AS n FROM contatos_ativo").get().n;
+  const origem = process.env.DB_PATH ? "DB_PATH" : "padrão local";
+  console.log(
+    `🗄  Banco: ${CAMINHO_BANCO} (${origem}) · user_version ${db.pragma("user_version", { simple: true })} · ${contatos} contato(s) de prospecção`
+  );
 }
 
 module.exports = db;

@@ -12,3 +12,8 @@ dados/*.xlsx
 *.db-shm
 *.db-wal
 *.db-journal
+
+# volume do banco em produção e backups — nunca versionar
+data/
+backups/
+*.db

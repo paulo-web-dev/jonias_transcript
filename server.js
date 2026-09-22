@@ -718,7 +718,27 @@ app.post("/api/importacoes/prospeccao", corpoXlsx, async (req, res) => {
     return res.status(400).json({ error: `Informe a UF da planilha em ?uf= (${prospeccao.UFS_ACEITAS.join(", ")}).` });
   }
   const arquivo = String(req.query.arquivo || "prospeccao.xlsx").slice(0, 200);
-  const resultado = await prospeccao.importarProspeccao(req.body, arquivo, uf, req.usuario.id);
+  // ?sobrescrever={"ABA": "assinatura da prévia"} — sobrescrever aba editada
+  // no sistema é decisão SÓ de admin (a rota já é de gestão; conferido de novo)
+  let sobrescrever = {};
+  if (req.query.sobrescrever) {
+    if (req.usuario.papel !== "admin") {
+      return res.status(403).json({ error: "Só o admin pode sobrescrever abas editadas no sistema." });
+    }
+    try {
+      sobrescrever = JSON.parse(String(req.query.sobrescrever));
+    } catch {
+      sobrescrever = null;
+    }
+    if (!sobrescrever || typeof sobrescrever !== "object" || Array.isArray(sobrescrever) ||
+        Object.values(sobrescrever).some((v) => typeof v !== "string")) {
+      return res.status(400).json({ error: "Parâmetro sobrescrever inválido (esperado {aba: assinatura})." });
+    }
+  }
+  const resultado = await prospeccao.importarProspeccao(req.body, arquivo, uf, req.usuario.id, { sobrescrever });
+  if (resultado.status === "erro") {
+    console.error(`importação de prospecção recusada (${arquivo}, ${uf}, ${req.body.length} B): ${resultado.erro}`);
+  }
   res.status(resultado.status === "erro" ? 422 : 200).json(resultado);
 });
 
@@ -1329,6 +1349,26 @@ function tratarErro(rota, err, res) {
   }
   return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
 }
+
+// Erros que escapam das rotas (corpo acima do limite do body-parser, exceção
+// em rota async) respondem JSON com o motivo em /api — sem isto o Express
+// devolve uma página HTML e a tela só consegue dizer "erro 413/500".
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  if (status === 413 || err.type === "entity.too.large") {
+    const mb = (n) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return res.status(413).json({
+      error: `Arquivo grande demais para o servidor: ${err.length ? mb(err.length) : "?"} (limite ${err.limit ? mb(err.limit) : "?"}).`,
+    });
+  }
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ error: err.expose ? err.message : `Requisição recusada (${status}).` });
+  }
+  console.error(`erro não tratado em ${req.method} ${req.path}:`, err);
+  if (!req.path.startsWith("/api/")) return res.status(500).send("Erro interno.");
+  res.status(500).json({ error: `Erro interno: ${err.message || err}` });
+});
 
 (async () => {
   await semearAdmin(); // garante o primeiro admin e adota aulas sem dono

@@ -83,6 +83,9 @@ aula-ai/
 ├── js/nav.js        # menu por papel via /api/sessao (conveniência; a proteção é nas rotas)
 ├── dados/           # referência versionada (CSV de regionais, JSONs do IBGE, mapa SVG)
 ├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
+├── scripts/banco.js # manutenção do SQLite: conferir | checkpoint | backup (deploy seguro)
+├── DEPLOY.md        # procedimento de deploy em produção (Docker) e migração do banco p/ o volume
+├── .dockerignore    # a imagem NUNCA leva banco (*.db, -wal, -shm), backups/, data/ nem planilhas
 ├── css/style.css    # tema dark completo (robô, listas, modais, login, view, central)
 ├── js/
 │   ├── markdown.js  # conversor MD→HTML compartilhado (navegador + servidor/PDF)
@@ -92,8 +95,8 @@ aula-ai/
 │   ├── central.js   # uploads, sincronização e histórico de ingestões
 │   ├── territorio.js # cobertura do casamento + revisão manual (Fase 1)
 │   └── login.js
-├── aula-ai.db       # SQLite (gerado em runtime, ignorado no git)
-└── .env             # ANTHROPIC_API_KEY, SESSION_SECRET, ADMIN_*, MYSQL_*, TV_TOKEN
+├── aula-ai.db       # SQLite local (gerado em runtime, ignorado no git; produção: DB_PATH no volume)
+└── .env             # ANTHROPIC_API_KEY, SESSION_SECRET, ADMIN_*, MYSQL_*, TV_TOKEN, DB_PATH
 ```
 
 ## Como rodar
@@ -110,9 +113,45 @@ primeiro admin quando a tabela `usuarios` está vazia (padrão do example:
 unyflex/unyflex); alterá-los depois não muda a senha no banco. As migrações rodam
 sozinhas no `require("./db.js")` do startup.
 
+**Caminho do banco (`DB_PATH`)**: sem a variável, o banco é `./aula-ai.db` na
+raiz (desenvolvimento). Com ela, é o arquivo indicado — em produção
+`DB_PATH=/app/data/aula-ai.db`, dentro do diretório montado como volume
+(`./data:/app/data`; diretório, nunca bind de arquivo único, porque `-wal` e
+`-shm` ficam ao lado do `.db`). O boot **falha alto** (sai sem criar nada)
+se `DB_PATH` aponta para diretório inexistente/não gravável ou para arquivo
+que não existe (`DB_CRIAR_NOVO=1` libera criar um banco novo de propósito), e
+se `NODE_ENV=production` estiver sem `DB_PATH`. Todo boot loga
+`🗄 Banco: <caminho absoluto> (DB_PATH|padrão local) · user_version N · N
+contato(s) de prospecção` — a primeira coisa a conferir depois de um deploy.
+
 Abrir `http://localhost:8000` no Chrome → redireciona para /login.
 **Modo de teste:** `?bloco=30` na URL da sessão ao vivo reduz o bloco de 400
 para 30 palavras.
+
+## Deploy seguro (produção)
+
+Procedimento completo, passo a passo, em **`DEPLOY.md`** (inclui a migração
+única do banco de `/app/aula-ai.db` para o volume). O incidente que motivou
+(2026-09-22): o app gravava em `/app/aula-ai.db`, fora do volume, e cada
+`docker compose build` + `up` recriava o container com o banco da imagem —
+dados da equipe perdidos. O Dockerfile e o docker-compose vivem só no servidor
+(não estão no repositório). Regras:
+
+- **Backup antes de todo deploy**: `node scripts/banco.js backup
+  /app/data/aula-ai.db /app/data/backup-<data>.db` (API de backup online do
+  SQLite: consistente com o app rodando, arquivo único) + `conferir` para o
+  retrato "antes"; copiar backups para fora do servidor.
+- **Nunca copiar o banco local por cima do de produção** (bases diferentes; a
+  de produção tem o trabalho da equipe) e nunca empacotar banco na imagem
+  (`.dockerignore` com `**/*.db` — sem `**/` só casa na raiz do contexto).
+- **Conferir depois de subir**: a linha `🗄 Banco:` do log tem de dizer
+  `/app/data/aula-ai.db (DB_PATH)` com a contagem de contatos esperada;
+  `scripts/banco.js conferir` mostra user_version, quick_check, contagens das
+  tabelas de trabalho, carimbos mais recentes e as últimas importações
+  recusadas com o motivo. Comparar com o "antes".
+- `stop` preserva o container (e o banco dentro dele); `down`/`up` com imagem
+  nova destroem. `scripts/banco.js` roda em imagem que ainda não o tem:
+  `docker compose exec -T <serviço> node - conferir <db> < scripts/banco.js`.
 
 ## Banco de dados
 
@@ -305,7 +344,24 @@ abandonado). Fase 1 = carga com fidelidade total:
   escolhida no upload (nunca deduzida do nome do arquivo); `orgao` derivado
   do nome da aba (PM/CM/Autarquia). Reimportar = upsert pela chave natural;
   **aba com `editado_em` preenchido (edição no jonIAs, Fase 2) é recusada**
-  na reimportação — o sistema virou a fonte. `linha_oculta` marca as linhas
+  na reimportação — o sistema virou a fonte. A recusa é **por aba**: as
+  outras abas do arquivo entram normalmente e o relatório traz `resumoAbas`
+  (importadas / recusadas por edição / outras) e `bloqueios` — por aba
+  recusada, a **prévia do que se perderia** (`previaSobrescrita`: linha,
+  campo, valor atual com quem/quando editou, valor da planilha; contatos
+  manuais, linhas editadas que sumiram da planilha, histórico e marcações são
+  mantidos e contados à parte). **Só admin** pode "sobrescrever mesmo assim"
+  (2026-09-22): o reenvio leva `?sobrescrever={aba: assinatura}`; a
+  assinatura (nº de linhas editadas + última `editado_em`) amarra a
+  confirmação à prévia vista — edição feita depois da prévia faz a aba ser
+  recusada de novo, com prévia nova. Na sobrescrita, cada valor trocado vai
+  para `contatos_ativo_historico` (valor anterior → planilha, observação
+  "sobrescrito pela planilha …") antes do UPDATE; `editado_em` fica (a aba
+  continua marcada como trabalhada no sistema). **`pessoa_id` nunca é apagado
+  pela reimportação** (`mesclarConsultor`): planilha sem consultor casado
+  mantém o atual — a atribuição por carteira não marca `editado_em` e antes
+  sumia em silêncio a cada reimportação; com consultor na planilha, a planilha
+  vale. `linha_oculta` marca as linhas
   ocultas da planilha (1.761 PR / 934 SC — importadas, decisão do usuário).
 - `cores_prospeccao(cor_hex PK, origem, linhas, celulas, status_nome, significado, ignorar, ordem, atualizado_em, usuario_id)`
   — **cor é informação**: 1 linha por cor de preenchimento distinta (RGB de
@@ -490,7 +546,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/territorio/agregado?de&ate` | Fase 2: `estados`, `regionais` (principal; `compartilhados` à parte), `municipios` (694, com `temHistorico`), `outrosEstados.porUf`, `semMunicipio.porGrupo`, `total`, `conferencia.elos` (✓/✗ com diferença) |
 | `GET /api/territorio/municipios/:codigo?de&ate` | detalhe do município: regional principal + outras, `resumo` (matrículas, alunos distintos, receita, ticket médio, canceladas), `cursos`, `vendedores` (carteira), `matriculas` (alunos), `prospeccao` (regional no período com quantos municípios já compraram + `semCompra`; vizinhos geográficos com situação cliente/nunca e valores no período); 404 se não existe |
 | `GET /api/territorio/mapa` | malha municipal PR+SC em SVG (`dados/mapa_PR_SC.svg`, autenticada, `Cache-Control` 1 dia); 503 se o arquivo não existe |
-| `POST /api/importacoes/prospeccao?arquivo=&uf=` | planilha de prospecção (.xlsx binário, 50 MB); `uf` obrigatória (400); resposta com relatório por aba (`abas`), colunas não reconhecidas, cores, municípios; erro estrutural → 422 |
+| `POST /api/importacoes/prospeccao?arquivo=&uf=[&sobrescrever=]` | planilha de prospecção (.xlsx binário, 50 MB); `uf` obrigatória (400); resposta com relatório por aba (`abas`), `resumoAbas`, `bloqueios` (prévia das abas recusadas por edição), colunas não reconhecidas, cores, municípios; erro estrutural (arquivo ilegível, falha ao gravar) → 422 com o motivo em `erro` (também no log do servidor e em `importacoes.erro`); `sobrescrever={aba: assinatura}` só admin (403), JSON inválido → 400 |
 | `GET /prospeccao` | tela: cores encontradas → status (nome/significado/só formatação, salva ao sair do campo) + cobertura da carga por UF/aba + colunas não reconhecidas |
 | `GET /api/prospeccao/cores`, `PUT /api/prospeccao/cores/:hex` | cores com contagens, abas e exemplos reais; PUT `{statusNome, significado, ignorar}` (campo ausente não mexe) |
 | `GET /api/prospeccao/cobertura` | por UF e por aba: linhas, ocultas, telefone válido, whatsapp, e-mail, município casado/pendente, cores, editadas; colunas não reconhecidas e abas não importadas da última importação de cada UF |
@@ -512,6 +568,12 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/prospeccao/marcacoes?uf=&usuario=` | admin: marcações de outro usuário na UF (só leitura); vendedor → 403 |
 | `POST /api/prospeccao/cdr/recruzar` | admin: reclassifica todas as ligações (derivado, idempotente) e devolve as contagens |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
+
+Erros que escapam das rotas passam por um tratador final em `server.js`: corpo
+acima do limite → 413 JSON com tamanho e limite; outros 4xx/5xx → JSON com o
+motivo (antes o Express devolvia HTML e a tela só dizia "erro N"). Na
+`/central`, `chamarApi` mostra `error` ou `erro` do corpo e, para 422 de
+importação, renderiza o relatório inteiro.
 
 Todas as rotas `/api/*` (exceto login e logout) e todas as páginas internas exigem
 sessão com usuário **ativo** (sessão órfã/inativa é destruída); sem login: API
