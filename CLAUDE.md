@@ -361,7 +361,15 @@ abandonado). Fase 1 = carga com fidelidade total:
   pela reimportação** (`mesclarConsultor`): planilha sem consultor casado
   mantém o atual — a atribuição por carteira não marca `editado_em` e antes
   sumia em silêncio a cada reimportação; com consultor na planilha, a planilha
-  vale. `linha_oculta` marca as linhas
+  vale.
+  **Atribuição ao titular na importação** (decisão do usuário, 2026-09-22):
+  depois do casamento de município, todo contato das abas importadas que
+  ficou sem consultor e cuja regional principal tem titular passa para o
+  titular — a mesma regra de `gravarCarteira`, sem marcar `editado_em`;
+  histórico `pessoa_id` com observação "atribuído ao titular da regional X na
+  importação da planilha … (importação #N)"; contagem por regional em
+  `detalhes.atribuidosTitular` e nos avisos. Regional só com apoios não
+  atribui; consultor vindo da planilha nunca é trocado. `linha_oculta` marca as linhas
   ocultas da planilha (1.761 PR / 934 SC — importadas, decisão do usuário).
 - `cores_prospeccao(cor_hex PK, origem, linhas, celulas, status_nome, significado, ignorar, ordem, atualizado_em, usuario_id)`
   — **cor é informação**: 1 linha por cor de preenchimento distinta (RGB de

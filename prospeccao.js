@@ -729,6 +729,33 @@ async function importarProspeccao(buffer, arquivoNome, uf, usuarioId, opcoes = {
       const cruzamento = cruzarMunicipios();
       tempos.cruzamento = Date.now() - marca; marca = Date.now();
 
+      // Mesma regra de gravarCarteira: contato das abas importadas que ficou
+      // sem consultor e cujo município (regional principal) tem titular passa
+      // para o titular — depois do casamento, que é o que define o município.
+      // Não marca editado_em (atribuição não é edição; não bloqueia reimportação).
+      const setoresImportados = abas.filter((a) => !a.motivo).map((a) => a.aba);
+      const atribuicoes = {};
+      if (setoresImportados.length) {
+        const semDono = db.prepare(
+          `SELECT c.id, ca.pessoa_id titular, r.sigla FROM contatos_ativo c
+             JOIN municipios m ON m.codigo_ibge = c.codigo_ibge
+             JOIN regionais r ON r.id = m.regional_principal_id
+             JOIN carteiras ca ON ca.regional_id = r.id AND ca.papel = 'titular'
+           WHERE c.uf = ? AND c.pessoa_id IS NULL AND c.setor IN (${setoresImportados.map(() => "?").join(",")})`
+        ).all(uf, ...setoresImportados);
+        const atribuir = db.prepare("UPDATE contatos_ativo SET pessoa_id = ?, atualizado_em = ? WHERE id = ?");
+        for (const c of semDono) {
+          atribuir.run(c.titular, agora, c.id);
+          inserirHistorico.run({ contato_id: c.id, tipo: "edicao", canal: null, campo: "pessoa_id", valor_anterior: null,
+            valor_novo: String(c.titular),
+            observacao: `atribuído ao titular da regional ${c.sigla} na importação da planilha "${arquivoNome}" (importação #${importacaoId})`,
+            usuario_id: usuarioId, registrado_em: agora });
+          atribuicoes[c.sigla] = (atribuicoes[c.sigla] || 0) + 1;
+        }
+      }
+      relatorio.atribuidosTitular = atribuicoes;
+      tempos.atribuicao = Date.now() - marca; marca = Date.now();
+
       relatorio.uf = uf;
       relatorio.abas = abas.map(({ linhas, ...resto }) => resto); // sem as linhas (vão para a tabela)
       relatorio.colunasNaoReconhecidas = [...contexto.naoReconhecidas.values()]
@@ -750,7 +777,10 @@ async function importarProspeccao(buffer, arquivoNome, uf, usuarioId, opcoes = {
       relatorio.avisos.push(
         `${abas.length} aba(s) no arquivo: ${relatorio.resumoAbas.importadas} importada(s), ${relatorio.resumoAbas.recusadasPorEdicao} recusada(s) por edição no sistema, ${relatorio.resumoAbas.outrasNaoImportadas} não importada(s) por outro motivo (listadas em "Linhas ignoradas").`,
         `Cores distintas encontradas: ${contexto.cores.size} — dê nome e significado a cada uma em /prospeccao (nenhum significado foi presumido).`,
-        `Casamento cidade → município: ${cruzamento.apelidosNovos} chave(s) nova(s); pendências ficam na revisão de /territorio.`
+        `Casamento cidade → município: ${cruzamento.apelidosNovos} chave(s) nova(s); pendências ficam na revisão de /territorio.`,
+        Object.keys(atribuicoes).length
+          ? `Contatos sem consultor atribuídos ao titular da regional: ${Object.values(atribuicoes).reduce((a, b) => a + b, 0)} (${Object.entries(atribuicoes).map(([s, n]) => `${s} ${n}`).join(", ")}) — registrado no histórico de cada contato.`
+          : "Nenhum contato sem consultor em regional com titular — nada atribuído."
       );
 
       db.prepare(
