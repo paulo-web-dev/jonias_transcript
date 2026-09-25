@@ -46,10 +46,48 @@ que fez o banco "voltar no tempo". O `.dockerignore` novo impede que se repita.
 
 ### 1. Trazer o código novo, SEM build
 
+O `Dockerfile` e o `docker-compose.yml` agora são versionados. O
+`docker-compose.yml` do repositório traz `DB_PATH`, `NODE_ENV=production`,
+`env_file: .env`, o volume e `init: true`. O que é só do servidor (labels, rede
+e domínio do Traefik) vai para `docker-compose.override.yml`, que não é
+versionado. O compose lê esse arquivo junto com o principal sem precisar de
+nenhum parâmetro. Os arquivos antigos do servidor ainda não são rastreados, e
+por isso o `git pull` aborta enquanto eles estiverem na pasta. Tire-os do
+caminho antes:
+
 ```sh
+docker compose config > compose-antigo-AAAAMMDD.txt   # como o compose antigo resolve tudo
+mv Dockerfile Dockerfile.antigo
+mv docker-compose.yml docker-compose.antigo.yml
 git pull                               # só muda arquivos do host; o container em execução não é tocado
-ls .dockerignore scripts/banco.js      # os dois precisam existir
+ls .dockerignore scripts/banco.js Dockerfile docker-compose.yml   # os quatro precisam existir
 ```
+
+Monte o override a partir do compose antigo e acerte o nome do serviço:
+
+1. `cp docker-compose.override.example.yml docker-compose.override.yml` e
+   troque os valores pelas labels e pela rede que estão em
+   `docker-compose.antigo.yml`.
+2. **O nome do serviço tem de ser o mesmo do compose antigo.** No repositório
+   ele se chama `jonias`. Se o antigo usa outro nome, troque `jonias` por esse
+   nome nos dois arquivos (`docker-compose.yml` e override). Com nome
+   diferente, o compose não reconhece o container que está rodando e cria um
+   novo ao lado dele.
+3. Confira:
+
+   ```sh
+   docker compose ps                    # tem de listar o container que JÁ está rodando
+   docker compose config > compose-novo-AAAAMMDD.txt
+   diff compose-antigo-AAAAMMDD.txt compose-novo-AAAAMMDD.txt
+   ```
+
+   As diferenças esperadas são estas: `init`, `restart`, `env_file`/
+   `environment` (`DB_PATH`, `NODE_ENV`) e o volume `./data`. Labels, rede e
+   porta têm de sair iguais. Se o antigo publicava `ports:`, copie esse bloco
+   também para o override.
+
+Daqui até o passo 7, os comandos usam o compose novo. Ele só é aplicado ao
+container no build do passo 9.
 
 ### 2. Retrato "antes" (contagens do banco vivo)
 
@@ -117,8 +155,9 @@ mensagem `✖ BANCO: … não é gravável`. Ele não cria banco vazio.
 
 ### 7. Conferir a cópia antes de subir
 
-A conferência usa a imagem antiga, num container descartável, com o volume
-montado:
+A conferência roda num container descartável, com o volume montado. Se a
+imagem do serviço ainda não existir com o nome novo, o compose a constrói
+antes. Isso não faz mal: o container só executa o `banco.js`.
 
 ```sh
 docker compose run --rm --no-deps -T --entrypoint node SVC - checkpoint /app/data/aula-ai.db < scripts/banco.js
@@ -132,22 +171,23 @@ Só as linhas `arquivo`/`tamanhos` devem diferir. **Se alguma contagem for
 menor, pare aqui.** O container antigo continua parado e intacto; volte com
 `docker compose start SVC`.
 
-### 8. Definir `DB_PATH`
+### 8. Conferir `DB_PATH` e `.env`
 
-A forma mais explícita é no `docker-compose.yml`, no serviço:
+O `docker-compose.yml` versionado já define `DB_PATH=/app/data/aula-ai.db` e
+`NODE_ENV=production` e monta `./data:/app/data`. Os segredos vêm do `.env`
+da pasta por `env_file`. O `.dockerignore` tira o `.env` da imagem, então ele
+precisa estar na pasta do compose, ao lado do `docker-compose.yml`:
+`ls -la .env`.
 
-```yaml
-    environment:
-      - DB_PATH=/app/data/aula-ai.db
-    volumes:
-      - ./data:/app/data
-```
-
-Também funciona pôr `DB_PATH=/app/data/aula-ai.db` no `.env`, se o compose
-usa `env_file: .env` ou se o Dockerfile copia o `.env` para a imagem. O log do
-passo 9 prova qual delas pegou.
+`NODE_ENV=production` liga o cookie `secure`, e o login só funciona por
+HTTPS. Com o Traefik terminando o TLS, isso é o esperado.
 
 ### 9. Build e subida
+
+O `Dockerfile` usa dois estágios. As dependências são instaladas com
+`npm ci --omit=dev` (exatamente o `package-lock.json`) num estágio que tem
+python3/make/g++, porque `better-sqlite3` e `argon2` compilam quando não há
+binário pronto. A imagem final leva só o `node_modules` pronto.
 
 ```sh
 docker compose build SVC

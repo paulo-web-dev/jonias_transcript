@@ -1,0 +1,23 @@
+# jonIAs — produção. O que é específico do servidor (labels e rede do Traefik,
+# domínio) fica em docker-compose.override.yml, que NÃO é versionado; o compose
+# lê os dois arquivos juntos sozinho. Modelo: docker-compose.override.example.yml.
+#
+# O nome do serviço tem de ser o mesmo do compose que já roda no servidor:
+# nome diferente = container novo ao lado do antigo. Ver DEPLOY.md.
+services:
+  jonias:
+    build: .
+    restart: unless-stopped
+    # tini como PID 1: repassa o SIGTERM do `stop` ao node (sem ele, o docker
+    # espera 10 s e mata com SIGKILL)
+    init: true
+    # segredos e configuração (ANTHROPIC_API_KEY, SESSION_SECRET, MYSQL_*,
+    # TV_TOKEN…) — o .env não entra mais na imagem
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      # banco no volume; com NODE_ENV=production e sem DB_PATH o app não sobe
+      DB_PATH: /app/data/aula-ai.db
+    volumes:
+      # diretório, nunca arquivo único: -wal e -shm ficam ao lado do .db
+      - ./data:/app/data

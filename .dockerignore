@@ -16,3 +16,12 @@ data/
 **/*.xls
 
 .git
+
+# dependências vêm do `npm ci` dentro da imagem (binários nativos de Linux),
+# nunca do node_modules do host
+node_modules/
+
+# segredos entram pelo env_file do docker-compose.yml, não pela imagem
+.env
+.env.*
+!.env.example

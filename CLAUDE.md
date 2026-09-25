@@ -85,7 +85,9 @@ aula-ai/
 ├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
 ├── scripts/banco.js # manutenção do SQLite: conferir | checkpoint | backup (deploy seguro)
 ├── DEPLOY.md        # procedimento de deploy em produção (Docker) e migração do banco p/ o volume
-├── .dockerignore    # a imagem NUNCA leva banco (*.db, -wal, -shm), backups/, data/ nem planilhas
+├── .dockerignore    # a imagem NUNCA leva banco (*.db, -wal, -shm), backups/, data/, planilhas, .env nem node_modules
+├── Dockerfile       # 2 estágios: npm ci --omit=dev com toolchain → node:22-bookworm-slim
+├── docker-compose.yml # serviço jonias: DB_PATH, NODE_ENV, env_file, volume ./data (Traefik no override, fora do git)
 ├── css/style.css    # tema dark completo (robô, listas, modais, login, view, central)
 ├── js/
 │   ├── markdown.js  # conversor MD→HTML compartilhado (navegador + servidor/PDF)
@@ -134,8 +136,18 @@ Procedimento completo, passo a passo, em **`DEPLOY.md`** (inclui a migração
 única do banco de `/app/aula-ai.db` para o volume). O incidente que motivou
 (2026-09-22): o app gravava em `/app/aula-ai.db`, fora do volume, e cada
 `docker compose build` + `up` recriava o container com o banco da imagem —
-dados da equipe perdidos. O Dockerfile e o docker-compose vivem só no servidor
-(não estão no repositório). Regras:
+dados da equipe perdidos. A causa era o `COPY . .` do Dockerfile do servidor
+sem `.dockerignore`, que empacotava o `aula-ai.db` local na imagem.
+**`Dockerfile` e `docker-compose.yml` são versionados desde 2026-09-23.** O
+Dockerfile tem dois estágios, com `npm ci --omit=dev` num estágio que tem
+python3/make/g++: `better-sqlite3` compila quando não há binário pronto para
+a versão do Node, e a falta desse estágio foi medida no build. O compose traz
+`DB_PATH`, `NODE_ENV=production`, `env_file: .env`, `init: true` e
+`./data:/app/data`. Labels, rede e domínio do Traefik ficam em
+`docker-compose.override.yml`, só no servidor e no `.gitignore`, com modelo em
+`docker-compose.override.example.yml`. O nome do serviço (`jonias`) tem de ser
+igual ao do container que já roda. O `.dockerignore` barra também
+`node_modules/` e `.env`, que entra só pelo `env_file`. Regras:
 
 - **Backup antes de todo deploy**: `node scripts/banco.js backup
   /app/data/aula-ai.db /app/data/backup-<data>.db` (API de backup online do

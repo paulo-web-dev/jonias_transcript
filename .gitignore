@@ -17,3 +17,7 @@ dados/*.xlsx
 data/
 backups/
 *.db
+
+# específico do servidor (labels/rede/domínio do Traefik) — modelo versionado em
+# docker-compose.override.example.yml
+docker-compose.override.yml

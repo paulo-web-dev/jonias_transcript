@@ -1,0 +1,18 @@
+# Modelo do docker-compose.override.yml do servidor (esse arquivo não é
+# versionado). Copie para docker-compose.override.yml e troque os valores pelos
+# que estão hoje no compose do servidor: labels, rede e domínio do Traefik.
+# Conferir o resultado da junção com: docker compose config
+services:
+  jonias:
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.jonias.rule=Host(`jonias.exemplo.com.br`)
+      - traefik.http.routers.jonias.entrypoints=websecure
+      - traefik.http.routers.jonias.tls.certresolver=letsencrypt
+      - traefik.http.services.jonias.loadbalancer.server.port=8000
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    external: true
