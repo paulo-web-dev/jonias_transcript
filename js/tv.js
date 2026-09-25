@@ -10,11 +10,12 @@
 
 const params = new URLSearchParams(location.search);
 const token = params.get("token") || "";
-const GIRO_MS = Math.max(6, Number(params.get("giro")) || 45) * 1000;
+// ?giro=N segundos por tela (padrão 30 desde 2026-09-25: com as telas de parados, 45 s dava um ciclo de ~6 min)
+const GIRO_MS = Math.max(6, Number(params.get("giro")) || 30) * 1000;
 // Cartão de destaque (falta para a meta da semana): entra ENTRE cada tela da
 // rotação, com duração própria — ?destaque=N segundos (padrão 12, mín. 4)
 const DESTAQUE_MS = Math.max(4, Number(params.get("destaque")) || 12) * 1000;
-const FIXO = params.get("fixo"); // dia | semana | mes | destaque
+const FIXO = params.get("fixo"); // dia | semana | receita | mes | parados3 | parados10 | destaque
 const DIA_SEMPRE = params.get("dia") === "sempre";
 // Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
 // ?som=1 / ?som=0 é override por dispositivo. Silêncio é o padrão, não falha.
@@ -37,6 +38,8 @@ const dataBr = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "—")
 const horaBr = (iso) => { const m = /T(\d{2}):(\d{2})/.exec(iso || ""); return m ? `${m[1]}h${m[2]}` : ""; };
 const dataHoraBr = (iso) => (iso ? `${dataBr(iso)} ${horaBr(iso)}`.trim() : "nunca");
 const el = (id) => document.getElementById(id);
+// Texto que vem do CRM (nome de conta) nunca entra cru no innerHTML
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 // ---------- Som (WebAudio sintetizado; um som por evento, nunca em loop) ----------
 // Sem overlay de desbloqueio: se o som está habilitado, tentamos armar direto
@@ -334,11 +337,12 @@ function proximaCelebracao() {
 
 // ---------- Rotação entre visões ----------
 
-const VISOES = ["dia", "destaque", "semana", "receita", "mes"];
+const VISOES = ["dia", "destaque", "semana", "receita", "mes", "parados3", "parados10"];
 let receitaAvisada = false;
 let visoesAtivas = [];
 let visaoAtual = 0;
 let destaqueAvisado = false;
+const paradosAvisados = new Set();
 
 function aplicarVisoes(d) {
   const mostrarDia = d.dia.emCurso && (d.dia.temDadoHoje || DIA_SEMPRE);
@@ -360,7 +364,15 @@ function aplicarVisoes(d) {
   telas.push("semana");
   if (temReceita) telas.push("receita");
   telas.push("mes");
-  // destaque intercalado: HOJE → cartão → SEMANA → cartão → RECEITA → cartão → MÊS → cartão
+  // Leads parados: cada faixa só entra com alguém nela (tela vazia sai da rotação)
+  for (const [visao, faixa] of [["parados3", "amarela"], ["parados10", "vermelha"]]) {
+    if (d.parados?.faixas[faixa]?.total) { telas.push(visao); paradosAvisados.delete(visao); }
+    else if (!paradosAvisados.has(visao)) {
+      paradosAvisados.add(visao);
+      console.log(`[tv] tela ${visao} fora da rotação: nenhuma oportunidade ativa na faixa ${faixa}`);
+    }
+  }
+  // destaque intercalado: HOJE → cartão → SEMANA → cartão → RECEITA → cartão → MÊS → cartão → PARADOS 3–9 → cartão → PARADOS 10+ → cartão
   const novas = temDestaque ? telas.flatMap((t) => [t, "destaque"]) : telas;
   const fixoValido = FIXO && novas.includes(FIXO) ? FIXO : null;
   visoesAtivas = fixoValido ? [fixoValido] : novas;
@@ -369,9 +381,10 @@ function aplicarVisoes(d) {
   mostrarVisao(visoesAtivas[visaoAtual]);
 }
 
-const NOMES_VISAO = { dia: "HOJE", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", destaque: "META DA SEMANA" };
+const NOMES_VISAO = { dia: "HOJE", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
 
 function mostrarVisao(nome) {
+  if (nome === "parados3" || nome === "parados10") ajustarCards(nome);
   for (const v of VISOES) el("visao-" + v).classList.toggle("tv-ativa", v === nome);
   // Pontos = só as telas (o cartão intercalado não ganha ponto próprio)
   const pontos = [...new Set(visoesAtivas.filter((v) => v !== "destaque"))];
@@ -641,6 +654,8 @@ function renderizar(d, origem) {
       (eqMes.incluiGerencial ? " · inclui Gerencial" : "")
     : `Equipe no mês: ${reais(eqMes.receitaCentavos)}` + (eqMes.incluiGerencial ? " · inclui Gerencial" : "");
 
+  renderParados(d.parados);
+
   // ---- DESTAQUE: falta para a meta da SEMANA (equipe, R$) ----
   const eq = d.semana.equipe.receita;
   if (eq && eq.metaCentavos != null) {
@@ -668,6 +683,86 @@ function renderizar(d, origem) {
   }
 }
 let destaqueAnterior = null;
+
+// ---------- Leads parados no funil (kanban por vendedor) ----------
+// O placar (contagem por vendedor, em tipografia grande) é o principal; os 5
+// cards mais antigos são ilustração. Zero é mérito: "0 ✓" em verde. "≥ N dias"
+// = sem data de entrada na fase no Omie, contado desde a última atualização
+// (piso: nunca superestima).
+const dataHoraLocal = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}h${String(d.getMinutes()).padStart(2, "0")}`;
+};
+const diasFmt = (dias, piso) => `${piso ? "≥ " : ""}${num(dias)} dia${dias === 1 ? "" : "s"}`;
+
+// Card que não cabe INTEIRO na coluna sai e entra na conta "+ N outros" (o
+// número na tela é sempre exato). Refeito ao mostrar a tela e no resize: com
+// a tela fora da rotação (display: none) não há o que medir.
+function ajustarCards(visao) {
+  for (const coluna of el(visao + "-kanban").querySelectorAll(".tv-kb-coluna")) {
+    const caixa = coluna.querySelector(".tv-kb-cards");
+    const outrosEl = coluna.querySelector(".tv-kb-outros");
+    if (!caixa || !outrosEl) continue;
+    const cards = [...caixa.children];
+    cards.forEach((c) => { c.hidden = false; });
+    const limite = caixa.getBoundingClientRect().bottom + 1;
+    let ocultos = 0;
+    for (const c of cards) {
+      if (ocultos || c.getBoundingClientRect().bottom > limite) { c.hidden = true; ocultos++; }
+    }
+    const n = Number(outrosEl.dataset.base) + ocultos;
+    outrosEl.textContent = n > 0 ? `+ ${num(n)} outro${n === 1 ? "" : "s"}` : "";
+  }
+}
+window.addEventListener("resize", () => { ajustarCards("parados3"); ajustarCards("parados10"); });
+
+function renderParados(p) {
+  if (!p) return;
+  for (const [visao, faixa] of [["parados3", "amarela"], ["parados10", "vermelha"]]) {
+    const f = p.faixas[faixa];
+    const kanban = el(visao + "-kanban");
+    kanban.style.setProperty("--colunas", f.colunas.length);
+    const html = f.colunas.map((c) => {
+      if (!c.total) {
+        return `<div class="tv-kb-coluna tv-kb-zero" data-nome="${esc(c.nome)}">
+          <div class="tv-kb-nome">${esc(c.nome)}</div>
+          <div class="tv-kb-total">0 <span>✓</span></div>
+          <div class="tv-kb-antigo">nenhum parado nesta faixa</div>
+        </div>`;
+      }
+      const outros = c.total - c.cards.length;
+      return `<div class="tv-kb-coluna" data-nome="${esc(c.nome)}">
+        <div class="tv-kb-nome">${esc(c.nome)}</div>
+        <div class="tv-kb-total">${num(c.total)} <small>parado${c.total === 1 ? "" : "s"}</small></div>
+        <div class="tv-kb-antigo">mais antigo: <b>${diasFmt(c.maisAntigo.dias, c.maisAntigo.piso)}</b></div>
+        <div class="tv-kb-cards">${c.cards.map((k) => `
+          <div class="tv-kb-card">
+            <div class="tv-kb-conta">${esc(k.conta || k.numero)}</div>
+            <div class="tv-kb-meta"><b>${diasFmt(k.dias, k.piso)}</b> · ${esc(k.fase)} · ${k.ticketCentavos ? kReais(k.ticketCentavos) : "sem ticket"}</div>
+          </div>`).join("")}
+        </div>
+        <div class="tv-kb-outros" data-base="${outros}"></div>
+      </div>`;
+    }).join("");
+    if (kanban.dataset.h !== html) { kanban.innerHTML = html; kanban.dataset.h = html; }
+
+    // Aviso de dado defasado: a exportação do Omie é um retrato de uma janela
+    // recente — o que não veio no último arquivo pode ter mudado de fase no CRM
+    const u = p.ultimaImportacao;
+    const partes = [];
+    if (u) {
+      partes.push(f.foraDoUltimoArquivo
+        ? `<span class="tv-parados-alerta">⚠ ${num(f.foraDoUltimoArquivo)} de ${num(f.total)} não vieram na última importação do Omie (${dataHoraLocal(u.concluidoEm)}) — podem ter mudado de fase no CRM</span>`
+        : `✔ todos vieram na última importação do Omie (${dataHoraLocal(u.concluidoEm)})`);
+    }
+    if (f.comPiso) partes.push(`≥ = sem data de fase no Omie, contado desde a última atualização (${num(f.comPiso)})`);
+    const aviso = partes.join(" · ");
+    const alvo = el(visao + "-aviso");
+    if (alvo.dataset.h !== aviso) { alvo.innerHTML = aviso; alvo.dataset.h = aviso; }
+    ajustarCards(visao); // por último: o aviso também ocupa altura
+  }
+}
 
 // ---------- Relógio / status ----------
 

@@ -1124,6 +1124,37 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
 .tv-gauge-canal .tv-gauge-nome { margin-top: 0; }
 
 /* Cartão de destaque: falta para a meta da semana (R$) — o número mais alto da tela */
+/* Leads parados: kanban por vendedor. Placar grande no topo da coluna; cards são ilustração */
+.tv-parados { --faixa: var(--amarelo); --faixa-fundo: rgba(255, 200, 87, 0.08); }
+.tv-parados-vermelha { --faixa: var(--vermelho); --faixa-fundo: rgba(255, 92, 114, 0.09); }
+.tv-parados h2 { color: var(--faixa); }
+.tv-kanban { display: grid; grid-template-columns: repeat(var(--colunas, 5), minmax(0, 1fr)); gap: 1.1vw; flex: 1; min-height: 0; }
+.tv-kb-coluna {
+  display: flex; flex-direction: column; gap: 0.5vw; min-height: 0; overflow: hidden;
+  background: var(--faixa-fundo); border-top: 0.45vw solid var(--faixa); border-radius: 0.8vw; padding: 1vw 0.9vw;
+}
+/* cabeçalho da coluna nunca encolhe; quem cede espaço (e é cortado) são os cards */
+.tv-kb-nome, .tv-kb-total, .tv-kb-antigo, .tv-kb-outros { flex-shrink: 0; }
+.tv-kb-nome { font-size: 1.9vw; font-weight: 800; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-kb-total { font-size: 4.4vw; font-weight: 900; line-height: 1; color: var(--faixa); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tv-kb-total small { font-size: 1.3vw; font-weight: 700; color: var(--texto-suave); letter-spacing: 0; }
+.tv-parados-amarela .tv-kb-total { font-size: 3.8vw; }
+.tv-kb-antigo { font-size: 1.35vw; color: var(--texto-suave); margin-bottom: 0.3vw; }
+.tv-kb-antigo b { color: var(--texto); }
+.tv-kb-cards { display: flex; flex-direction: column; gap: 0.45vw; flex: 1; min-height: 0; overflow: hidden; }
+.tv-kb-card { flex-shrink: 0; }
+.tv-kb-card { background: rgba(255, 255, 255, 0.05); border-left: 0.3vw solid var(--faixa); border-radius: 0.4vw; padding: 0.45vw 0.6vw; }
+.tv-kb-conta { font-size: 1.1vw; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-kb-meta { font-size: 0.95vw; color: var(--texto-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-kb-meta b { color: var(--faixa); }
+.tv-kb-outros { font-size: 1.2vw; line-height: 1.4; min-height: 1.4em; font-weight: 700; color: var(--texto-suave); padding-top: 0.3vw; box-sizing: content-box; } /* altura fixa: medir os cards antes do texto não pode mudar o layout */
+/* zero parado é mérito: neutro-positivo, nunca vermelho */
+.tv-kb-zero { background: rgba(61, 220, 132, 0.07); border-top-color: var(--verde); justify-content: flex-start; }
+.tv-kb-zero .tv-kb-total { color: var(--verde); }
+.tv-kb-zero .tv-kb-total span { font-size: 0.6em; }
+.tv-parados-aviso { font-size: 1.1vw; color: var(--texto-suave); margin-top: 0.7vw; text-align: center; }
+.tv-parados-alerta { color: var(--amarelo); font-weight: 700; }
+
 .tv-destaque { align-items: center; justify-content: center; }
 .tv-destaque-caixa { text-align: center; width: 70vw; }
 .tv-destaque-titulo { font-size: 2.2vw; font-weight: 800; letter-spacing: 4px; color: var(--texto-suave); }
@@ -1400,7 +1431,23 @@ main.territorio-pagina { width: min(1380px, 100%); }
 .trab-dicas { font-size: 0.76rem; margin: 0 0 0.5rem; }
 .trab-dicas kbd { border: 1px solid var(--borda-painel); border-radius: 4px; padding: 0 0.3rem; font-size: 0.7rem; }
 .trab-corpo { display: grid; grid-template-columns: 1fr auto; gap: 0.8rem; align-items: start; }
-.trab-scroll { height: calc(100vh - 290px); min-height: 360px; overflow: auto; border: 1px solid var(--borda-painel); border-radius: 12px; background: rgba(0, 0, 0, 0.15); outline: none; }
+.trab-scroll { height: calc(100vh - 290px); min-height: 360px; overflow: auto; border: 1px solid var(--borda-painel); border-radius: 12px; background: rgba(0, 0, 0, 0.15); outline: none;
+  --larg-marca: 80px; --larg-status: 150px; --larg-municipio: 170px; --fundo-fixa: #0b0e17; }
+/* barra horizontal grossa e visível (a equipe usa notebook: nem todo mundo tem trackpad) */
+.trab-scroll::-webkit-scrollbar { width: 12px; height: 16px; }
+.trab-scroll::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.04); }
+.trab-scroll::-webkit-scrollbar-thumb { background: #3a4260; border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }
+.trab-scroll::-webkit-scrollbar-thumb:hover { background: #56608a; background-clip: padding-box; }
+.trab-scroll::-webkit-scrollbar-corner { background: transparent; }
+/* colunas fixas ao rolar para o lado: marcação, status e município */
+.trab-tabela thead th:nth-child(-n + 3) { z-index: 3; }
+.trab-tabela td.fixa { position: sticky; z-index: 1; background: linear-gradient(var(--tinta), var(--tinta)), var(--fundo-fixa); }
+.trab-tabela thead th:nth-child(1), .trab-tabela td.c-marca { left: 0; }
+.trab-tabela thead th:nth-child(2), .trab-tabela td.c-status { left: var(--larg-marca); }
+.trab-tabela thead th:nth-child(3), .trab-tabela td.c-municipioNome { left: calc(var(--larg-marca) + var(--larg-status)); }
+.trab-tabela thead th:nth-child(3), .trab-tabela tbody td.c-municipioNome { box-shadow: 6px 0 8px -6px rgba(0, 0, 0, 0.8); }
+/* cursor de coluna (setas ← →) na linha selecionada */
+.trab-tabela tbody td.cursor, .trab-tabela tbody td.c-municipioNome.cursor { box-shadow: inset 0 0 0 2px rgba(56, 214, 224, 0.75); }
 .trab-scroll:focus-visible { border-color: var(--acento-2); }
 .trab-tabela { table-layout: fixed; min-width: 1500px; font-size: 0.8rem; }
 .trab-tabela thead th { position: sticky; top: 0; z-index: 2; background: #141827; cursor: pointer; user-select: none; text-align: left; }
@@ -1408,24 +1455,35 @@ main.territorio-pagina { width: min(1380px, 100%); }
 .trab-tabela thead th.ordem-desc::after { content: " ▼"; color: var(--acento-2); }
 .trab-tabela td { text-align: left; height: 34px; padding: 0 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
 .trab-tabela tbody tr { cursor: default; }
-.trab-tabela tbody tr.trab-linha:hover { background: rgba(255, 255, 255, 0.035); }
-.trab-tabela tbody tr.trab-selecionada { background: rgba(108, 123, 255, 0.14); }
-.trab-tabela tbody tr.trab-oculta td { opacity: 0.45; }
-/* marcação pessoal (verde/vermelho): pinta a linha inteira, por cima de hover e seleção */
-.trab-tabela tbody tr.trab-linha.trab-marca-verde { background: rgba(61, 220, 132, 0.17); }
-.trab-tabela tbody tr.trab-linha.trab-marca-verde:hover { background: rgba(61, 220, 132, 0.23); }
-.trab-tabela tbody tr.trab-linha.trab-marca-verde.trab-selecionada { background: rgba(61, 220, 132, 0.3); }
-.trab-tabela tbody tr.trab-linha.trab-marca-vermelho { background: rgba(255, 92, 114, 0.17); }
-.trab-tabela tbody tr.trab-linha.trab-marca-vermelho:hover { background: rgba(255, 92, 114, 0.23); }
-.trab-tabela tbody tr.trab-linha.trab-marca-vermelho.trab-selecionada { background: rgba(255, 92, 114, 0.3); }
+/* a tinta da linha fica numa variável: as células fixas (opacas) repetem a mesma cor por cima do fundo sólido */
+.trab-tabela tbody tr.trab-linha { --tinta: transparent; background: var(--tinta); }
+.trab-tabela tbody tr.trab-linha:hover { --tinta: rgba(255, 255, 255, 0.035); }
+.trab-tabela tbody tr.trab-linha.trab-selecionada { --tinta: rgba(108, 123, 255, 0.14); }
+.trab-tabela tbody tr.trab-oculta td:not(.fixa) { opacity: 0.45; }
+/* célula fixa não pode ter opacidade (o conteúdo rolado apareceria através dela) */
+.trab-tabela tbody tr.trab-oculta td.fixa { color: var(--texto-suave); }
+.trab-tabela tbody tr.trab-oculta td.fixa > * { opacity: 0.45; }
+/* marcação pessoal (verde/vermelho/amarelo): pinta a linha inteira, por cima de hover e seleção */
+.trab-tabela tbody tr.trab-linha.trab-marca-verde { --tinta: rgba(61, 220, 132, 0.17); }
+.trab-tabela tbody tr.trab-linha.trab-marca-verde:hover { --tinta: rgba(61, 220, 132, 0.23); }
+.trab-tabela tbody tr.trab-linha.trab-marca-verde.trab-selecionada { --tinta: rgba(61, 220, 132, 0.3); }
+.trab-tabela tbody tr.trab-linha.trab-marca-vermelho { --tinta: rgba(255, 92, 114, 0.17); }
+.trab-tabela tbody tr.trab-linha.trab-marca-vermelho:hover { --tinta: rgba(255, 92, 114, 0.23); }
+.trab-tabela tbody tr.trab-linha.trab-marca-vermelho.trab-selecionada { --tinta: rgba(255, 92, 114, 0.3); }
 .trab-tabela tbody tr.trab-marca-verde td.c-marca { box-shadow: inset 4px 0 0 var(--verde); }
 .trab-tabela tbody tr.trab-marca-vermelho td.c-marca { box-shadow: inset 4px 0 0 var(--vermelho); }
+.trab-tabela tbody tr.trab-linha.trab-marca-amarelo { --tinta: rgba(255, 200, 87, 0.17); }
+.trab-tabela tbody tr.trab-linha.trab-marca-amarelo:hover { --tinta: rgba(255, 200, 87, 0.23); }
+.trab-tabela tbody tr.trab-linha.trab-marca-amarelo.trab-selecionada { --tinta: rgba(255, 200, 87, 0.3); }
+.trab-tabela tbody tr.trab-marca-amarelo td.c-marca { box-shadow: inset 4px 0 0 var(--amarelo); }
 .trab-tabela thead th.th-marca { text-align: center; }
 .trab-tabela td.c-marca { text-align: center; padding: 0 0.2rem; }
 .marca-btn { width: 17px; height: 17px; margin: 0 2px; border-radius: 50%; border: 2px solid; background: transparent; cursor: pointer; vertical-align: middle; opacity: 0.55; padding: 0; }
 .marca-btn:hover { opacity: 1; }
 .marca-btn.marca-verde { border-color: var(--verde); }
 .marca-btn.marca-vermelho { border-color: var(--vermelho); }
+.marca-btn.marca-amarelo { border-color: var(--amarelo); }
+.marca-btn.marca-amarelo.ativo { background: var(--amarelo); opacity: 1; }
 .marca-btn.marca-verde.ativo { background: var(--verde); opacity: 1; }
 .marca-btn.marca-vermelho.ativo { background: var(--vermelho); opacity: 1; }
 .marca-btn:disabled { cursor: not-allowed; }
@@ -1439,7 +1497,7 @@ main.territorio-pagina { width: min(1380px, 100%); }
 .trab-vazio { padding: 2rem !important; text-align: center !important; }
 col.c-status { width: 150px; } col.c-municipio { width: 170px; } col.c-regional { width: 90px; } col.c-setor { width: 150px; } col.c-responsavel { width: 170px; }
 col.c-cargo { width: 130px; } col.c-telefone { width: 135px; } col.c-whats { width: 120px; } col.c-email { width: 200px; } col.c-data { width: 105px; }
-col.c-marca { width: 58px; } col.c-consultor { width: 100px; } col.c-curso { width: 160px; } col.c-obs { width: 260px; } col.c-acoes { width: 64px; } col.c-cdr { width: 110px; }
+col.c-marca { width: 80px; } col.c-consultor { width: 100px; } col.c-curso { width: 160px; } col.c-obs { width: 260px; } col.c-acoes { width: 64px; } col.c-cdr { width: 110px; }
 .trab-cdr { white-space: nowrap; cursor: help; }
 .trab-cdr small { color: var(--texto-suave); margin-left: 0.2rem; }
 .trab-cdr-contato { color: var(--acento-2); }

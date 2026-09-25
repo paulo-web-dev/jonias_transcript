@@ -74,6 +74,21 @@ db.pragma("foreign_keys = ON");
 // avança). Bancos novos e antigos passam pelo mesmo caminho — a migração 1 é o
 // baseline idempotente (CREATE IF NOT EXISTS) que ambos já satisfazem.
 
+// Grafias do Jhonnata no Vendedor do Omie e no wallet da Unyflex (migração 26).
+// Nome completo: Jhonnata Henrick de Lima Ribeiro (cadastro 55622 no painel da
+// Unyflex). O casamento é exato (nome normalizado, sem acento/caixa), então as
+// combinações prováveis entram explícitas — nunca palpite por primeiro nome.
+const NOMES_JHONNATA = [
+  "Jhonnata",
+  "Jhonnata Henrick de Lima Ribeiro",
+  "Jhonnata Henrick Lima Ribeiro",
+  "Jhonnata Henrick",
+  "Jhonnata Ribeiro",
+  "Jhonnata Lima Ribeiro",
+  "Jhonnata Henrick Ribeiro",
+  "Jhonnata de Lima Ribeiro",
+];
+
 const MIGRACOES = [
   // 1 — baseline: aulas + anotações
   () => {
@@ -956,6 +971,107 @@ const MIGRACOES = [
       ) WITHOUT ROWID;
       CREATE INDEX idx_marcacoes_contato ON marcacoes_prospeccao(contato_id);
     `);
+  },
+
+  // 26 — Vendedor novo Jhonnata e ramal 2004 COM vigência (decisão do
+  // usuário, 2026-09-25). Diferente do 2001 (migração 17, consolidado no
+  // Eduardo sem vigência): o 2004 tem 1.411 ligações do Douglas desde
+  // 01/12/2025 em produção, então o histórico fica com quem ligou. Até
+  // 2026-09-21 o ramal é do Douglas; a partir de 2026-09-22 (entrada do
+  // Jhonnata), do Jhonnata.
+  // - `ramal_vigencias` guarda o dono do ramal por período e é consultada pelo
+  //   importador do CDR ANTES de `pessoas.ramal`. Sem isso, reimportar um CSV
+  //   antigo devolveria as ligações do Douglas ao dono atual (o upsert refaz
+  //   pessoa_id). Ramal sem linha aqui segue a regra de sempre (pessoas.ramal).
+  // - Douglas fica sem ramal em `pessoas` e continua em OCULTOS_TEMPORARIOS_TV.
+  // - Só muda de dono o que é do Jhonnata pela vigência (data_hora ≥
+  //   2026-09-22); o número sai no log. Nada é apagado.
+  // - Gerencial ganha a grafia "Paulo Sergio Orfanelli" (2 oportunidades do
+  //   Omie sem match em 2026-09-25).
+  // - Backfills só onde pessoa_id IS NULL (mesmo padrão da migração 17).
+  () => {
+    db.exec(`
+      CREATE TABLE ramal_vigencias (
+        id            INTEGER PRIMARY KEY,
+        ramal         TEXT NOT NULL,
+        pessoa_id     INTEGER NOT NULL REFERENCES pessoas(id),
+        vigente_desde TEXT,          -- NULL = desde sempre
+        vigente_ate   TEXT,          -- NULL = em aberto (datas locais AAAA-MM-DD, inclusivas)
+        UNIQUE (ramal, vigente_desde)
+      );
+    `);
+    const douglas = db.prepare("SELECT id FROM pessoas WHERE nome = 'Douglas' AND tipo = 'consultor'").get()?.id;
+    if (!douglas) throw new Error("migração 26: consultor Douglas não encontrado — abortada");
+    db.prepare("UPDATE pessoas SET ramal = NULL WHERE id = ?").run(douglas);
+    const jhonnata = db
+      .prepare(
+        `INSERT INTO pessoas (nome, ramal, crm_user_id, wallet_nome, ativo, entra_feedback,
+                              tipo, entra_painel, entra_tv, nomes_alternativos)
+         VALUES ('Jhonnata', '2004', 55622, 'Jhonnata', 1, 1, 'consultor', 1, 1, json(?))`
+      )
+      .run(JSON.stringify(NOMES_JHONNATA)).lastInsertRowid;
+    const vigencia = db.prepare("INSERT INTO ramal_vigencias (ramal, pessoa_id, vigente_desde, vigente_ate) VALUES (?, ?, ?, ?)");
+    vigencia.run("2004", douglas, null, "2026-09-21");
+    vigencia.run("2004", jhonnata, "2026-09-22", null);
+
+    const doJhonnata = db
+      .prepare("UPDATE ligacoes SET pessoa_id = ? WHERE ramal = '2004' AND data_hora >= '2026-09-22' AND (pessoa_id IS NULL OR pessoa_id != ?)")
+      .run(jhonnata, jhonnata).changes;
+    const doDouglas = db
+      .prepare("SELECT COUNT(*) n FROM ligacoes WHERE ramal = '2004' AND pessoa_id = ?")
+      .get(douglas).n;
+    console.log(`migração 26: ramal 2004 com vigência — ${doJhonnata} ligação(ões) desde 22/09/2026 passaram ao Jhonnata; ${doDouglas} seguem do Douglas.`);
+
+    const nomes = NOMES_JHONNATA.map((n) => n.toLowerCase());
+    const marcadores = nomes.map(() => "?").join(", ");
+    const mat = db
+      .prepare(`UPDATE matriculas SET pessoa_id = ? WHERE pessoa_id IS NULL AND lower(trim(wallet)) IN (${marcadores})`)
+      .run(jhonnata, ...nomes).changes;
+    const opo = db
+      .prepare(`UPDATE oportunidades SET pessoa_id = ? WHERE pessoa_id IS NULL AND lower(trim(vendedor)) IN (${marcadores})`)
+      .run(jhonnata, ...nomes).changes;
+    console.log(`migração 26: backfill Jhonnata — ${mat} matrícula(s), ${opo} oportunidade(s).`);
+
+    const gerencial = db.prepare("SELECT id, nomes_alternativos FROM pessoas WHERE nome = 'Gerencial'").get();
+    if (gerencial) {
+      const alts = JSON.parse(gerencial.nomes_alternativos || "[]");
+      if (!alts.includes("Paulo Sergio Orfanelli")) alts.push("Paulo Sergio Orfanelli");
+      db.prepare("UPDATE pessoas SET nomes_alternativos = ? WHERE id = ?").run(JSON.stringify(alts), gerencial.id);
+      const g = db
+        .prepare("UPDATE oportunidades SET pessoa_id = ? WHERE pessoa_id IS NULL AND lower(trim(vendedor)) = 'paulo sergio orfanelli'")
+        .run(gerencial.id).changes;
+      console.log(`migração 26: Gerencial ganhou "Paulo Sergio Orfanelli" — ${g} oportunidade(s) atribuída(s).`);
+    }
+  },
+
+  // 27 — Marcação pessoal AMARELA (decisão do usuário, 2026-09-25). O SQLite
+  // não altera CHECK: a tabela é recriada e TODAS as linhas copiadas. Antes do
+  // commit, total e contagem por cor da tabela nova têm de ser iguais aos da
+  // antiga — senão a migração aborta e nada muda. Nenhuma outra tabela
+  // referencia marcacoes_prospeccao (dispensa desligarFk).
+  () => {
+    const contar = (tabela) =>
+      JSON.stringify(db.prepare(`SELECT cor, COUNT(*) n FROM ${tabela} GROUP BY cor ORDER BY cor`).all());
+    const antes = contar("marcacoes_prospeccao");
+    db.exec(`
+      CREATE TABLE marcacoes_prospeccao_nova (
+        usuario_id  INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+        contato_id  INTEGER NOT NULL REFERENCES contatos_ativo(id) ON DELETE CASCADE,
+        cor         TEXT NOT NULL CHECK (cor IN ('verde', 'vermelho', 'amarelo')),
+        marcado_em  TEXT NOT NULL,
+        PRIMARY KEY (usuario_id, contato_id)
+      ) WITHOUT ROWID;
+      INSERT INTO marcacoes_prospeccao_nova (usuario_id, contato_id, cor, marcado_em)
+        SELECT usuario_id, contato_id, cor, marcado_em FROM marcacoes_prospeccao;
+    `);
+    const depois = contar("marcacoes_prospeccao_nova");
+    if (antes !== depois) throw new Error(`migração 27: contagem das marcações divergiu (${antes} → ${depois}) — abortada`);
+    db.exec(`
+      DROP TABLE marcacoes_prospeccao;
+      ALTER TABLE marcacoes_prospeccao_nova RENAME TO marcacoes_prospeccao;
+      CREATE INDEX idx_marcacoes_contato ON marcacoes_prospeccao(contato_id);
+    `);
+    console.log(`migração 27: marcação amarela liberada — marcações preservadas: ${antes}`);
   },
 ];
 

@@ -68,8 +68,9 @@ const trab = {
   ordem: { campo: "municipioNome", dir: 1 }, selecionado: null, editando: null,
   filtros: { busca: "", municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" },
   primeiraVisivel: -1, ultimaVisivel: -1,
-  // marcação pessoal (verde/vermelho): as MINHAS vêm no payload; admin pode ver as de outro usuário (só leitura)
+  // marcação pessoal (verde/vermelho/amarelo): as MINHAS vêm no payload; admin pode ver as de outro usuário (só leitura)
   marcas: new Map(), verDe: null, marcasOutro: new Map(),
+  coluna: -1, // cursor de coluna (setas ← →) na linha selecionada; -1 = nenhum
 };
 const el = {};
 for (const id of ["f-uf", "f-busca", "f-municipio", "f-regional", "f-setor", "f-consultor", "f-marca", "f-marcas-de", "f-status", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate",
@@ -209,10 +210,12 @@ function aplicarFiltros() {
 }
 
 function atualizarContador() {
-  let verdes = 0, vermelhas = 0;
-  for (const cor of (trab.verDe ? trab.marcasOutro : trab.marcas).values()) { if (cor === "verde") verdes++; else vermelhas++; }
+  const n = { verde: 0, vermelho: 0, amarelo: 0 };
+  for (const cor of (trab.verDe ? trab.marcasOutro : trab.marcas).values()) if (cor in n) n[cor]++;
   el.trabContador.textContent = `${inteiro(trab.filtradas.length)} de ${inteiro(trab.linhas.length)}` +
-    (verdes || vermelhas ? ` · ${trab.verDe ? `de ${trab.verDe.nome}: ` : ""}🟢 ${inteiro(verdes)} 🔴 ${inteiro(vermelhas)}` : "");
+    (n.verde || n.vermelho || n.amarelo
+      ? ` · ${trab.verDe ? `de ${trab.verDe.nome}: ` : ""}🟢 ${inteiro(n.verde)} 🔴 ${inteiro(n.vermelho)} 🟡 ${inteiro(n.amarelo)}`
+      : "");
 }
 
 function ordenar() {
@@ -260,7 +263,7 @@ function lerHash() {
   const q = new URLSearchParams(query);
   const f = trab.filtros;
   if (q.get("uf")) trab.uf = q.get("uf").toUpperCase();
-  f.busca = q.get("q") || ""; f.municipio = q.get("mun") || ""; f.regional = q.get("reg") || ""; f.setor = q.get("setor") || ""; f.consultor = q.get("cons") || ""; f.marca = ["verde", "vermelho", "sem"].includes(q.get("marca")) ? q.get("marca") : "";
+  f.busca = q.get("q") || ""; f.municipio = q.get("mun") || ""; f.regional = q.get("reg") || ""; f.setor = q.get("setor") || ""; f.consultor = q.get("cons") || ""; f.marca = ["verde", "vermelho", "amarelo", "sem"].includes(q.get("marca")) ? q.get("marca") : "";
   f.status = new Set((q.get("st") || "").split(",").filter((s) => s !== "" || (q.get("st") || "").includes(",")));
   if (q.get("st") === "") f.status = new Set([""]);
   const flags = new Set((q.get("flags") || "").split(",")); f.ocultas = flags.has("ocultas"); f.semTelefone = flags.has("semTelefone"); f.inexistente = flags.has("inexistente"); f.nunca = flags.has("nunca"); f.nuncaCdr = flags.has("nuncaCdr");
@@ -271,12 +274,15 @@ function lerHash() {
 
 // ---------- tabela virtual ----------
 
+// Marcação pessoal: a ordem é a das teclas (1 verde, 2 vermelho, 3 amarelo)
+const CORES_MARCA = ["verde", "vermelho", "amarelo"];
+
 const COLUNAS = [
-  { campo: "marca", render: (o) => ["verde", "vermelho"].map((cor) =>
+  { campo: "marca", fixa: true, render: (o) => CORES_MARCA.map((cor) =>
     `<button type="button" class="marca-btn marca-${cor}${o.marca === cor ? " ativo" : ""}" data-acao="marca" data-cor="${cor}"${trab.verDe ? " disabled" : ""}
-      title="${trab.verDe ? `marcação de ${escapeHtml(trab.verDe.nome)} (só leitura)` : `${cor} (tecla ${cor === "verde" ? 1 : 2}) — clique de novo limpa`}"></button>`).join("") },
-  { campo: "status", render: (o) => chipStatus(o), editavel: "status" },
-  { campo: "municipioNome", render: (o) => escapeHtml(o.municipioNome) + (o.codigo_ibge ? "" : o.municipio_texto ? ' <span class="trab-sem-match" title="não casou com município oficial">?</span>' : ""), editavel: "municipio" },
+      title="${trab.verDe ? `marcação de ${escapeHtml(trab.verDe.nome)} (só leitura)` : `${cor} (tecla ${CORES_MARCA.indexOf(cor) + 1}) — clique de novo limpa`}"></button>`).join("") },
+  { campo: "status", fixa: true, render: (o) => chipStatus(o), editavel: "status" },
+  { campo: "municipioNome", fixa: true, render: (o) => escapeHtml(o.municipioNome) + (o.codigo_ibge ? "" : o.municipio_texto ? ' <span class="trab-sem-match" title="não casou com município oficial">?</span>' : ""), editavel: "municipio" },
   { campo: "regionalSigla", render: (o) => escapeHtml(o.regionalSigla) },
   { campo: "setor", render: (o) => escapeHtml(o.setor), editavel: "setor" },
   { campo: "responsavel", render: (o) => escapeHtml(o.responsavel || ""), editavel: "texto" },
@@ -303,7 +309,8 @@ function chipStatus(o) {
 
 function htmlLinha(o, idx) {
   const classes = ["trab-linha", o.marca ? `trab-marca-${o.marca}` : "", o.linha_oculta ? "trab-oculta" : "", o.id === trab.selecionado ? "trab-selecionada" : "", o.editado_em ? "trab-editada" : ""].filter(Boolean).join(" ");
-  return `<tr class="${classes}" data-id="${o.id}" data-idx="${idx}">${COLUNAS.map((c) => `<td class="c-${c.campo}${c.editavel ? " editavel" : ""}" data-campo="${c.campo}">${c.render(o)}</td>`).join("")}</tr>`;
+  const cursor = o.id === trab.selecionado ? trab.coluna : -1;
+  return `<tr class="${classes}" data-id="${o.id}" data-idx="${idx}">${COLUNAS.map((c, i) => `<td class="c-${c.campo}${c.editavel ? " editavel" : ""}${c.fixa ? " fixa" : ""}${i === cursor ? " cursor" : ""}" data-campo="${c.campo}">${c.render(o)}</td>`).join("")}</tr>`;
 }
 
 function renderizarJanela(forcar = false) {
@@ -328,6 +335,13 @@ el.trabScroll.addEventListener("scroll", () => {
   rafScroll = requestAnimationFrame(() => { rafScroll = 0; renderizarJanela(); });
 });
 window.addEventListener("resize", () => renderizarJanela(true));
+// Shift + roda do mouse rola para o lado. Onde o navegador já converte sozinho
+// (evento chega com deltaX), não faz nada; senão converte o deltaY.
+el.trabScroll.addEventListener("wheel", (ev) => {
+  if (!ev.shiftKey || ev.deltaX || !ev.deltaY) return;
+  ev.preventDefault();
+  el.trabScroll.scrollLeft += ev.deltaMode === 1 ? ev.deltaY * ALTURA_LINHA : ev.deltaY;
+}, { passive: false });
 
 function rerenderLinha(id) {
   const o = trab.porId.get(id);
@@ -442,6 +456,31 @@ function selecionar(id, rolar = false) {
   if (!el.gaveta.classList.contains("oculto") && id) abrirGaveta(id);
 }
 
+// Traz a célula para a área visível rolando SÓ a tabela (scrollIntoView rolaria a
+// página inteira junto). A área útil desconta o cabeçalho fixo, as colunas fixas
+// e as barras de rolagem; célula fixa já está sempre à vista na horizontal.
+function mostrarCelula(td) {
+  if (!td) return;
+  const s = el.trabScroll, r = td.getBoundingClientRect(), a = s.getBoundingClientRect();
+  const cabecalho = document.querySelector("#trab-tabela thead").offsetHeight;
+  const fixas = [...td.parentElement.querySelectorAll("td.fixa")].reduce((soma, c) => soma + c.offsetWidth, 0);
+  const topo = a.top + s.clientTop + cabecalho, base = a.top + s.clientTop + s.clientHeight;
+  if (r.top < topo) s.scrollTop -= topo - r.top;
+  else if (r.bottom > base) s.scrollTop += r.bottom - base;
+  if (td.classList.contains("fixa")) return;
+  const esquerda = a.left + s.clientLeft + fixas, direita = a.left + s.clientLeft + s.clientWidth;
+  if (r.left < esquerda) s.scrollLeft -= esquerda - r.left;
+  else if (r.right > direita) s.scrollLeft += Math.min(r.right - direita, r.left - esquerda);
+}
+
+function moverColuna(delta) {
+  if (!trab.selecionado) return;
+  const base = trab.coluna < 0 ? (delta > 0 ? -1 : COLUNAS.length) : trab.coluna;
+  trab.coluna = Math.min(COLUNAS.length - 1, Math.max(0, base + delta));
+  rerenderLinha(trab.selecionado);
+  mostrarCelula(el.trabCorpoTabela.querySelector(`tr[data-id="${trab.selecionado}"] td.cursor`));
+}
+
 function moverSelecao(delta) {
   if (!trab.filtradas.length) return;
   const idx = trab.filtradas.findIndex((o) => o.id === trab.selecionado);
@@ -457,6 +496,7 @@ function iniciarEdicao(td) {
   const o = trab.porId.get(Number(tr.dataset.id));
   const col = COLUNAS.find((c) => c.campo === td.dataset.campo);
   if (!o || !col || !col.editavel) return;
+  trab.coluna = COLUNAS.indexOf(col); // o cursor acompanha a célula editada
   selecionar(o.id); // re-renderiza a linha: a célula clicada saiu do DOM — buscar de novo
   td = el.trabCorpoTabela.querySelector(`tr[data-id="${o.id}"] td[data-campo="${col.campo}"]`);
   if (!td) return;
@@ -480,7 +520,8 @@ function iniciarEdicao(td) {
   td.classList.add("editando");
   td.innerHTML = "";
   td.appendChild(controle);
-  controle.focus();
+  mostrarCelula(td);
+  controle.focus({ preventScroll: true });
   if (controle.select) try { controle.select(); } catch (_) { /* date */ }
   trab.editando = { td, o, campo, coluna: col.campo, controle, original: valor };
 }
@@ -737,7 +778,10 @@ el.trabCorpoTabela.addEventListener("click", (ev) => {
   const td = ev.target.closest("td");
   if (trab.editando && trab.editando.td === td) return;
   if (td && td.classList.contains("editavel")) iniciarEdicao(td);
-  else selecionar(id);
+  else {
+    if (td) trab.coluna = COLUNAS.findIndex((c) => c.campo === td.dataset.campo);
+    selecionar(id);
+  }
 });
 
 el.trabCorpoTabela.addEventListener("keydown", (ev) => {
@@ -765,15 +809,22 @@ el.trabScroll.addEventListener("keydown", (ev) => {
   if (trab.editando || ev.target.matches("input, select, textarea")) return;
   if (ev.key === "ArrowDown") { ev.preventDefault(); moverSelecao(1); }
   else if (ev.key === "ArrowUp") { ev.preventDefault(); moverSelecao(-1); }
-  else if (["1", "2", "0"].includes(ev.key) && !ev.ctrlKey && !ev.altKey && !ev.metaKey && trab.selecionado) {
+  else if (ev.key === "ArrowRight") { ev.preventDefault(); moverColuna(1); }
+  else if (ev.key === "ArrowLeft") { ev.preventDefault(); moverColuna(-1); }
+  else if (["1", "2", "3", "0"].includes(ev.key) && !ev.ctrlKey && !ev.altKey && !ev.metaKey && trab.selecionado) {
     ev.preventDefault();
     const atual = trab.marcas.get(trab.selecionado);
     if (ev.key === "0") { if (atual) marcar(trab.selecionado, atual); }
-    else marcar(trab.selecionado, ev.key === "1" ? "verde" : "vermelho");
+    else marcar(trab.selecionado, CORES_MARCA[Number(ev.key) - 1]);
   }
   else if (ev.key.toLowerCase() === "r" && trab.selecionado) { ev.preventDefault(); abrirPopover(trab.selecionado); }
   else if (ev.key.toLowerCase() === "d" && trab.selecionado) { ev.preventDefault(); abrirGaveta(trab.selecionado); }
-  else if (ev.key === "Enter" && trab.selecionado) { const td = el.trabCorpoTabela.querySelector(`tr[data-id="${trab.selecionado}"] td[data-campo="responsavel"]`); if (td) iniciarEdicao(td); }
+  else if (ev.key === "Enter" && trab.selecionado) {
+    // Enter edita a célula do cursor; sem cursor (ou célula só de leitura), o Responsável
+    const campo = COLUNAS[trab.coluna]?.editavel ? COLUNAS[trab.coluna].campo : "responsavel";
+    const td = el.trabCorpoTabela.querySelector(`tr[data-id="${trab.selecionado}"] td[data-campo="${campo}"]`);
+    if (td) { ev.preventDefault(); iniciarEdicao(td); }
+  }
 });
 
 document.querySelector("#trab-tabela thead").addEventListener("click", (ev) => {

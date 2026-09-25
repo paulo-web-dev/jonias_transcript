@@ -104,7 +104,7 @@
         <select id="f-setor" class="campo-select"><option value="">setor: todos</option></select>
         <select id="f-consultor" class="campo-select"><option value="">consultor: todos</option></select>
         <select id="f-marca" class="campo-select" title="sua marcação pessoal (só você vê)">
-          <option value="">marcação: todas</option><option value="verde">🟢 só verdes</option><option value="vermelho">🔴 só vermelhas</option><option value="sem">sem marcação</option>
+          <option value="">marcação: todas</option><option value="verde">🟢 só verdes</option><option value="vermelho">🔴 só vermelhas</option><option value="amarelo">🟡 só amarelas</option><option value="sem">sem marcação</option>
         </select>
         <select id="f-marcas-de" class="campo-select oculto" title="administrador: ver as marcações de outro usuário (só leitura)"></select>
         <div class="trab-status-filtro" id="f-status" title="clique para filtrar por status (vários)"></div>
@@ -122,9 +122,10 @@
           <button type="button" class="btn-mini" id="btn-exportar-tudo">Exportar UF</button>
         </span>
       </div>
-      <p class="texto-suave trab-dicas">Clique numa célula para editar (Enter/Tab salva, Esc cancela). Clique no status para trocar. Os círculos 🟢 🔴 no início da linha são a sua marcação pessoal
-        (só você vê; <kbd>1</kbd> verde, <kbd>2</kbd> vermelho, a mesma tecla ou <kbd>0</kbd> limpa).
-        📞 registra contato (ou tecla <kbd>R</kbd> na linha selecionada); ▸ abre detalhes e histórico (<kbd>D</kbd>). <kbd>↑</kbd><kbd>↓</kbd> navegam.</p>
+      <p class="texto-suave trab-dicas">Clique numa célula para editar (Enter/Tab salva, Esc cancela). Clique no status para trocar. Os círculos 🟢 🔴 🟡 no início da linha são a sua marcação pessoal
+        (só você vê; <kbd>1</kbd> verde, <kbd>2</kbd> vermelho, <kbd>3</kbd> amarelo, a mesma tecla ou <kbd>0</kbd> limpa).
+        📞 registra contato (ou tecla <kbd>R</kbd> na linha selecionada); ▸ abre detalhes e histórico (<kbd>D</kbd>). <kbd>↑</kbd><kbd>↓</kbd> navegam nas linhas, <kbd>←</kbd><kbd>→</kbd> nas colunas (<kbd>Enter</kbd> edita a célula);
+        <kbd>Shift</kbd>+roda do mouse rola para o lado.</p>
       <div class="trab-corpo">
         <div class="trab-scroll" id="trab-scroll" tabindex="0">
           <table class="tabela-metricas trab-tabela" id="trab-tabela">

@@ -251,6 +251,23 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
     db.prepare("SELECT id, ramal FROM pessoas WHERE ramal IS NOT NULL").all()
       .map((p) => [p.ramal, p.id])
   );
+  // Ramal que trocou de dono com vigência (migração 26: 2004 Douglas → Jhonnata
+  // em 2026-09-22): o dono vem da data da ligação, senão reimportar um CSV
+  // antigo daria as ligações do dono anterior ao atual. Ramal sem vigência
+  // (ou ligação sem data) segue pessoas.ramal.
+  const vigenciasPorRamal = new Map();
+  for (const v of db.prepare("SELECT ramal, pessoa_id, vigente_desde, vigente_ate FROM ramal_vigencias").all()) {
+    (vigenciasPorRamal.get(v.ramal) ?? vigenciasPorRamal.set(v.ramal, []).get(v.ramal)).push(v);
+  }
+  function pessoaDoRamal(ramal, dataHora) {
+    const vigencias = vigenciasPorRamal.get(ramal);
+    if (vigencias && dataHora) {
+      const dia = dataHora.slice(0, 10);
+      const v = vigencias.find((x) => (!x.vigente_desde || x.vigente_desde <= dia) && (!x.vigente_ate || dia <= x.vigente_ate));
+      if (v) return v.pessoa_id;
+    }
+    return pessoaPorRamal.get(ramal) ?? null;
+  }
 
   // Agrupa o arquivo por ligação. O CSV vem em "retratos repetidos": a linha
   // com ID reaparece várias vezes (só a última traz a duração total) e as
@@ -350,7 +367,7 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
       for (const [cdrId, grupo] of grupos) {
         const linha = grupo.primeiro;
         const ramal = valor(linha, col.ramal);
-        const pessoaId = pessoaPorRamal.get(ramal) ?? null;
+        const pessoaId = pessoaDoRamal(ramal, grupo.dataHora);
         if (ramal && pessoaId === null) {
           registrarOcorrencia(relatorio.problemas, "ramal_desconhecido", `${ramal} (ligação ${cdrId})`);
         }

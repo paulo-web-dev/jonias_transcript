@@ -632,7 +632,90 @@ function dadosTvCompleto() {
       : null,
   };
 
-  return { atualizadoEm: new Date().toISOString(), jornada: JORNADA, frescor, dia, semana, mes, funil };
+  return { atualizadoEm: new Date().toISOString(), jornada: JORNADA, frescor, dia, semana, mes, funil, parados: paradosTv(hoje) };
+}
+
+// ---------- Leads parados no funil (telas AMARELA e VERMELHA da TV) ----------
+// Regras (decisões do usuário, 2026-09-25):
+// - só status 'Ativo'; "parado" = dias CORRIDOS desde a entrada na fase ATUAL
+//   (fase_NN_em da fase_atual), contados sobre o BANCO INTEIRO (união de todas
+//   as importações do Omie, não só o último arquivo);
+// - sem data de entrada na fase (carga inicial do Omie de 01/08, sem datas de
+//   fase): piso conservador pelo atualizado_em — a fase atual começou no
+//   máximo na última atualização, então o número nunca superestima; o card
+//   mostra "≥ N dias";
+// - faixas sem sobreposição: amarela 3–9 dias, vermelha ≥ 10;
+// - colunas = consultores ativos com entra_tv = 1 (canais fora), todos
+//   presentes mesmo com zero; 5 cards mais antigos por coluna + "N outros";
+// - aviso de dado defasado: quantas das oportunidades de cada faixa NÃO
+//   vieram na última importação do Omie (podem ter mudado de fase no CRM).
+const FAIXAS_PARADOS = { amarela: { de: 3, ate: 9 }, vermelha: { de: 10, ate: null } };
+const CARDS_POR_COLUNA = 5;
+
+function paradosTv(hoje) {
+  const ultima = db.prepare(
+    `SELECT id, concluido_em, arquivo_nome FROM importacoes
+      WHERE tipo = 'oportunidades' AND status = 'concluida' ORDER BY id DESC LIMIT 1`
+  ).get() ?? null;
+  const consultores = db
+    .prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 AND entra_tv = 1 ORDER BY nome")
+    .all();
+  const linhas = db.prepare(
+    `WITH base AS (
+       SELECT o.numero, o.conta, o.fase_atual, o.ticket_centavos, o.importacao_id, o.pessoa_id,
+              CASE substr(o.fase_atual, 1, 2)
+                WHEN '01' THEN o.fase_01_em WHEN '02' THEN o.fase_02_em WHEN '03' THEN o.fase_03_em
+                WHEN '04' THEN o.fase_04_em WHEN '05' THEN o.fase_05_em END AS entrada,
+              o.atualizado_em
+         FROM oportunidades o JOIN pessoas p ON p.id = o.pessoa_id
+        WHERE o.status = 'Ativo' AND p.tipo = 'consultor' AND p.ativo = 1 AND p.entra_tv = 1
+     )
+     SELECT numero, conta, fase_atual, ticket_centavos, importacao_id, pessoa_id,
+            entrada IS NULL AS piso,
+            CAST(julianday(?) - julianday(substr(COALESCE(entrada, atualizado_em), 1, 10)) AS INTEGER) AS dias
+       FROM base`
+  ).all(hoje);
+
+  const semData = linhas.filter((l) => l.dias == null).length;
+  const faixaDe = (dias) =>
+    dias == null ? null : dias >= FAIXAS_PARADOS.vermelha.de ? "vermelha" : dias >= FAIXAS_PARADOS.amarela.de ? "amarela" : null;
+  const faseLegivel = (f) => (f && /^\d{2}_/.test(f) ? f.slice(3) : "sem fase");
+
+  const faixas = {};
+  for (const [nome, limites] of Object.entries(FAIXAS_PARADOS)) {
+    const daFaixa = linhas
+      .filter((l) => faixaDe(l.dias) === nome)
+      .sort((a, b) => b.dias - a.dias || (b.ticket_centavos || 0) - (a.ticket_centavos || 0) || a.numero.localeCompare(b.numero));
+    faixas[nome] = {
+      ...limites,
+      total: daFaixa.length,
+      foraDoUltimoArquivo: ultima ? daFaixa.filter((l) => l.importacao_id !== ultima.id).length : 0,
+      comPiso: daFaixa.filter((l) => l.piso).length,
+      colunas: consultores.map((c) => {
+        const dele = daFaixa.filter((l) => l.pessoa_id === c.id);
+        return {
+          nome: c.nome,
+          total: dele.length,
+          maisAntigo: dele.length ? { dias: dele[0].dias, piso: !!dele[0].piso } : null,
+          cards: dele.slice(0, CARDS_POR_COLUNA).map((l) => ({
+            numero: l.numero,
+            conta: l.conta,
+            fase: faseLegivel(l.fase_atual),
+            dias: l.dias,
+            piso: !!l.piso,
+            ticketCentavos: l.ticket_centavos,
+          })),
+        };
+      }),
+    };
+  }
+  return {
+    hoje,
+    ultimaImportacao: ultima ? { concluidoEm: ultima.concluido_em, arquivo: ultima.arquivo_nome } : null,
+    ativos: linhas.length,
+    semData,
+    faixas,
+  };
 }
 
 // ---------- Metas: leitura estruturada para o painel /metas ----------

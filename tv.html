@@ -57,6 +57,21 @@
       <div class="tv-mes-rodape" id="mes-rodape"></div>
     </section>
 
+    <!-- Leads parados no funil do Omie, em kanban por vendedor. Faixas sem
+         sobreposição: amarela 3–9 dias, vermelha ≥ 10. Sai da rotação quando
+         a faixa está vazia. -->
+    <section class="tv-visao tv-parados tv-parados-amarela" id="visao-parados3">
+      <h2 id="parados3-titulo">⚠ PARADOS HÁ 3 A 9 DIAS NA MESMA FASE</h2>
+      <div class="tv-kanban" id="parados3-kanban"></div>
+      <div class="tv-parados-aviso" id="parados3-aviso"></div>
+    </section>
+
+    <section class="tv-visao tv-parados tv-parados-vermelha" id="visao-parados10">
+      <h2 id="parados10-titulo">🚨 URGENTE — PARADOS HÁ 10 DIAS OU MAIS NA MESMA FASE</h2>
+      <div class="tv-kanban" id="parados10-kanban"></div>
+      <div class="tv-parados-aviso" id="parados10-aviso"></div>
+    </section>
+
     <!-- Cartão de destaque: quanto falta para a meta da SEMANA em R$ (equipe).
          Entra entre cada tela da rotação — é o número que fica na cabeça. -->
     <section class="tv-visao tv-destaque" id="visao-destaque">

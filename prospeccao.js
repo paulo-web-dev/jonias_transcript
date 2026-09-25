@@ -989,7 +989,7 @@ function payloadTrabalho(uf, usuario, escopo = null) {
     uf, campos: CAMPOS_TRABALHO, linhas, status: statusDisponiveis(), setores, regionais, municipios, consultores,
     // Fase 4 (só leitura): por município [última, total, atendidas, quem ligou por último]; por contato [última, total]
     cdr: cdr.cdrPorMunicipio(uf, escopo),
-    // marcação pessoal (verde/vermelho) SÓ do usuário logado: { contatoId: cor }
+    // marcação pessoal (verde/vermelho/amarelo) SÓ do usuário logado: { contatoId: cor }
     marcacoes: marcacoesDoUsuario(uf, usuario.id, escopo),
     // admin: quem mais marcou nesta UF (para ver as marcações de outro usuário, só leitura)
     marcacoesDe: escopo ? null : usuariosComMarcacoes(uf, usuario.id),
@@ -1126,9 +1126,9 @@ function atualizarContato(id, mudancas, usuarioId, escopo = null) {
 }
 
 // ---------- marcação pessoal (migração 25) ----------
-// Verde/vermelho por USUÁRIO, independente do status importado e do registro
+// Verde/vermelho/amarelo por USUÁRIO, independente do status importado e do registro
 // de contato: não toca contatos_ativo (nem editado_em) nem o histórico.
-const CORES_MARCACAO = ["verde", "vermelho"];
+const CORES_MARCACAO = ["verde", "vermelho", "amarelo"]; // amarelo: migração 27
 
 function marcacoesDoUsuario(uf, usuarioId, escopo = null) {
   const cm = clausulaMunicipios(escopo, "c.codigo_ibge");
@@ -1158,13 +1158,13 @@ function marcacoesDeOutro(uf, usuarioId) {
   return { uf, usuarioId: id, marcacoes: marcacoesDoUsuario(uf, id) };
 }
 
-// PUT { cor: 'verde' | 'vermelho' | null } — idempotente: grava o estado final
+// PUT { cor: 'verde' | 'vermelho' | 'amarelo' | null } — idempotente: grava o estado final
 // pedido pelo cliente (sem alternância no servidor, então requisições repetidas
 // ou reenviadas não invertem a marcação). Contato fora do escopo = 404.
 function marcarContato(id, cor, usuarioId, escopo = null) {
   const linha = buscarLinha(id, escopo);
   if (cor !== null && cor !== "" && cor !== undefined && !CORES_MARCACAO.includes(cor)) {
-    throw erro("Marcação inválida — use verde, vermelho ou null.");
+    throw erro("Marcação inválida — use verde, vermelho, amarelo ou null.");
   }
   if (!cor) {
     db.prepare("DELETE FROM marcacoes_prospeccao WHERE usuario_id = ? AND contato_id = ?").run(usuarioId, linha.id);

@@ -169,7 +169,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **25**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **27**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -199,6 +199,26 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   do deploy). Relatórios/snapshots congelados antes dessa data guardam essas
   ligações no Hirlan e **não batem** com um recálculo — terceira quebra de
   comparabilidade, ao lado da taxa de atendimento e das turmas `unyflex = 1`.
+  **Jhonnata (migração 26, 2026-09-25)**: Jhonnata Henrick de Lima Ribeiro,
+  exibido como Jhonnata; "Jhonnata" no Vendedor do Omie, e `nomes_alternativos`
+  com o nome completo e as combinações prováveis (`NOMES_JHONNATA` em `db.js`,
+  casamento exato), ramal 2004,
+  `crm_user_id` 55622 (painel Unyflex), flags 1/1/1, metas padrão. ⚠ **Ramal
+  2004 COM vigência** — decisão oposta à do 2001: o 2004 tinha 1.411 ligações
+  do Douglas desde 01/12/2025 em produção, e o histórico fica com quem ligou.
+  `ramal_vigencias(ramal, pessoa_id, vigente_desde, vigente_ate)` (datas
+  locais inclusivas, NULL = aberto): 2004 é do Douglas até 2026-09-21 e do
+  Jhonnata desde **2026-09-22** (data de entrada informada pelo usuário). O
+  importador do CDR consulta essa tabela ANTES de `pessoas.ramal` (ramal sem
+  vigência segue a regra de sempre) — sem isso, reimportar um CSV antigo
+  devolveria as ligações do Douglas ao dono atual, porque o upsert refaz
+  `pessoa_id`. A migração passa ao Jhonnata só as ligações do 2004 com
+  `data_hora ≥ 2026-09-22` (o número sai no log do deploy). Douglas fica sem
+  ramal em `pessoas` e segue em `OCULTOS_TEMPORARIOS_TV`. **Quarta quebra de
+  comparabilidade (2026-09-25)**, menor que as outras: relatório ou snapshot
+  congelado com ligações do 2004 a partir de 22/09 as guarda no Douglas, e um
+  recálculo as põe no Jhonnata. A mesma migração acrescentou "Paulo Sergio
+  Orfanelli" à Gerencial (2 oportunidades do Omie estavam sem match).
   `tipo`: consultor | canal;
   `entra_painel` controla as visões de prospecção da TV (dia/semana/rankings);
   `entra_tv = 0` oculta de TODAS as visões da TV, mês incluído. As duas flags
@@ -447,7 +467,18 @@ abandonado). Fase 1 = carga com fidelidade total:
   cancela, Tab vai para a próxima célula), menu de status, popover
   "registrar contato" (Ctrl+Enter), gaveta de detalhes + histórico, modal
   de novo contato, exportação .xlsx do filtro ou da UF. Teclado na tabela:
-  ↑↓ selecionam, R registra, D abre detalhes, Enter edita, / busca.
+  ↑↓ selecionam, ←→ movem o cursor de coluna (Enter edita a célula do
+  cursor; sem cursor, o Responsável), R registra, D abre detalhes, / busca.
+  **Rolagem lateral (2026-09-25)**: marcação, status e município ficam fixos
+  (`td.fixa`, `position: sticky`; fundo opaco com a tinta da linha na
+  variável `--tinta`, então marcação/seleção pintam também a parte fixa;
+  linha oculta esmaece as células fixas pela cor, nunca por opacidade, senão o
+  conteúdo rolado apareceria através delas); barra horizontal de 16 px;
+  Shift + roda rola para o lado (`wheel` converte `deltaY` só quando o
+  navegador não mandou `deltaX`); Tab, Shift+Tab e ←→ trazem a célula para a
+  área útil com `mostrarCelula`, que rola SÓ a tabela — `scrollIntoView`
+  rolava a página inteira junto — descontando cabeçalho e colunas fixas.
+  Conferido com a tabela a 1366, 1000 e 800 px de largura.
 - **Migração 23 (Fase 3, 2026-09-09) — papéis e escopo.** `usuarios` ganha
   `pessoa_id` (login ↔ consultor, único), `senha_temporaria` (1 = troca
   obrigatória no 1º acesso), `senha_trocada_em`, `ultimo_acesso_em`; `papel`
@@ -519,7 +550,7 @@ abandonado). Fase 1 = carga com fidelidade total:
   consultor; `POST …/recruzar` é só admin.
 - **Migração 25 (2026-09-16) — marcação pessoal** (pedido do usuário: as cores
   importadas são muitas; o vendedor precisa de um "já liguei" simples).
-  `marcacoes_prospeccao(usuario_id, contato_id, cor verde|vermelho,
+  `marcacoes_prospeccao(usuario_id, contato_id, cor verde|vermelho|amarelo,
   marcado_em, PK(usuario_id, contato_id))`: sem marcação = sem linha. **Por
   usuário**: cada um vê só as suas; o admin tem as próprias (separadas) e pode
   VER as de outro usuário, só leitura (seletor "marcações de…"). **Camada
@@ -532,6 +563,11 @@ abandonado). Fase 1 = carga com fidelidade total:
   requisição por contato em voo e cliques durante o voo reenviam só o último
   estado; falha desfaz a pintura com aviso. Marcar com o filtro ativo não tira a
   linha da tela até o próximo filtro (não embaralha a navegação por ↑↓).
+  **Migração 27 (2026-09-25)**: terceira cor, **amarelo** (tecla `3`, filtro
+  "só amarelas", contador 🟢/🔴/🟡), mesmo comportamento. O SQLite não altera
+  CHECK: a tabela é recriada e todas as linhas copiadas, e a migração aborta,
+  sem mudar nada, se o total ou a contagem por cor da tabela nova diferir da
+  antiga (o log mostra as contagens preservadas).
 
 ## Rotas
 
@@ -552,7 +588,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
 | `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
-| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 45), `?fixo=dia\|semana\|receita\|mes\|destaque`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
+| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 30 desde 2026-09-25; antes 45), `?fixo=dia\|semana\|receita\|mes\|parados3\|parados10\|destaque`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
 | `GET /api/metas`, `PUT /api/metas`, `PUT /api/metas/config` | painel `/metas` (`resumoMetas()`): padrão vigente, valor efetivo por consultor (própria ou herdada, com "desde" e vigência futura), meta da equipe + soma das individuais, receita do mês com/sem Gerencial, histórico. PUT `{pessoaId: null\|id, escopo: dia\|semana\|mes\|equipe, vigenteDesde, valores: {ligacoes, leads, matriculas, receita \| receita (semana) \| semana, mes}}` — campo ausente não mexe, `null`/"" = sem meta (pessoa: volta a herdar), reais → centavos; data inválida/retroativa, escopo equipe com pessoa, consultor inexistente → 400/404. `/config` `{incluiGerencial: bool}`. Ambos emitem SSE `{tipo:"config"}` — a TV refaz o fetch em silêncio (sem pulso/toast) |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
@@ -584,7 +620,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/prospeccao/gerencial` | admin: por regional — titular, apoios, contatos, telefone válido, sem consultor, trabalhados, nunca tocados, inexistentes, último contato, editados; totais por UF e "sem regional" |
 | `GET /api/prospeccao/cdr?de&ate` | Fase 4: `total`, `classes` (ligações/atendidas/municípios por classe), `regionais` (ligações, atendidas, municípios ligados × com contatos, nunca ligados, fora da carteira, `porConsultor`); admin ainda `ambiguas` (número, ligações, última, UF, municípios com linhas e ids), `desconhecidasPorDdd`, `semRegional`, `porConsultor`; vendedor ainda `nuncaLigados` (municípios da carteira sem ligação no período). Período inválido → 400 |
 | `GET /api/prospeccao/contatos/:id/ligacoes` | ligações do CDR para o número do contato (`doNumero`) e para o município dele (`doMunicipio`, `totalMunicipio`) — data, atendida, tempo de conversa, falha, consultor (vendedor: terceiros = "outro consultor"); fora do escopo → 404 |
-| `PUT /api/prospeccao/contatos/:id/marcacao` | marcação pessoal `{cor: "verde"\|"vermelho"\|null}` do usuário da sessão; idempotente; contato fora do escopo → 404, cor inválida → 400. As marcações próprias vêm em `marcacoes` no `GET /api/prospeccao/contatos` (admin também recebe `marcacoesDe`: quem mais marcou na UF) |
+| `PUT /api/prospeccao/contatos/:id/marcacao` | marcação pessoal `{cor: "verde"\|"vermelho"\|"amarelo"\|null}` do usuário da sessão; idempotente; contato fora do escopo → 404, cor inválida → 400. As marcações próprias vêm em `marcacoes` no `GET /api/prospeccao/contatos` (admin também recebe `marcacoesDe`: quem mais marcou na UF) |
 | `GET /api/prospeccao/marcacoes?uf=&usuario=` | admin: marcações de outro usuário na UF (só leitura); vendedor → 403 |
 | `POST /api/prospeccao/cdr/recruzar` | admin: reclassifica todas as ligações (derivado, idempotente) e devolve as contagens |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
@@ -773,7 +809,7 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 - Períodos congelados com versões (`periodo_snapshots`) — tela `/relatorios`
 - Tela `/saude` (frescor, wallets/vendedores sem match, matrículas sem
   oportunidade, conquistadas sem matrícula, conflitos, alunos órfãos)
-- Painel de TV 2.0 `/tv?token=` — **rotação automática** entre quatro visões
+- Painel de TV 2.0 `/tv?token=` — **rotação automática** entre quatro visões (seis desde 2026-09-25, com as duas de leads parados — ver "TV — leads parados no funil")
   (crossfade + indicador; a quarta, **RECEITA DA SEMANA**, entrou em
   2026-09-04 entre SEMANA e MÊS — por vendedor, R$ feito em número grande
   "/ R$ 20.000", barra na largura toda, % e "faltam R$ X"; meta =
@@ -968,6 +1004,35 @@ fases, cada uma aprovada antes da seguinte:
   consultores" só em número, chips dos municípios da carteira sem ligação no
   período linkando para a tela de trabalho). Decisões do usuário: ambígua não
   conta; só leitura; classificação estendida a Omie e matrículas.
+
+### ✅ TV — leads parados no funil (2026-09-25)
+Duas telas novas na rotação, em kanban por vendedor, sem IA (`paradosTv()`
+em `metricas.js`, campo `parados` do payload da TV): **AMARELA** "parados
+há 3 a 9 dias" e **VERMELHA** "URGENTE — parados há 10 dias ou mais", faixas
+sem sobreposição. Regras (decisões do usuário):
+- só `status = 'Ativo'`; "parado" = dias corridos desde a entrada na fase
+  ATUAL (`fase_NN_em` da `fase_atual`), contados sobre o **banco inteiro**
+  (união das importações do Omie, não só o último arquivo);
+- sem data de entrada na fase (≈ 195 oportunidades da carga inicial do Omie
+  de 01/08, que não trouxe datas de fase): **piso conservador pelo
+  `atualizado_em`**. A fase atual começou no máximo na última atualização,
+  então o número nunca superestima, e o card mostra "≥ N dias";
+- colunas = consultores ativos com `entra_tv = 1`, todos presentes; canais
+  (Gerencial) fora. Topo da coluna: nome, **contagem em tipografia grande**
+  (o placar é o principal) e "mais antigo: N dias". Abaixo, os 5 cards mais
+  antigos (conta, dias, fase, ticket); o que não cabe inteiro na altura da
+  tela sai e entra no "+ N outros" (`ajustarCards`, a contagem é sempre
+  exata). Vendedor sem nenhum na faixa: "0 ✓" em verde — mérito, não falha;
+- faixa vazia sai da rotação (log no console); o cartão da meta da semana
+  entra depois de cada uma, como nas outras telas; `?fixo=parados3|parados10`;
+- **aviso de dado defasado** no rodapé de cada tela: quantas das
+  oportunidades da faixa NÃO vieram na última importação do Omie, com a
+  data dela. Em produção, em 2026-09-25, só 285 de 1.275 ativas tinham vindo
+  no último arquivo: as outras podem ter mudado de fase no CRM sem o sistema
+  saber. Também explica o "≥".
+- Números de produção em 2026-09-25: 120 na amarela (45 com 3 dias, 23 com
+  4) e 1.092 na vermelha. A rotação passou de 45 s para 30 s por tela
+  (`?giro`).
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

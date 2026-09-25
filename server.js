@@ -793,7 +793,7 @@ app.get("/api/prospeccao/contatos/:id/historico", (req, res) => {
   }
 });
 
-// Marcação pessoal verde/vermelho (migração 25): sempre do usuário da sessão;
+// Marcação pessoal verde/vermelho/amarelo (migrações 25 e 27): sempre do usuário da sessão;
 // vendedor só marca contatos do escopo (404 fora)
 app.put("/api/prospeccao/contatos/:id/marcacao", (req, res) => {
   try {
