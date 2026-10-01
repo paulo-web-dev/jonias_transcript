@@ -647,7 +647,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
 | `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
-| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 30 desde 2026-09-25; antes 45), `?fixo=dia\|semana\|receita\|mes\|parados3\|parados10\|destaque`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
+| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: `rota` (progresso da Rota do dia, `progressoTv()` em `rota.js`), dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20 desde 2026-10-01; 30 de 25/09 a 30/09, antes 45), `?fixo=dia\|rota\|semana\|receita\|mes\|parados3\|parados10\|destaque`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
 | `GET /api/metas`, `PUT /api/metas`, `PUT /api/metas/config` | painel `/metas` (`resumoMetas()`): padrão vigente, valor efetivo por consultor (própria ou herdada, com "desde" e vigência futura), meta da equipe + soma das individuais, receita do mês com/sem Gerencial, histórico. PUT `{pessoaId: null\|id, escopo: dia\|semana\|mes\|equipe, vigenteDesde, valores: {ligacoes, leads, matriculas, receita \| receita (semana) \| semana, mes}}` — campo ausente não mexe, `null`/"" = sem meta (pessoa: volta a herdar), reais → centavos; data inválida/retroativa, escopo equipe com pessoa, consultor inexistente → 400/404. `/config` `{incluiGerencial: bool}`. Ambos emitem SSE `{tipo:"config"}` — a TV refaz o fetch em silêncio (sem pulso/toast) |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
@@ -1063,7 +1063,8 @@ fases, cada uma aprovada antes da seguinte:
   certa para corrigir o município, desconhecidas por DDD, botão "Recalcular
   cruzamento"); aba Trabalho ganhou a coluna **📟 CDR** (data×quantidade da
   última ligação ao número exato — em ciano — ou ao município, com quem ligou
-  no tooltip; ordenável), o filtro "nunca ligado (CDR)" (`flags=nuncaCdr` no
+  no tooltip; ordenável; **substituída em 2026-10-01** pelas colunas por
+  telefone, ver "Última ligação por telefone"), o filtro "nunca ligado (CDR)" (`flags=nuncaCdr` no
   hash) e a seção "Ligações do PABX" na gaveta; `/meu-painel` ganhou "Minhas
   ligações × carteira" (cartões por classe, tabela por regional com "outros
   consultores" só em número, chips dos municípios da carteira sem ligação no
@@ -1096,7 +1097,7 @@ sem sobreposição. Regras (decisões do usuário):
   no último arquivo: as outras podem ter mudado de fase no CRM sem o sistema
   saber. Também explica o "≥".
 - Números de produção em 2026-09-25: 120 na amarela (45 com 3 dias, 23 com
-  4) e 1.092 na vermelha. A rotação passou de 45 s para 30 s por tela
+  4) e 1.092 na vermelha. A rotação passou de 45 s para 30 s por tela (20 s desde 2026-10-01)
   (`?giro`).
 
 ### ✅ Rota do dia (2026-09-30, migração 28)
@@ -1112,6 +1113,37 @@ bloqueio (por telefone só dentro da campanha).
 carteira, mas não podia receber contato na aba Trabalho) ∪ todo consultor
 ativo com carteira ou com usuário vendedor ativo. Fonte única para o seletor
 de consultor, o casamento do consultor da planilha e `/usuarios`.
+
+### ✅ Última ligação por telefone e TV da Rota (2026-10-01, sem migração)
+- **Aba Trabalho e Rota do dia**: as colunas **📟 Última ligação** (data e
+  hora, ✓ atendida · N min ou ✗ não atendida, como na baixa da rota) e **Quem
+  ligou** substituíram a antiga "📟 CDR", que olhava o número quando ele era
+  único e, se não, o município. Decisões do usuário: são **por TELEFONE**,
+  só a coluna Telefone (o WhatsApp aparece só na gaveta), e contam só as
+  ligações de SAÍDA. `ligacoesPorTelefone()` em `cruzamento.js` usa nono
+  dígito via `variantes` e as classes `prospeccao`/`ambigua`, e vem no
+  payload como `cdr: {ultima, compartilhados, pessoas}`. É derivado e atualiza
+  sozinho a cada importação do CDR. O PATCH de telefone devolve a ligação do
+  número novo. **Telefone compartilhado**: `⇆N` na célula, com dica de que
+  a ligação foi para o NÚMERO e não diz o setor. N conta os contatos da base
+  inteira com o mesmo número (o geral da prefeitura).
+- **Quem ligou** = dono do ramal NA DATA, calculado na leitura
+  (`SQL_QUEM_LIGOU`: vigência em `ramal_vigencias`, senão `ligacoes.pessoa_id`).
+  Vigência corrigida depois vale sem reimportar. O vendedor vê "outro
+  consultor" (-1, no servidor), nunca o nome.
+- Filtros: "nunca ligado" (agora por telefone, mesma flag `nuncaCdr` no hash)
+  e "ligado nos últimos N dias" (`lig=N`; 1 = hoje). A gaveta mostra o
+  histórico **completo** do telefone (as duas direções; recebida marcada),
+  o WhatsApp à parte e as últimas do município.
+- **TV — ROTA DO DIA** (depois de HOJE na rotação): por consultor, % em
+  número grande + barra, "N de M feitas", atendidas, selo "rota curta (cota
+  45)". Percentual = **feitas ÷ itens da rota** (decisão do usuário: rota
+  curta fecha 100%). Feita = baixa pelo CDR ou manual. Respeita `entra_tv`.
+  Sai da rotação sem campanha vigente hoje ou sem rota com itens. Fechar
+  100% dispara a festa "ROTA CONCLUÍDA" (virada <100 → 100, mesmo dia). Baixa
+  pelo CDR chega por SSE na importação; a baixa manual chega pelo polling de
+  60 s.
+- Rotação: 20 s por tela (`?giro=N` continua).
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

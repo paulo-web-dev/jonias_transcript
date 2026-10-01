@@ -559,6 +559,28 @@ function estoque(data, tipo) {
   return { consultores, bloqueados, candidatos, porPessoa };
 }
 
+// TV: progresso da rota de HOJE (Brasília) por consultor. Mesmo corte das
+// outras telas (consultor ativo com entra_tv = 1). Percentual = feitas ÷ itens
+// da rota (decisão do usuário, 2026-10-01): rota curta — estoque acabou — fecha
+// 100% com os itens que recebeu, e a TV mostra o selo com a cota. Sem campanha
+// vigente hoje ou sem rota com itens, `ativa = false` e a tela sai da rotação.
+function progressoTv() {
+  const { data } = agoraBrasilia();
+  const campanha = campanhaVigente(data);
+  const porPessoa = db.prepare(
+    `SELECT r.id, p.nome, r.cota, t.nome tipo FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id JOIN rota_tipos t ON t.id = r.tipo_id
+     WHERE r.data = ? AND p.tipo = 'consultor' AND p.ativo = 1 AND p.entra_tv = 1 ORDER BY p.nome`
+  ).all(data).map((r) => {
+    const pr = progressoDe(db.prepare(`${SQL_ITEM} WHERE i.rota_id = ?`).all(r.id), r.cota);
+    return {
+      nome: r.nome, tipo: r.tipo, cota: pr.cota, itens: pr.itens, feitas: pr.feitas, atendidas: pr.atendidas,
+      pct: pr.itens ? Math.floor((pr.feitas / pr.itens) * 100) : null, curta: pr.itens < pr.cota,
+    };
+  });
+  const ativa = !!campanha?.tipoId && porPessoa.some((p) => p.itens > 0);
+  return { data, campanha: campanha?.tipoId ? campanha.nome : null, ativa, porPessoa };
+}
+
 function painel(dataArg) {
   const { data: hoje, hora } = agoraBrasilia();
   const data = dataArg && RE_DATA.test(dataArg) ? dataArg : hoje;
@@ -673,7 +695,7 @@ module.exports = {
   listarTipos, lerTipo, setoresDisponiveis, gravarTipo,
   campanhaVigente, trocarCampanha,
   bloqueiosPara, sobreposicao, gerarRotas, garantirRotas,
-  baixarPeloCdr, baixarPorRegistro, desfazerBaixa, itemDaTela,
+  baixarPeloCdr, baixarPorRegistro, desfazerBaixa, itemDaTela, progressoTv,
   rotaDoDia, painel,
   BLOQUEIO_DIAS, BLOQUEIO_SEM_LIGACAO_DIAS, HORA_GERACAO,
 };

@@ -275,54 +275,98 @@ function painelCdr(de, ate, escopo = null) {
   return resultado;
 }
 
-// Por município (para a tela de trabalho): última ligação, total, atendidas e
-// quem ligou por último — cortado pelo escopo; para o vendedor, terceiros
-// viram -1 (e NULL vira 0 = "sem consultor").
-function cdrPorMunicipio(uf, escopo = null) {
-  const { clausulaMunicipios } = require("./escopo.js");
-  const cm = clausulaMunicipios(escopo, "l.codigo_ibge");
-  const pessoaSql = escopo ? "CASE WHEN l.pessoa_id = ? THEN l.pessoa_id WHEN l.pessoa_id IS NULL THEN NULL ELSE -1 END" : "l.pessoa_id";
-  const valores = escopo ? [escopo.pessoaId ?? -2] : [];
-  const municipios = {};
-  for (const r of db.prepare(
-    `SELECT l.codigo_ibge codigo, MAX(l.data_hora) ultima, COUNT(*) total, SUM(l.atendida) atendidas
-     FROM ligacoes l JOIN municipios m ON m.codigo_ibge = l.codigo_ibge
-     WHERE l.classe = 'prospeccao' AND m.uf = ? AND ${cm.sql} GROUP BY 1`).all(uf, ...cm.valores)) {
-    municipios[r.codigo] = [r.ultima, r.total, r.atendidas || 0, null];
+// Quem ligou = dono do ramal NA DATA da ligação: a vigência (ramal_vigencias,
+// migração 26) quando o ramal tem uma, senão o pessoa_id gravado na importação
+// (que já segue a mesma regra). Recalculado na leitura: uma vigência corrigida
+// depois vale para o histórico sem reimportar o CDR.
+const SQL_QUEM_LIGOU = `COALESCE((SELECT v.pessoa_id FROM ramal_vigencias v WHERE v.ramal = l.ramal
+    AND (v.vigente_desde IS NULL OR v.vigente_desde <= substr(l.data_hora, 1, 10))
+    AND (v.vigente_ate IS NULL OR substr(l.data_hora, 1, 10) <= v.vigente_ate)
+    ORDER BY v.vigente_desde DESC LIMIT 1), l.pessoa_id)`;
+
+// Chave do telefone com e sem o nono dígito: a variante mais longa
+const chaveDoNumero = (n) => variantes(n).sort((a, b) => b.length - a.length)[0];
+
+// Última ligação por TELEFONE (coluna Telefone do contato, decisão do usuário
+// de 2026-10-01; o WhatsApp fica só na gaveta). Só ligações de SAÍDA: "quando
+// alguém ligou para esse número". A chave é o telefone como está no contato:
+//   ultima: { telefone: [última data_hora, quem ligou, atendida, conversa (s), total, atendidas] }
+// O número é do TELEFONE, não do contato: o geral da prefeitura atende vários
+// setores, por isso vai junto `compartilhados` = { telefone: nº de contatos
+// da base inteira com o mesmo número } (só os > 1).
+// Vendedor: quem ligou vira -1 quando é outro consultor (nunca o nome).
+function ligacoesPorTelefone(telefones, escopo = null) {
+  const pedidos = new Map(); // variante → telefones do contato
+  for (const t of new Set(telefones)) {
+    const n = normalizarNumero(t);
+    if (n.length < 10) continue;
+    for (const v of variantes(n)) indexar(pedidos, v, t);
   }
-  for (const r of db.prepare(
-    `SELECT l.codigo_ibge codigo, ${pessoaSql} pessoa FROM ligacoes l JOIN municipios m ON m.codigo_ibge = l.codigo_ibge
-     WHERE l.classe = 'prospeccao' AND m.uf = ? AND ${cm.sql} ORDER BY l.data_hora DESC`).all(...valores, uf, ...cm.valores)) {
-    const x = municipios[r.codigo];
-    if (x && x[3] === null) x[3] = r.pessoa ?? 0;
+  const ultima = {};
+  const compartilhados = {};
+  if (!pedidos.size) return { ultima, compartilhados, pessoas: {} };
+  // Número de contato cai sempre em 'prospeccao' ou 'ambigua' no cruzamento
+  const ligs = db.prepare(
+    `SELECT l.numero_externo numero, l.data_hora dataHora, l.atendida, l.tempo_conversa_seg conversa, ${SQL_QUEM_LIGOU} pessoa
+     FROM ligacoes l WHERE l.sentido = 'S' AND l.classe IN ('prospeccao', 'ambigua') ORDER BY l.data_hora, l.id`
+  ).all();
+  for (const l of ligs) {
+    const alvos = pedidos.get(l.numero);
+    if (!alvos) continue;
+    const pessoa = escopo ? (l.pessoa == null ? null : l.pessoa === escopo.pessoaId ? l.pessoa : -1) : l.pessoa;
+    for (const t of alvos) {
+      const r = ultima[t] ?? (ultima[t] = [null, null, 0, 0, 0, 0]);
+      r[0] = l.dataHora; r[1] = pessoa; r[2] = l.atendida ? 1 : 0; r[3] = l.conversa || 0;
+      r[4] += 1; r[5] += l.atendida ? 1 : 0;
+    }
   }
-  const contatos = {};
-  for (const r of db.prepare(
-    `SELECT l.contato_id id, MAX(l.data_hora) ultima, COUNT(*) total FROM ligacoes l JOIN contatos_ativo c ON c.id = l.contato_id
-     WHERE l.classe = 'prospeccao' AND c.uf = ? AND ${cm.sql} GROUP BY 1`).all(uf, ...cm.valores)) {
-    contatos[r.id] = [r.ultima, r.total];
+  const porChave = new Map();
+  for (const t of db.prepare("SELECT telefone FROM contatos_ativo WHERE telefone IS NOT NULL").pluck().all()) {
+    const n = normalizarNumero(t);
+    if (n.length >= 10) { const k = chaveDoNumero(n); porChave.set(k, (porChave.get(k) || 0) + 1); }
   }
-  return { municipios, contatos };
+  for (const t of new Set(telefones)) {
+    const n = normalizarNumero(t);
+    const q = n.length >= 10 ? porChave.get(chaveDoNumero(n)) || 0 : 0;
+    if (q > 1) compartilhados[t] = q;
+  }
+  // nomes de quem ligou (inclui quem já saiu da equipe, ex.: Douglas no 2004 até 21/09)
+  const ids = [...new Set(Object.values(ultima).map((r) => r[1]).filter((id) => id > 0))];
+  const pessoas = Object.fromEntries(ids.length
+    ? db.prepare(`SELECT id, nome FROM pessoas WHERE id IN (${ids.map(() => "?").join(",")})`).all(...ids).map((p) => [p.id, p.nome])
+    : []);
+  return { ultima, compartilhados, pessoas };
 }
 
-// Ligações de um contato (número exato) e do município dele — para a gaveta
-function ligacoesDoContato(contato, escopo = null, limite = 30) {
-  const nums = new Set();
-  for (const t of [contato.telefone, contato.whatsapp]) for (const v of variantes(normalizarNumero(t))) if (v.length >= 10) nums.add(v);
-  const pessoaSql = escopo ? "CASE WHEN l.pessoa_id = ? THEN p.nome WHEN l.pessoa_id IS NULL THEN NULL ELSE 'outro consultor' END" : "p.nome";
+// Ligações de um contato para a gaveta: o TELEFONE (histórico completo, as
+// duas direções), o WhatsApp à parte e as últimas do município. Quem ligou =
+// dono do ramal na data (SQL_QUEM_LIGOU); vendedor vê "outro consultor".
+function ligacoesDoContato(contato, escopo = null, limiteMunicipio = 30) {
+  const numerosDe = (t) => [...new Set(variantes(normalizarNumero(t)).filter((v) => v.length >= 10))];
+  const pessoaSql = escopo
+    ? "CASE WHEN q.pessoa = ? THEN p.nome WHEN q.pessoa IS NULL THEN NULL ELSE 'outro consultor' END"
+    : "p.nome";
   const valores = escopo ? [escopo.pessoaId ?? -2] : [];
-  const base = `SELECT l.id, l.data_hora dataHora, l.sentido, l.atendida, l.tempo_conversa_seg conversaSeg, l.evento_falha eventoFalha, ${pessoaSql} consultor,
-                  l.numero_externo numero, l.codigo_ibge codigo FROM ligacoes l LEFT JOIN pessoas p ON p.id = l.pessoa_id`;
-  const doNumero = nums.size
-    ? db.prepare(`${base} WHERE l.numero_externo IN (${[...nums].map(() => "?").join(",")}) ORDER BY l.data_hora DESC LIMIT ?`).all(...valores, ...nums, limite)
-    : [];
+  const consulta = (where, extra = "") => `SELECT q.id, q.dataHora, q.sentido, q.atendida, q.conversaSeg, q.eventoFalha, ${pessoaSql} consultor, q.numero, q.codigo
+    FROM (SELECT l.id, l.data_hora dataHora, l.sentido, l.atendida, l.tempo_conversa_seg conversaSeg, l.evento_falha eventoFalha,
+            ${SQL_QUEM_LIGOU} pessoa, l.numero_externo numero, l.codigo_ibge codigo FROM ligacoes l WHERE ${where}) q
+    LEFT JOIN pessoas p ON p.id = q.pessoa ORDER BY q.dataHora DESC ${extra}`;
+  const doNumeros = (nums) => (nums.length
+    ? db.prepare(consulta(`l.numero_externo IN (${nums.map(() => "?").join(",")})`)).all(...valores, ...nums)
+    : []);
+  const tel = numerosDe(contato.telefone);
+  const doNumero = doNumeros(tel);
+  const doWhatsapp = doNumeros(numerosDe(contato.whatsapp).filter((v) => !tel.includes(v)));
   const doMunicipio = contato.codigo_ibge
-    ? db.prepare(`${base} WHERE l.classe = 'prospeccao' AND l.codigo_ibge = ? ORDER BY l.data_hora DESC LIMIT ?`).all(...valores, contato.codigo_ibge, limite)
+    ? db.prepare(consulta("l.classe = 'prospeccao' AND l.codigo_ibge = ?", "LIMIT ?")).all(...valores, contato.codigo_ibge, limiteMunicipio)
     : [];
   const totalMunicipio = contato.codigo_ibge
     ? db.prepare("SELECT COUNT(*) n FROM ligacoes WHERE classe = 'prospeccao' AND codigo_ibge = ?").get(contato.codigo_ibge).n
     : 0;
-  return { doNumero, doMunicipio, totalMunicipio };
+  return { doNumero, doWhatsapp, doMunicipio, totalMunicipio };
 }
 
-module.exports = { normalizarNumero, variantes, cruzarLigacoes, cruzarSePendente, painelCdr, cdrPorMunicipio, ligacoesDoContato };
+module.exports = {
+  normalizarNumero, variantes, cruzarLigacoes, cruzarSePendente, painelCdr, ligacoesPorTelefone, ligacoesDoContato,
+  SQL_QUEM_LIGOU,
+};

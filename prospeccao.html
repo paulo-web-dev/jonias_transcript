@@ -206,7 +206,8 @@
         <label class="trab-flag"><input type="checkbox" id="f-sem-telefone" /> sem telefone</label>
         <label class="trab-flag"><input type="checkbox" id="f-inexistente" /> contato inexistente</label>
         <label class="trab-flag"><input type="checkbox" id="f-nunca" /> nunca tocado</label>
-        <label class="trab-flag" title="município sem nenhuma ligação no CDR importado"><input type="checkbox" id="f-nunca-cdr" /> nunca ligado (CDR)</label>
+        <label class="trab-flag" title="TELEFONE sem nenhuma ligação do PABX no CDR importado"><input type="checkbox" id="f-nunca-cdr" /> nunca ligado</label>
+        <label class="trab-flag" title="TELEFONE com ligação do PABX nos últimos N dias (1 = hoje); vazio = sem filtro">ligado nos últimos <input type="number" id="f-lig-dias" class="campo-select trab-lig-dias" min="1" max="999" placeholder="N" /> dias</label>
         <label class="trab-flag">último contato de <input type="date" id="f-de" class="campo-select" /> até <input type="date" id="f-ate" class="campo-select" /></label>
         <button type="button" class="btn-mini" id="btn-limpar-filtros">limpar</button>
         <span class="trab-contador" id="trab-contador">—</span>
@@ -226,14 +227,14 @@
           <table class="tabela-metricas trab-tabela" id="trab-tabela">
             <colgroup>
               <col class="c-marca"><col class="c-status"><col class="c-municipio"><col class="c-regional"><col class="c-setor"><col class="c-responsavel"><col class="c-cargo">
-              <col class="c-telefone"><col class="c-whats"><col class="c-email"><col class="c-data"><col class="c-cdr"><col class="c-consultor"><col class="c-curso"><col class="c-obs"><col class="c-acoes">
+              <col class="c-telefone"><col class="c-whats"><col class="c-email"><col class="c-data"><col class="c-lig"><col class="c-quem"><col class="c-consultor"><col class="c-curso"><col class="c-obs"><col class="c-acoes">
             </colgroup>
             <thead>
               <tr>
                 <th data-ordem="marca" class="th-marca" title="sua marcação pessoal — só você vê">●</th><th data-ordem="statusNome">Status</th><th data-ordem="municipioNome">Município</th><th data-ordem="regionalSigla">Regional</th>
                 <th data-ordem="setor">Setor</th><th data-ordem="responsavel">Responsável</th><th data-ordem="cargo">Cargo</th>
                 <th data-ordem="telefone_original">Telefone</th><th data-ordem="whatsapp">WhatsApp</th><th data-ordem="email">E-mail</th>
-                <th data-ordem="data_ultimo_contato">Último contato</th><th data-ordem="cdrUltima" title="última ligação do PABX (CDR) para este número ou, se o número é compartilhado, para o município — só leitura">📟 CDR</th><th data-ordem="consultorNome">Consultor</th>
+                <th data-ordem="data_ultimo_contato">Último contato</th><th data-ordem="ligUltima" title="última ligação do PABX (CDR) para o TELEFONE da linha — atualiza a cada importação do CDR. É do NÚMERO, não do contato: ⇆N = o número é de N contatos (geral da prefeitura), e a ligação não diz com qual setor falaram">📟 Última ligação</th><th data-ordem="ligQuem" title="quem ligou por último para o telefone: dono do ramal na data da ligação">Quem ligou</th><th data-ordem="consultorNome">Consultor</th>
                 <th data-ordem="curso">Curso</th><th data-ordem="observacoes">Observações</th><th></th>
               </tr>
             </thead>

@@ -999,8 +999,8 @@ function payloadTrabalho(uf, usuario, escopo = null) {
     : consultoresAtuais();
   return {
     uf, campos: CAMPOS_TRABALHO, linhas, status: statusDisponiveis(), setores, regionais, municipios, consultores,
-    // Fase 4 (só leitura): por município [última, total, atendidas, quem ligou por último]; por contato [última, total]
-    cdr: cdr.cdrPorMunicipio(uf, escopo),
+    // Última ligação do PABX por TELEFONE (só leitura, derivada do CDR): { ultima, compartilhados }
+    cdr: cdr.ligacoesPorTelefone(telefonesDe(linhas), escopo),
     // marcação pessoal (verde/vermelho/amarelo) SÓ do usuário logado: { contatoId: cor }
     marcacoes: marcacoesDoUsuario(uf, usuario.id, escopo),
     // admin: quem mais marcou nesta UF (para ver as marcações de outro usuário, só leitura)
@@ -1010,6 +1010,11 @@ function payloadTrabalho(uf, usuario, escopo = null) {
     geradoEm: new Date().toISOString(),
   };
 }
+
+const telefonesDe = (linhas) => {
+  const i = CAMPOS_TRABALHO.indexOf("telefone");
+  return linhas.map((l) => l[i]).filter(Boolean);
+};
 
 // Rota (rota.js): mesmo formato do payloadTrabalho, mas só para os contatos
 // pedidos (podem ser de PR e SC na mesma rota), na ordem dos ids. O corte do
@@ -1036,17 +1041,11 @@ function payloadContatos(ids, usuario, escopo = null) {
   const consultores = escopo
     ? (escopo.pessoaId ? db.prepare("SELECT id, nome FROM pessoas WHERE id = ?").all(escopo.pessoaId) : [])
     : consultoresAtuais();
-  const cdrJunto = { municipios: {}, contatos: {} };
-  for (const uf of ufs) {
-    const c = cdr.cdrPorMunicipio(uf, escopo);
-    Object.assign(cdrJunto.municipios, c.municipios);
-    Object.assign(cdrJunto.contatos, c.contatos);
-  }
   const marcacoes = {};
   for (const uf of ufs) Object.assign(marcacoes, marcacoesDoUsuario(uf, usuario.id, escopo));
   return {
     ufs, campos: CAMPOS_TRABALHO, linhas, status: statusDisponiveis(), setores, regionais, municipios, consultores,
-    cdr: cdrJunto, marcacoes, marcacoesDe: null,
+    cdr: cdr.ligacoesPorTelefone(telefonesDe(linhas), escopo), marcacoes, marcacoesDe: null,
     usuario: { id: usuario.id, nome: usuario.nome || usuario.login, papel: usuario.papel, pessoaId: usuario.pessoa_id ?? null },
     escopo: escopo ? { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio } : null,
     geradoEm: new Date().toISOString(),
@@ -1176,7 +1175,10 @@ function atualizarContato(id, mudancas, usuarioId, escopo = null) {
   if (registros.length && campos.some((c) => ["telefone", "whatsapp", "codigo_ibge"].includes(c))) {
     cdr.cruzarLigacoes({ numeros: [linha.telefone, linha.whatsapp, colunas.telefone, colunas.whatsapp].filter(Boolean) });
   }
-  return { linha: linhaCompactaDe(linha.id, escopo), alteracoes: registros.length };
+  const nova = linhaCompactaDe(linha.id, escopo);
+  // telefone trocado: a última ligação da coluna passa a ser a do número novo
+  const cdrNovo = campos.includes("telefone") ? cdr.ligacoesPorTelefone(telefonesDe([nova]), escopo) : undefined;
+  return { linha: nova, alteracoes: registros.length, cdr: cdrNovo };
 }
 
 // ---------- marcação pessoal (migração 25) ----------

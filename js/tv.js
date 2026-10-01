@@ -10,12 +10,12 @@
 
 const params = new URLSearchParams(location.search);
 const token = params.get("token") || "";
-// ?giro=N segundos por tela (padrão 30 desde 2026-09-25: com as telas de parados, 45 s dava um ciclo de ~6 min)
-const GIRO_MS = Math.max(6, Number(params.get("giro")) || 30) * 1000;
+// ?giro=N segundos por tela (padrão 20 desde 2026-10-01; antes 30, e 45 até 2026-09-25)
+const GIRO_MS = Math.max(6, Number(params.get("giro")) || 20) * 1000;
 // Cartão de destaque (falta para a meta da semana): entra ENTRE cada tela da
 // rotação, com duração própria — ?destaque=N segundos (padrão 12, mín. 4)
 const DESTAQUE_MS = Math.max(4, Number(params.get("destaque")) || 12) * 1000;
-const FIXO = params.get("fixo"); // dia | semana | receita | mes | parados3 | parados10 | destaque
+const FIXO = params.get("fixo"); // dia | rota | semana | receita | mes | parados3 | parados10 | destaque
 const DIA_SEMPRE = params.get("dia") === "sempre";
 // Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
 // ?som=1 / ?som=0 é override por dispositivo. Silêncio é o padrão, não falha.
@@ -337,11 +337,12 @@ function proximaCelebracao() {
 
 // ---------- Rotação entre visões ----------
 
-const VISOES = ["dia", "destaque", "semana", "receita", "mes", "parados3", "parados10"];
+const VISOES = ["dia", "rota", "destaque", "semana", "receita", "mes", "parados3", "parados10"];
 let receitaAvisada = false;
 let visoesAtivas = [];
 let visaoAtual = 0;
 let destaqueAvisado = false;
+let rotaAvisada = false;
 const paradosAvisados = new Set();
 
 function aplicarVisoes(d) {
@@ -361,6 +362,12 @@ function aplicarVisoes(d) {
   }
   const telas = [];
   if (mostrarDia) telas.push("dia");
+  // ROTA DO DIA: só com campanha vigente e rota com itens hoje
+  if (d.rota?.ativa) { telas.push("rota"); rotaAvisada = false; }
+  else if (!rotaAvisada) {
+    rotaAvisada = true;
+    console.log(`[tv] tela ROTA DO DIA fora da rotação: ${d.rota?.campanha ? "nenhuma rota com itens hoje" : "nenhuma campanha da Rota vigente hoje"}`);
+  }
   telas.push("semana");
   if (temReceita) telas.push("receita");
   telas.push("mes");
@@ -381,7 +388,7 @@ function aplicarVisoes(d) {
   mostrarVisao(visoesAtivas[visaoAtual]);
 }
 
-const NOMES_VISAO = { dia: "HOJE", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
+const NOMES_VISAO = { dia: "HOJE", rota: "ROTA DO DIA", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
 
 function mostrarVisao(nome) {
   if (nome === "parados3" || nome === "parados10") ajustarCards(nome);
@@ -407,6 +414,36 @@ function agendarGiro() {
   }, duracao);
 }
 agendarGiro();
+
+// ---------- ROTA DO DIA ----------
+// Linhas remontadas quando muda quem tem rota (a rota de hoje pode nascer com a TV aberta)
+function renderizarRota(r) {
+  if (!r) return;
+  const alvo = el("rota-linhas");
+  const nomes = r.porPessoa.map((p) => p.nome);
+  if (alvo.dataset.nomes !== nomes.join("|")) {
+    montarLinhas(alvo, nomes, false);
+    alvo.dataset.nomes = nomes.join("|");
+    alvo.classList.toggle("tv-linhas-compactas", nomes.length > 5);
+  }
+  el("rota-titulo").textContent = `ROTA DO DIA ${dataBr(r.data)}${r.campanha ? ` — ${r.campanha.toUpperCase()}` : ""}`;
+  for (const p of r.porPessoa) {
+    const linha = alvo.querySelector(`[data-nome="${p.nome}"]`);
+    if (!linha) continue;
+    if (!p.itens) {
+      atualizarLinha(linha, { semDados: true });
+      linha.querySelector('[data-campo="status"]').textContent = "rota vazia — sem estoque";
+      continue;
+    }
+    atualizarLinha(linha, {
+      principal: p.pct, formatar: (v) => `${num(v)}%`, meta: null, pct: p.pct,
+      status: `${num(p.feitas)} de ${num(p.itens)} feitas`,
+      statusClasse: p.pct >= 100 ? "status-adiantado" : "status-no_ritmo",
+      detalhe: `✓ ${num(p.atendidas)} atendida${p.atendidas === 1 ? "" : "s"}` + (p.curta ? ` · rota curta (cota ${num(p.cota)})` : ""),
+      cruzouMeta: p.cruzou,
+    });
+  }
+}
 
 // ---------- Render ----------
 
@@ -509,7 +546,17 @@ function renderizar(d, origem) {
       }
     }
   }
+  // Rota do dia fechada em 100% (feitas ÷ itens) é festa — só na virada, no mesmo dia
+  if (anterior?.rota && d.rota && anterior.rota.data === d.rota.data) {
+    for (const p of d.rota.porPessoa) {
+      const antes = anterior.rota.porPessoa.find((a) => a.nome === p.nome);
+      if (!antes || !p.itens) continue;
+      p.cruzou = (antes.pct ?? 0) < 100 && p.pct >= 100;
+      if (p.cruzou) celebrar("🏆 ROTA CONCLUÍDA 🏆", `${p.nome} · ${num(p.feitas)} de ${num(p.itens)} da rota — 100%!`);
+    }
+  }
   anterior = d;
+  renderizarRota(d.rota);
 
   // ---- HOJE ----
   el("dia-titulo").textContent = d.dia.emCurso

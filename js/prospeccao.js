@@ -72,14 +72,14 @@ const COR_INEXISTENTE = "6b7280";
 const trab = {
   uf: "PR", dados: null, linhas: [], filtradas: [], porId: new Map(),
   ordem: { campo: "municipioNome", dir: 1 }, selecionado: null, editando: null,
-  filtros: { busca: "", municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" },
+  filtros: { busca: "", municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, ligDias: "", de: "", ate: "" },
   primeiraVisivel: -1, ultimaVisivel: -1,
   // marcação pessoal (verde/vermelho/amarelo): as MINHAS vêm no payload; admin pode ver as de outro usuário (só leitura)
   marcas: new Map(), verDe: null, marcasOutro: new Map(),
   coluna: -1, // cursor de coluna (setas ← →) na linha selecionada; -1 = nenhum
 };
 const el = {};
-for (const id of ["f-uf", "f-busca", "f-municipio", "f-regional", "f-setor", "f-consultor", "f-marca", "f-marcas-de", "f-status", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate",
+for (const id of ["f-uf", "f-busca", "f-municipio", "f-regional", "f-setor", "f-consultor", "f-marca", "f-marcas-de", "f-status", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-lig-dias", "f-de", "f-ate",
   "trab-contador", "trab-scroll", "trab-tabela", "trab-corpo-tabela", "gaveta", "gaveta-titulo", "gaveta-conteudo", "popover-contato", "popover-quem", "popover-status", "popover-data", "popover-obs",
   "menu-status", "modal-novo", "modal-novo-erro", "lista-municipios-uf", "lista-setores", "n-uf", "n-setor", "n-municipio", "n-status", "n-consultor"]) {
   el[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.getElementById(id);
@@ -105,14 +105,16 @@ function enriquecer(o) {
   o.statusNome = o.contato_inexistente ? "Contato inexistente" : o.cor_linha ? d.statusPorHex.get(o.cor_linha)?.nome || "" : "";
   o.statusHexVisual = o.contato_inexistente ? COR_INEXISTENTE : o.cor_linha && d.statusPorHex.has(o.cor_linha) ? o.cor_linha : null;
   o.busca = normalizar([o.municipioNome, o.municipio_texto, o.responsavel, o.cargo, o.telefone, o.telefone_original, o.whatsapp, o.email, o.observacoes, o.curso, o.setor, o.consultor_planilha].filter(Boolean).join(" | "));
-  // Fase 4 (só leitura): ligação do CDR ao número exato (contato único) ou ao município
-  const cm = o.codigo_ibge && d.cdr ? d.cdr.municipios[o.codigo_ibge] : null;
-  const cc = d.cdr ? d.cdr.contatos[o.id] : null;
-  o.cdrContato = !!cc;
-  o.cdrUltima = cc ? cc[0] : cm ? cm[0] : null;
-  o.cdrTotal = cc ? cc[1] : cm ? cm[1] : 0;
-  o.cdrMunicipioTotal = cm ? cm[1] : 0;
-  o.cdrQuem = cm ? (cm[3] === -1 ? "outro consultor" : cm[3] === 0 || cm[3] === null ? "" : d.consultoresPorId.get(cm[3]) || "") : "";
+  // Última ligação do PABX para o TELEFONE (só leitura, derivada do CDR). É do
+  // número, não do contato: o geral da prefeitura atende vários setores.
+  const lt = o.telefone && d.cdr ? d.cdr.ultima[o.telefone] : null;
+  o.ligUltima = lt ? lt[0] : null;
+  o.ligQuem = lt ? (lt[1] === -1 ? "outro consultor" : lt[1] ? d.cdr.pessoas[lt[1]] || d.consultoresPorId.get(lt[1]) || "" : "ramal sem dono") : "";
+  o.ligAtendida = lt ? lt[2] : 0;
+  o.ligConversa = lt ? lt[3] : 0;
+  o.ligTotal = lt ? lt[4] : 0;
+  o.ligAtendidas = lt ? lt[5] : 0;
+  o.telCompartilhado = o.telefone && d.cdr ? d.cdr.compartilhados[o.telefone] || 0 : 0;
   return o;
 }
 
@@ -168,7 +170,7 @@ function preencherFiltrosEstaticos() {
   // refletir filtros no formulário
   const f = trab.filtros;
   el.fBusca.value = f.busca; el.fMunicipio.value = f.municipio; el.fRegional.value = f.regional; el.fSetor.value = f.setor; el.fConsultor.value = f.consultor; el.fMarca.value = f.marca;
-  el.fOcultas.checked = f.ocultas; el.fSemTelefone.checked = f.semTelefone; el.fInexistente.checked = f.inexistente; el.fNunca.checked = f.nunca; el.fNuncaCdr.checked = f.nuncaCdr; el.fDe.value = f.de; el.fAte.value = f.ate;
+  el.fOcultas.checked = f.ocultas; el.fSemTelefone.checked = f.semTelefone; el.fInexistente.checked = f.inexistente; el.fNunca.checked = f.nunca; el.fNuncaCdr.checked = f.nuncaCdr; el.fLigDias.value = f.ligDias; el.fDe.value = f.de; el.fAte.value = f.ate;
 }
 
 // ---------- filtros ----------
@@ -176,7 +178,7 @@ function preencherFiltrosEstaticos() {
 function lerFiltros() {
   const f = trab.filtros;
   f.busca = el.fBusca.value.trim(); f.municipio = el.fMunicipio.value.trim(); f.regional = el.fRegional.value; f.setor = el.fSetor.value; f.consultor = el.fConsultor.value; f.marca = el.fMarca.value;
-  f.ocultas = el.fOcultas.checked; f.semTelefone = el.fSemTelefone.checked; f.inexistente = el.fInexistente.checked; f.nunca = el.fNunca.checked; f.nuncaCdr = el.fNuncaCdr.checked; f.de = el.fDe.value; f.ate = el.fAte.value;
+  f.ocultas = el.fOcultas.checked; f.semTelefone = el.fSemTelefone.checked; f.inexistente = el.fInexistente.checked; f.nunca = el.fNunca.checked; f.nuncaCdr = el.fNuncaCdr.checked; f.ligDias = /^\d+$/.test(el.fLigDias.value.trim()) ? el.fLigDias.value.trim() : ""; f.de = el.fDe.value; f.ate = el.fAte.value;
 }
 
 function aplicarFiltros() {
@@ -187,6 +189,8 @@ function aplicarFiltros() {
   const regional = f.regional ? Number(f.regional) : null;
   const consultor = f.consultor === "sem" ? "sem" : f.consultor ? Number(f.consultor) : null;
   const status = f.status;
+  // "ligado nos últimos N dias": N = 1 é hoje; compara só a data da ligação
+  const ligDesde = f.ligDias ? (() => { const d = new Date(); d.setDate(d.getDate() - Number(f.ligDias) + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })() : null;
   if (trab.modo === "rota") {
     trab.filtradas = [...trab.linhas];
     ordenar(); atualizarContador(); trab.primeiraVisivel = -1; renderizarJanela(true); gravarHash();
@@ -202,7 +206,8 @@ function aplicarFiltros() {
     if (f.semTelefone && o.telefone) return false;
     if (f.inexistente && !o.contato_inexistente) return false;
     if (f.nunca && o.data_ultimo_contato) return false;
-    if (f.nuncaCdr && o.cdrUltima) return false;
+    if (f.nuncaCdr && o.ligUltima) return false;
+    if (ligDesde && (!o.ligUltima || o.ligUltima.slice(0, 10) < ligDesde)) return false;
     if (f.de && (!o.data_ultimo_contato || o.data_ultimo_contato < f.de)) return false;
     if (f.ate && (!o.data_ultimo_contato || o.data_ultimo_contato > f.ate)) return false;
     if (status.size) {
@@ -261,6 +266,7 @@ function serializarFiltros() {
   if (f.busca) q.set("q", f.busca); if (f.municipio) q.set("mun", f.municipio); if (f.regional) q.set("reg", f.regional); if (f.setor) q.set("setor", f.setor);
   if (f.consultor) q.set("cons", f.consultor); if (f.marca) q.set("marca", f.marca); if (f.status.size) q.set("st", [...f.status].join(","));
   const flags = ["ocultas", "semTelefone", "inexistente", "nunca", "nuncaCdr"].filter((k) => f[k]); if (flags.length) q.set("flags", flags.join(","));
+  if (f.ligDias) q.set("lig", f.ligDias);
   if (f.de) q.set("de", f.de); if (f.ate) q.set("ate", f.ate);
   if (trab.ordem.campo !== "municipioNome" || trab.ordem.dir !== 1) q.set("ord", `${trab.ordem.campo}:${trab.ordem.dir}`);
   return q.toString();
@@ -281,6 +287,7 @@ function lerHash() {
   f.status = new Set((q.get("st") || "").split(",").filter((s) => s !== "" || (q.get("st") || "").includes(",")));
   if (q.get("st") === "") f.status = new Set([""]);
   const flags = new Set((q.get("flags") || "").split(",")); f.ocultas = flags.has("ocultas"); f.semTelefone = flags.has("semTelefone"); f.inexistente = flags.has("inexistente"); f.nunca = flags.has("nunca"); f.nuncaCdr = flags.has("nuncaCdr");
+  f.ligDias = /^\d+$/.test(q.get("lig") || "") ? q.get("lig") : "";
   f.de = q.get("de") || ""; f.ate = q.get("ate") || "";
   const ord = (q.get("ord") || "").split(":"); if (ord[0]) trab.ordem = { campo: ord[0], dir: Number(ord[1]) === -1 ? -1 : 1 };
   if (aba === "rota") lerHashRota(q);
@@ -306,14 +313,29 @@ const COLUNAS = [
   { campo: "whatsapp", render: (o) => escapeHtml(o.whatsapp || ""), editavel: "texto", valor: (o) => o.whatsapp },
   { campo: "email", render: (o) => escapeHtml(o.email || ""), editavel: "texto" },
   { campo: "data_ultimo_contato", render: (o) => (o.data_ultimo_contato ? escapeHtml(dataBr(o.data_ultimo_contato)) : '<span class="trab-nunca">nunca</span>'), editavel: "data" },
-  { campo: "cdrUltima", render: (o) => (o.cdrUltima
-    ? `<span class="trab-cdr${o.cdrContato ? " trab-cdr-contato" : ""}" title="${o.cdrContato ? `${o.cdrTotal} ligação(ões) do PABX para ESTE número` : `${o.cdrMunicipioTotal} ligação(ões) do PABX para o município (número compartilhado)`}${o.cdrQuem ? ` — última por ${escapeHtml(o.cdrQuem)}` : ""}">${escapeHtml(dataBr(o.cdrUltima))}<small>×${o.cdrTotal}</small></span>`
-    : '<span class="trab-nunca" title="nenhuma ligação do PABX para este município">—</span>') },
+  { campo: "ligUltima", render: renderUltimaLigacao },
+  { campo: "ligQuem", render: (o) => (o.ligUltima ? `<span title="${escapeHtml(dicaLigacao(o))}">${escapeHtml(o.ligQuem)}</span>` : "") },
   { campo: "pessoa_id", render: (o) => escapeHtml(o.consultorNome) || (o.consultor_planilha ? `<span class="texto-suave" title="na planilha: ${escapeHtml(o.consultor_planilha)}">—</span>` : ""), editavel: "consultor" },
   { campo: "curso", render: (o) => escapeHtml(o.curso || ""), editavel: "texto" },
   { campo: "observacoes", render: (o) => escapeHtml(o.observacoes || ""), editavel: "texto" },
   { campo: "acoes", render: (o) => `<button type="button" class="trab-btn" data-acao="registrar" title="registrar contato (R)">📞</button><button type="button" class="trab-btn" data-acao="detalhes" title="detalhes e histórico (D)">▸</button>` },
 ];
+// Última ligação do PABX para o TELEFONE: data e hora, atendida e conversa (como
+// na baixa da rota) e ⇆N quando o número é de N contatos (a ligação não diz o setor)
+function dicaLigacao(o) {
+  const base = `${o.ligTotal} ligação(ões) do PABX para o telefone ${o.telefone_original || o.telefone} (${o.ligAtendidas} atendida(s)); a última por ${o.ligQuem}.`;
+  return o.telCompartilhado > 1
+    ? `${base} ATENÇÃO: este número é de ${o.telCompartilhado} contatos (provavelmente o geral da prefeitura) — a ligação foi para o NÚMERO, não dá para saber com qual setor falaram.`
+    : base;
+}
+function renderUltimaLigacao(o) {
+  if (!o.ligUltima) return `<span class="trab-nunca" title="nenhuma ligação do PABX para este telefone">${o.telefone ? "nunca" : ""}</span>`;
+  const conversa = o.ligAtendida && o.ligConversa ? ` · ${Math.max(1, Math.round(o.ligConversa / 60))} min` : "";
+  return `<span class="trab-lig" title="${escapeHtml(dicaLigacao(o))}">${escapeHtml(dataHoraBr(o.ligUltima))} ` +
+    `<span class="${o.ligAtendida ? "rota-ok" : "rota-nao"}">${o.ligAtendida ? "✓ atendida" : "✗ não atend."}${conversa}</span>` +
+    (o.telCompartilhado > 1 ? ` <small class="trab-lig-compart">⇆${o.telCompartilhado}</small>` : "") + `</span>`;
+}
+
 // colunas em uso: no modo Rota entra a coluna de baixa depois do município (js/rota.js)
 let COLS = COLUNAS;
 
@@ -381,7 +403,9 @@ function rerenderLinha(id) {
   }
 }
 
-function atualizarLinhaLocal(arr) {
+function atualizarLinhaLocal(arr, cdrNovo) {
+  // telefone novo: mescla a última ligação dele (vem na resposta do PATCH)
+  if (cdrNovo && trab.dados.cdr) for (const k of ["ultima", "compartilhados", "pessoas"]) Object.assign(trab.dados.cdr[k], cdrNovo[k]);
   pendentesOutroModo[trab.modo === "rota" ? "trabalho" : "rota"].set(arr[0], arr);
   const o = montarLinha(arr);
   const atual = trab.porId.get(o.id);
@@ -615,7 +639,7 @@ async function concluirEdicao(cancelar, depois = null) {
   if (depois) depois();
   try {
     const r = await postJson(`/api/prospeccao/contatos/${o.id}`, { [campo]: valor }, "PATCH");
-    atualizarLinhaLocal(r.linha);
+    atualizarLinhaLocal(r.linha, r.cdr);
     rerenderLinha(o.id);
     td.classList.remove("erro");
   } catch (err) {
@@ -750,12 +774,18 @@ async function abrirGaveta(id, historico = null) {
     const l = await chamarApi(`/api/prospeccao/contatos/${id}/ligacoes`);
     const alvo = document.getElementById("gaveta-cdr");
     if (!alvo) return;
-    const item = (x) => `<li><span class="texto-suave">${escapeHtml(dataHoraBr(x.dataHora))}</span><span class="${x.atendida ? "lig-ok" : "lig-falha"}">${x.atendida ? `atendida${x.conversaSeg ? ` · ${Math.round(x.conversaSeg / 60)} min` : ""}` : x.eventoFalha ? escapeHtml(x.eventoFalha.toLowerCase()) : "não atendida"}</span><span>${escapeHtml(x.consultor || "sem consultor")}</span>${x.sentido !== "S" ? '<span class="texto-suave">recebida</span>' : ""}</li>`;
+    const item = (x) => `<li><span class="texto-suave">${escapeHtml(dataHoraBr(x.dataHora))}</span><span class="${x.atendida ? "lig-ok" : "lig-falha"}">${x.atendida ? `atendida${x.conversaSeg ? ` · ${Math.max(1, Math.round(x.conversaSeg / 60))} min` : ""}` : x.eventoFalha ? escapeHtml(x.eventoFalha.toLowerCase()) : "não atendida"}</span><span>${escapeHtml(x.consultor || "sem consultor")}</span>${x.sentido !== "S" ? '<span class="texto-suave">recebida</span>' : ""}</li>`;
     const partes = [];
-    if (l.doNumero.length) partes.push(`<p class="texto-suave">Para este número (${l.doNumero.length}${l.doNumero.length >= 30 ? "+" : ""}):</p><ul class="trab-ligacoes">${l.doNumero.map(item).join("")}</ul>`);
-    const outras = l.doMunicipio.filter((x) => !l.doNumero.some((y) => y.id === x.id));
+    const o = trab.porId.get(id);
+    const compart = o?.telCompartilhado > 1
+      ? ` <span class="texto-suave">— número de ${o.telCompartilhado} contatos: a ligação foi para o número, não para este setor</span>` : "";
+    partes.push(l.doNumero.length
+      ? `<p class="texto-suave">Para o telefone, histórico completo (${l.doNumero.length}):${compart}</p><ul class="trab-ligacoes">${l.doNumero.map(item).join("")}</ul>`
+      : `<p class="texto-suave">Nenhuma ligação do PABX para o telefone.</p>`);
+    if (l.doWhatsapp?.length) partes.push(`<p class="texto-suave">Para o WhatsApp (${l.doWhatsapp.length}):</p><ul class="trab-ligacoes">${l.doWhatsapp.map(item).join("")}</ul>`);
+    const outras = l.doMunicipio.filter((x) => !l.doNumero.some((y) => y.id === x.id) && !(l.doWhatsapp || []).some((y) => y.id === x.id));
     if (outras.length) partes.push(`<p class="texto-suave">Para o município (${inteiro(l.totalMunicipio)} no total; últimas ${outras.length}):</p><ul class="trab-ligacoes">${outras.slice(0, 10).map(item).join("")}</ul>`);
-    alvo.innerHTML = partes.join("") || `<p class="texto-suave">Nenhuma ligação do PABX para este número ou município.</p>`;
+    alvo.innerHTML = partes.join("");
   } catch (err) {
     const alvo = document.getElementById("gaveta-cdr");
     if (alvo) alvo.textContent = "não foi possível carregar as ligações";
@@ -947,7 +977,7 @@ let debounceBusca = 0;
 el.fBusca.addEventListener("input", () => { clearTimeout(debounceBusca); debounceBusca = setTimeout(() => { lerFiltros(); aplicarFiltros(); }, 90); });
 el.fMunicipio.addEventListener("input", () => { clearTimeout(debounceBusca); debounceBusca = setTimeout(() => { lerFiltros(); aplicarFiltros(); }, 120); });
 el.fMarcasDe.addEventListener("change", () => verMarcacoesDe(el.fMarcasDe.value).catch((e) => { el.fMarcasDe.value = ""; avisar("⚠ " + e.message, true); }));
-for (const id of ["f-regional", "f-setor", "f-consultor", "f-marca", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-de", "f-ate"]) {
+for (const id of ["f-regional", "f-setor", "f-consultor", "f-marca", "f-ocultas", "f-sem-telefone", "f-inexistente", "f-nunca", "f-nunca-cdr", "f-lig-dias", "f-de", "f-ate"]) {
   document.getElementById(id).addEventListener("change", () => { lerFiltros(); aplicarFiltros(); });
 }
 el.fUf.addEventListener("change", async () => { trab.uf = el.fUf.value; trab.filtros.status = new Set(); trab.filtros.regional = ""; trab.filtros.setor = ""; el.gaveta.classList.add("oculto"); try { await carregarTrabalho(); } catch (e) { avisar("⚠ " + e.message, true); } });
@@ -960,7 +990,7 @@ el.fStatus.addEventListener("click", (ev) => {
   aplicarFiltros();
 });
 document.getElementById("btn-limpar-filtros").addEventListener("click", () => {
-  Object.assign(trab.filtros, { busca: "", municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
+  Object.assign(trab.filtros, { busca: "", municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, ligDias: "", de: "", ate: "" });
   preencherFiltrosEstaticos(); aplicarFiltros();
 });
 document.getElementById("btn-novo-contato").addEventListener("click", abrirModalNovo);
@@ -1126,7 +1156,7 @@ document.getElementById("tabela-gerencial").addEventListener("click", async (ev)
   const tr = ev.target.closest("tr[data-regional]");
   if (!tr) return;
   const uf = tr.dataset.uf;
-  Object.assign(trab.filtros, { busca: "", municipio: "", regional: tr.dataset.regional, setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
+  Object.assign(trab.filtros, { busca: "", municipio: "", regional: tr.dataset.regional, setor: "", consultor: "", marca: "", status: new Set(), ocultas: false, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, ligDias: "", de: "", ate: "" });
   mostrarAba("trabalho");
   if (trab.uf !== uf) { trab.uf = uf; el.fUf.value = uf; await carregarTrabalho().catch((e) => avisar("⚠ " + e.message, true)); }
   else { preencherFiltrosEstaticos(); aplicarFiltros(); }
@@ -1191,7 +1221,7 @@ document.querySelector("#tabela-cdr-ambiguas tbody").addEventListener("click", a
   if (!a) return;
   ev.preventDefault();
   // abre a aba Trabalho na UF dos contatos, com a busca pelo número — as linhas aparecem com os municípios divergentes
-  Object.assign(trab.filtros, { busca: a.dataset.cdrNumero, municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: true, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, de: "", ate: "" });
+  Object.assign(trab.filtros, { busca: a.dataset.cdrNumero, municipio: "", regional: "", setor: "", consultor: "", marca: "", status: new Set(), ocultas: true, semTelefone: false, inexistente: false, nunca: false, nuncaCdr: false, ligDias: "", de: "", ate: "" });
   mostrarAba("trabalho");
   const uf = a.dataset.uf;
   if (uf && uf !== trab.uf) { trab.uf = uf; el.fUf.value = uf; await carregarTrabalho().catch((e) => avisar("⚠ " + e.message, true)); }
