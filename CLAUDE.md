@@ -75,6 +75,7 @@ aula-ai/
 ├── territorio.js    # território: referência PR/SC, casamento cidade→município, cobertura
 ├── prospeccao.js    # prospecção ativa: importação, tela de trabalho, carteiras, gerencial
 ├── cruzamento.js    # Fase 4: CDR × prospecção/Omie/matrículas (classe por ligação, painéis)
+├── rota.js          # Rota do dia: campanha por setor, geração 17h, bloqueio por telefone, baixa CDR/manual, painel
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
 ├── escopo.js        # papéis (admin | vendedor) e escopo por regional — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
@@ -84,6 +85,7 @@ aula-ai/
 ├── dados/           # referência versionada (CSV de regionais, JSONs do IBGE, mapa SVG)
 ├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
 ├── scripts/banco.js # manutenção do SQLite: conferir | checkpoint | backup (deploy seguro)
+├── scripts/viabilidade-rota.js # SÓ LEITURA: estoque de uma campanha da Rota por consultor/regional
 ├── DEPLOY.md        # procedimento de deploy em produção (Docker) e migração do banco p/ o volume
 ├── .dockerignore    # a imagem NUNCA leva banco (*.db, -wal, -shm), backups/, data/, planilhas, .env nem node_modules
 ├── Dockerfile       # 2 estágios: npm ci --omit=dev com toolchain → node:22-bookworm-slim
@@ -96,6 +98,7 @@ aula-ai/
 │   ├── aula-view.js # visualização + links de exportação
 │   ├── central.js   # uploads, sincronização e histórico de ingestões
 │   ├── territorio.js # cobertura do casamento + revisão manual (Fase 1)
+│   ├── rota.js      # aba Rota de /prospeccao (usa a tabela de js/prospeccao.js em "modo rota")
 │   └── login.js
 ├── aula-ai.db       # SQLite local (gerado em runtime, ignorado no git; produção: DB_PATH no volume)
 └── .env             # ANTHROPIC_API_KEY, SESSION_SECRET, ADMIN_*, MYSQL_*, TV_TOKEN, DB_PATH
@@ -169,7 +172,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **27**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **28**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -568,6 +571,62 @@ abandonado). Fase 1 = carga com fidelidade total:
   CHECK: a tabela é recriada e todas as linhas copiadas, e a migração aborta,
   sem mudar nada, se o total ou a contagem por cor da tabela nova diferir da
   antiga (o log mostra as contagens preservadas).
+- **Migração 28 (2026-09-30) — ROTA do dia** (`rota.js` + `js/rota.js`, **zero
+  IA**). Lista diária de ligações por consultor, gerada automaticamente.
+  Decisões do usuário: a rota é uma **CAMPANHA POR SETOR** (o admin escolhe o
+  tipo e todas as rotas a partir de então são dele; esgotou, escolhe o
+  próximo) — **nunca mistura setores**; estoque acabado = **rota curta**, visível
+  no painel, nada de completar com outro setor.
+  `rota_tipos(id, nome, setores_json [{uf, setor}] com o nome EXATO da aba,
+  cota=45, ativo)` — seed "Licitação" = PR `LICITAÇÃO PM`, `LICITAÇÃO CM`,
+  `LICITAÇÃO PM - com população`, `Licitação CM com Papulação` e SC
+  `LICITAÇÃO PM`, `LICITAÇÃO CM`; novos tipos pela tela, sem código.
+  `rota_campanhas(tipo_id NULL = encerrada, vale_desde)` — vigente numa data =
+  `vale_desde` mais recente ≤ data; a troca vale na próxima data útil SEM rota
+  gerada (opção "refazer as rotas futuras que ninguém começou").
+  `rotas(pessoa_id, data UNIQUE, campanha_id, tipo_id, setores_json, cota,
+  elegiveis)` e `rota_itens(rota_id, contato_id, posicao, telefone, setor,
+  codigo_ibge, baixa_em, baixa_metodo cdr|manual, ligacao_id, atendida,
+  baixa_usuario_id)` — **é o histórico de rota**, nunca apagado (exceto rota
+  futura descartada na troca). Regras: só regionais da carteira (regional
+  principal); contato sem consultor ou do próprio (de outro consultor não
+  entra — e contato de consultor SEM vínculo na regional não entra em rota
+  nenhuma: o painel conta como "fora de todas as rotas"); telefone válido, não
+  inexistente, não oculto; **um item por telefone** (chave = variante com o
+  nono dígito). **Bloqueio (opção B do usuário, 2026-09-30, `bloqueiosPara`)**:
+  item de rota bloqueia 30 dias com baixa e 7 dias sem baixa — **por TELEFONE
+  dentro da mesma campanha (mesmo tipo de rota), por CONTATO entre campanhas
+  diferentes** (~84% dos telefones de qualquer setor são o número geral da
+  prefeitura: bloquear o número entre campanhas esvaziaria toda campanha depois
+  da primeira; ligar de novo pedindo outro setor é a conversa normal). Fora da
+  rota, sempre por contato, 30 dias: registro manual (histórico `contato` ou
+  `data_ultimo_contato`) e ligação do CDR atribuível ao contato
+  (`ligacoes.contato_id`, número que só ele tem) — ligação para número
+  compartilhado não diz o setor e não bloqueia. Ordem: municípios inteiros andando pelos vizinhos
+  (`dados/vizinhos_PR_SC.json`), dentro do município PM → CM → Autarquia e a
+  ordem dos setores; consultores da mesma regional em rodízio por município
+  (ordem gira por dia), numa transação — nunca o mesmo telefone em duas rotas.
+  Geração: tique a cada 5 min + boot (`garantirRotas`): a de hoje se faltar e,
+  **a partir das 17h (Brasília, `Intl` com America/Sao_Paulo — o container roda
+  em UTC)**, a do próximo dia útil; rota gerada **não muda**. Baixa: pelo CDR
+  (`baixarPeloCdr`, ao fim de cada importação do CDR e no "recalcular
+  cruzamento"): ligação de SAÍDA do dono da rota para o número, no dia da rota;
+  vale a atendida, senão a última; reprocessável; só leitura sobre o contato.
+  Manual: registrar contato (qualquer canal) num contato da rota do dia da
+  data do registro (`baixarPorRegistro`, na rota de registrar contato);
+  desfazer só a manual (o histórico fica). Tela: aba **Rota do dia** em
+  `/prospeccao` (vendedor começa nela) — a MESMA tabela da aba Trabalho em
+  "modo rota" (`trocarModo` em `js/prospeccao.js`: troca o estado da tabela e
+  move tabela/gaveta/popover/menu de seção; edição num modo é repassada à
+  linha do outro; marcações num mapa único), com posição por município, faixa
+  entre municípios, coluna Baixa e progresso (feitas/atendidas/PABX/manuais).
+  Admin: painel da campanha (setor vigente e da próxima geração, estoque em
+  telefones e dias para a equipe e por consultor/regional, progresso do dia,
+  acumulado da campanha — tocados/universo, atendidos, entraram sem ligação,
+  nunca em rota —, **telefone compartilhado** (`sobreposicao`: contatos da
+  campanha vigente com o mesmo número de outro setor e os setores mais
+  sobrepostos — medido na carteira de teste: 94%), fora de todas as rotas, consultores sem carteira, troca de
+  setor em dois cliques, tipos de rota, histórico de campanhas).
 
 ## Rotas
 
@@ -622,7 +681,13 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/prospeccao/contatos/:id/ligacoes` | ligações do CDR para o número do contato (`doNumero`) e para o município dele (`doMunicipio`, `totalMunicipio`) — data, atendida, tempo de conversa, falha, consultor (vendedor: terceiros = "outro consultor"); fora do escopo → 404 |
 | `PUT /api/prospeccao/contatos/:id/marcacao` | marcação pessoal `{cor: "verde"\|"vermelho"\|"amarelo"\|null}` do usuário da sessão; idempotente; contato fora do escopo → 404, cor inválida → 400. As marcações próprias vêm em `marcacoes` no `GET /api/prospeccao/contatos` (admin também recebe `marcacoesDe`: quem mais marcou na UF) |
 | `GET /api/prospeccao/marcacoes?uf=&usuario=` | admin: marcações de outro usuário na UF (só leitura); vendedor → 403 |
-| `POST /api/prospeccao/cdr/recruzar` | admin: reclassifica todas as ligações (derivado, idempotente) e devolve as contagens |
+| `POST /api/prospeccao/cdr/recruzar` | admin: reclassifica todas as ligações (derivado, idempotente) e devolve as contagens (+ `rota`: baixas pelo CDR refeitas) |
+| `GET /api/rota?data=&pessoa=` | rota do dia (`data` padrão = hoje em Brasília): `rota` (itens com baixa, `progresso`) + `contatos` no formato do payload da aba Trabalho (corte do vendedor igual); vendedor: só a própria (`pessoa` de outro = 404); admin sem `pessoa` = a primeira do dia, `pessoas` = quem tem rota |
+| `DELETE /api/rota/itens/:id/baixa` | desfaz baixa MANUAL (a do CDR → 400); item de outro consultor (vendedor) = 404 |
+| `GET /api/rota/painel?data=` | admin: campanha (hoje / data / próxima geração / histórico), `rotasDia` com progresso, `estoque` da próxima geração (telefones, dias da equipe, por consultor e regional, `orfaos`, `semCarteira`), `acumulado` da campanha, `tipos` |
+| `POST /api/rota/campanha` | admin: `{tipoId \| null, refazerFuturas}` → vale na próxima data útil sem rota; gera o que já for devido |
+| `POST /api/rota/gerar` | admin: gera as rotas faltantes (hoje e, após 17h, o próximo dia útil) |
+| `GET/POST /api/rota/tipos`, `PUT /api/rota/tipos/:id` | admin: tipos de rota + setores disponíveis (uf, aba, linhas, aptas); setor inexistente/cota fora de 1–500/nome repetido → 400 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
 Erros que escapam das rotas passam por um tratador final em `server.js`: corpo
@@ -1033,6 +1098,20 @@ sem sobreposição. Regras (decisões do usuário):
 - Números de produção em 2026-09-25: 120 na amarela (45 com 3 dias, 23 com
   4) e 1.092 na vermelha. A rotação passou de 45 s para 30 s por tela
   (`?giro`).
+
+### ✅ Rota do dia (2026-09-30, migração 28)
+Ver "Migração 28" em Banco de dados. Antes de ligar em produção:
+`docker compose exec -T jonias node - /app/data/aula-ai.db < scripts/viabilidade-rota.js`
+(só leitura; aceita `"setor1|setor2"` como 2º argumento) mostra o estoque por
+consultor × regional, contatos fora de todas as rotas e quem está sem carteira.
+Medido em 2026-09-30 na base local: ~84% dos telefones de QUALQUER setor são
+iguais a algum telefone de licitação — foi isso que levou à opção B do
+bloqueio (por telefone só dentro da campanha).
+**Equipe atual da prospecção** (`equipeAtual()` em `prospeccao.js`): a lista
+`CONSULTORES_ATUAIS` (Jhonnata incluído em 2026-09-30 — tinha ramal e
+carteira, mas não podia receber contato na aba Trabalho) ∪ todo consultor
+ativo com carteira ou com usuário vendedor ativo. Fonte única para o seletor
+de consultor, o casamento do consultor da planilha e `/usuarios`.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

@@ -477,19 +477,31 @@ const COLUNAS_CONTATO = [
 ];
 
 // Consultor atual: só a equipe de hoje vira pessoa_id (decisão do usuário,
-// 2026-09-09); qualquer outra grafia fica sem consultor.
-const CONSULTORES_ATUAIS = ["Frederico", "Renato", "Eduardo", "Agnes", "Bianca"];
+// 2026-09-09); qualquer outra grafia fica sem consultor. Jhonnata entrou em
+// 2026-09-30 (já tinha ramal e carteira — a lista fixa o deixava de fora).
+// Para a lista não voltar a divergir da operação, a equipe atual também inclui
+// todo consultor ativo com carteira ou com usuário vendedor ativo.
+const CONSULTORES_ATUAIS = ["Frederico", "Renato", "Eduardo", "Agnes", "Bianca", "Jhonnata"];
+function equipeAtual() {
+  const marcadores = CONSULTORES_ATUAIS.map(() => "?").join(",");
+  return db.prepare(
+    `SELECT p.id, p.nome, p.wallet_nome, p.nomes_alternativos FROM pessoas p
+     WHERE p.tipo = 'consultor' AND p.ativo = 1 AND (
+       p.nome IN (${marcadores})
+       OR EXISTS (SELECT 1 FROM carteiras c WHERE c.pessoa_id = p.id)
+       OR EXISTS (SELECT 1 FROM usuarios u WHERE u.pessoa_id = p.id AND u.papel = 'vendedor' AND u.ativo = 1))
+     ORDER BY p.nome`
+  ).all(...CONSULTORES_ATUAIS);
+}
 function mapaConsultores() {
   const mapa = new Map();
-  const marcadores = CONSULTORES_ATUAIS.map(() => "?").join(",");
-  for (const p of db.prepare(`SELECT id, nome, wallet_nome, nomes_alternativos FROM pessoas WHERE nome IN (${marcadores})`).all(...CONSULTORES_ATUAIS)) {
+  for (const p of equipeAtual()) {
     for (const n of [p.nome, p.wallet_nome, ...JSON.parse(p.nomes_alternativos || "[]")]) if (n) mapa.set(normalizarRotulo(n), p.id);
   }
   return mapa;
 }
 function consultoresAtuais() {
-  const marcadores = CONSULTORES_ATUAIS.map(() => "?").join(",");
-  return db.prepare(`SELECT id, nome FROM pessoas WHERE nome IN (${marcadores}) ORDER BY nome`).all(...CONSULTORES_ATUAIS);
+  return equipeAtual().map((p) => ({ id: p.id, nome: p.nome }));
 }
 
 function linhaIdentica(existente, nova) {
@@ -999,6 +1011,48 @@ function payloadTrabalho(uf, usuario, escopo = null) {
   };
 }
 
+// Rota (rota.js): mesmo formato do payloadTrabalho, mas só para os contatos
+// pedidos (podem ser de PR e SC na mesma rota), na ordem dos ids. O corte do
+// vendedor vale igual: contato fora do escopo não sai do banco.
+function payloadContatos(ids, usuario, escopo = null) {
+  const cm = clausulaMunicipios(escopo);
+  const sl = sqlLinhaTrabalho(escopo);
+  const porId = new Map();
+  for (let i = 0; i < ids.length; i += 500) {
+    const lote = ids.slice(i, i + 500);
+    for (const r of db.prepare(`${sl.sql} WHERE id IN (${lote.map(() => "?").join(",")}) AND ${cm.sql}`).all(...sl.valores, ...lote, ...cm.valores)) porId.set(r.id, r);
+  }
+  const linhas = ids.filter((id) => porId.has(id)).map((id) => linhaCompacta(porId.get(id)));
+  const ufs = [...new Set(db.prepare(`SELECT DISTINCT uf FROM contatos_ativo WHERE id IN (${ids.map(() => "?").join(",") || "NULL"})`).all(...ids).map((r) => r.uf))];
+  const marcUf = ufs.map(() => "?").join(",") || "NULL";
+  const regionais = escopo
+    ? db.prepare(`SELECT id, sigla, nome FROM regionais WHERE id IN (${escopo.regionais.map(() => "?").join(",") || "NULL"}) ORDER BY sigla`).all(...escopo.regionais)
+    : db.prepare(`SELECT id, sigla, nome FROM regionais WHERE uf IN (${marcUf}) ORDER BY sigla`).all(...ufs);
+  const municipios = Object.fromEntries(
+    db.prepare(`SELECT codigo_ibge codigo, nome, regional_principal_id regional FROM municipios WHERE uf IN (${marcUf}) AND ${cm.sql} ORDER BY nome`)
+      .all(...ufs, ...cm.valores).map((m) => [m.codigo, [m.nome, m.regional]])
+  );
+  const setores = db.prepare(`SELECT DISTINCT setor FROM contatos_ativo WHERE uf IN (${marcUf}) AND ${cm.sql} ORDER BY setor`).all(...ufs, ...cm.valores).map((s) => s.setor);
+  const consultores = escopo
+    ? (escopo.pessoaId ? db.prepare("SELECT id, nome FROM pessoas WHERE id = ?").all(escopo.pessoaId) : [])
+    : consultoresAtuais();
+  const cdrJunto = { municipios: {}, contatos: {} };
+  for (const uf of ufs) {
+    const c = cdr.cdrPorMunicipio(uf, escopo);
+    Object.assign(cdrJunto.municipios, c.municipios);
+    Object.assign(cdrJunto.contatos, c.contatos);
+  }
+  const marcacoes = {};
+  for (const uf of ufs) Object.assign(marcacoes, marcacoesDoUsuario(uf, usuario.id, escopo));
+  return {
+    ufs, campos: CAMPOS_TRABALHO, linhas, status: statusDisponiveis(), setores, regionais, municipios, consultores,
+    cdr: cdrJunto, marcacoes, marcacoesDe: null,
+    usuario: { id: usuario.id, nome: usuario.nome || usuario.login, papel: usuario.papel, pessoaId: usuario.pessoa_id ?? null },
+    escopo: escopo ? { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio } : null,
+    geradoEm: new Date().toISOString(),
+  };
+}
+
 const hojeIso = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1369,13 +1423,9 @@ function listarCarteiras() {
     r.titular = vinculos.find((v) => v.regionalId === r.id && v.papel === "titular") || null;
     r.apoios = vinculos.filter((v) => v.regionalId === r.id && v.papel === "apoio");
   }
-  // Pessoas elegíveis: consultores ligados a um usuário vendedor ativo, mais a equipe atual
-  const pessoas = db.prepare(
-    `SELECT DISTINCT p.id, p.nome, (u.id IS NOT NULL) temUsuario FROM pessoas p
-     LEFT JOIN usuarios u ON u.pessoa_id = p.id AND u.papel = 'vendedor' AND u.ativo = 1
-     WHERE p.tipo = 'consultor' AND (u.id IS NOT NULL OR p.nome IN (${CONSULTORES_ATUAIS.map(() => "?").join(",")}))
-     ORDER BY p.nome`
-  ).all(...CONSULTORES_ATUAIS);
+  // Pessoas elegíveis: a equipe atual (mesma fonte da aba Trabalho)
+  const comUsuario = new Set(db.prepare("SELECT pessoa_id FROM usuarios WHERE papel = 'vendedor' AND ativo = 1 AND pessoa_id IS NOT NULL").all().map((u) => u.pessoa_id));
+  const pessoas = equipeAtual().map((p) => ({ id: p.id, nome: p.nome, temUsuario: comUsuario.has(p.id) ? 1 : 0 }));
   return { regionais, pessoas };
 }
 
@@ -1469,6 +1519,7 @@ module.exports = {
   gerencial,
   // Fase 2
   payloadTrabalho,
+  payloadContatos,
   atualizarContato,
   registrarContato,
   historicoDoContato,

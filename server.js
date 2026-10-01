@@ -31,6 +31,7 @@ const { prepararFatosFeedback, gerarFeedbackMarkdown } = require("./feedback.js"
 const territorio = require("./territorio.js");
 const prospeccao = require("./prospeccao.js");
 const cruzamento = require("./cruzamento.js");
+const rota = require("./rota.js");
 const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
 const { hashSenha, gerarSenhaInicial, validarSenhaNova } = require("./auth.js");
 
@@ -242,6 +243,7 @@ const PREFIXOS_SO_ADMIN = [
   "/api/usuarios", "/api/carteiras", "/api/prospeccao/cobertura", "/api/prospeccao/gerencial", "/api/prospeccao/marcacoes",
   "/api/prospeccao/status", "/api/territorio/cobertura", "/api/territorio/pendencias",
   "/api/territorio/apelidos", "/api/resumo",
+  "/api/rota/painel", "/api/rota/campanha", "/api/rota/gerar", "/api/rota/tipos",
 ];
 app.use("/api", (req, res, next) => {
   const caminho = req.originalUrl.split("?")[0];
@@ -779,7 +781,13 @@ app.patch("/api/prospeccao/contatos/:id", (req, res) => {
 
 app.post("/api/prospeccao/contatos/:id/contatos", (req, res) => {
   try {
-    res.status(201).json(prospeccao.registrarContato(req.params.id, req.body || {}, req.usuario.id, escopoDe(req.usuario)));
+    // dia do registro no horário de Brasília (o container roda em UTC)
+    const corpo = { ...(req.body || {}) };
+    if (!corpo.data) corpo.data = rota.agoraBrasilia().data;
+    const r = prospeccao.registrarContato(req.params.id, corpo, req.usuario.id, escopoDe(req.usuario));
+    // Rota: registrar contato num contato da rota do dia é a baixa manual
+    r.baixaRota = rota.baixarPorRegistro(req.params.id, corpo.data, req.usuario.id);
+    res.status(201).json(r);
   } catch (err) {
     responderErroProspeccao("prospeccao/contatos/:id/contatos", err, res);
   }
@@ -835,7 +843,79 @@ app.get("/api/prospeccao/cdr", (req, res) => {
 
 // Recalcular o cruzamento inteiro (admin) — derivado, idempotente
 app.post("/api/prospeccao/cdr/recruzar", (req, res) => {
-  res.json(cruzamento.cruzarLigacoes());
+  const r = cruzamento.cruzarLigacoes();
+  r.rota = rota.baixarPeloCdr();
+  res.json(r);
+});
+
+// ---------- Rota (migração 28, rota.js) ----------
+// Vendedor: só a própria rota (corte no servidor, outra pessoa = 404).
+// Admin: rotas de todos, painel da campanha, troca de setor e tipos de rota
+// (prefixos em PREFIXOS_SO_ADMIN).
+function responderErroRota(nome, err, res) {
+  if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message });
+  responderErroProspeccao(nome, err, res);
+}
+
+app.get("/api/rota", (req, res) => {
+  try {
+    res.json(rota.rotaDoDia({ data: req.query.data, pessoaId: req.query.pessoa }, req.usuario, escopoDe(req.usuario)));
+  } catch (err) {
+    responderErroRota("rota", err, res);
+  }
+});
+
+app.delete("/api/rota/itens/:id/baixa", (req, res) => {
+  try {
+    res.json(rota.desfazerBaixa(req.params.id, escopoDe(req.usuario)));
+  } catch (err) {
+    responderErroRota("rota/itens/:id/baixa", err, res);
+  }
+});
+
+app.get("/api/rota/painel", (req, res) => {
+  try {
+    res.json(rota.painel(req.query.data));
+  } catch (err) {
+    responderErroRota("rota/painel", err, res);
+  }
+});
+
+app.post("/api/rota/campanha", (req, res) => {
+  try {
+    const { tipoId = null, refazerFuturas = false } = req.body || {};
+    res.json(rota.trocarCampanha({ tipoId, refazerFuturas: refazerFuturas === true }, req.usuario.id));
+  } catch (err) {
+    responderErroRota("rota/campanha", err, res);
+  }
+});
+
+app.post("/api/rota/gerar", (req, res) => {
+  try {
+    res.json({ geradas: rota.garantirRotas() });
+  } catch (err) {
+    responderErroRota("rota/gerar", err, res);
+  }
+});
+
+app.get("/api/rota/tipos", (req, res) => {
+  res.json({ tipos: rota.listarTipos(), setores: rota.setoresDisponiveis() });
+});
+
+app.post("/api/rota/tipos", (req, res) => {
+  try {
+    res.status(201).json(rota.gravarTipo({ ...(req.body || {}), id: undefined }, req.usuario.id));
+  } catch (err) {
+    responderErroRota("rota/tipos", err, res);
+  }
+});
+
+app.put("/api/rota/tipos/:id", (req, res) => {
+  try {
+    res.json(rota.gravarTipo({ ...(req.body || {}), id: Number(req.params.id) }, req.usuario.id));
+  } catch (err) {
+    responderErroRota("rota/tipos/:id", err, res);
+  }
 });
 
 app.post("/api/prospeccao/status", (req, res) => {
@@ -1388,6 +1468,9 @@ app.use((err, req, res, next) => {
       `${cdrCruzado.prospeccao} prospecção, ${cdrCruzado.ambigua} ambígua(s), ${cdrCruzado.cliente} cliente, ${cdrCruzado.lead} lead, ` +
       `${cdrCruzado.desconhecida} desconhecida(s), ${cdrCruzado.interna} interna(s) em ${cdrCruzado.ms} ms.`);
   }
+  // Rota: gera a de hoje (se faltar) e, a partir das 17h, a do próximo dia útil
+  rota.garantirRotas();
+  setInterval(() => rota.garantirRotas(), 5 * 60 * 1000).unref();
   app.listen(PORT, () => {
     console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
   });

@@ -413,6 +413,9 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
     // Fase 4: classifica cada ligação (prospecção / cliente / lead…) — derivado, fora da transação da carga
     const cruzamento = cruzarLigacoes();
     relatorio.cruzamento = cruzamento;
+    // Rota: ligação do consultor para o número de um item da rota do dia = baixa
+    // (require tardio: rota.js → prospeccao.js → importacao.js)
+    relatorio.rota = require("./rota.js").baixarPeloCdr();
     db.prepare("UPDATE importacoes SET detalhes_json = ? WHERE id = ?").run(JSON.stringify(relatorio), resultado.importacaoId);
 
     return {

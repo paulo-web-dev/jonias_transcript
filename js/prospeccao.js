@@ -3,6 +3,7 @@
 // /prospeccao — Trabalho (Fase 2: tabela virtual com filtros em memória,
 // edição inline, status, registro de contato, histórico, novo contato,
 // exportação), Cores e status (Fase 1) e Cobertura da carga (Fase 1).
+// A aba Rota (js/rota.js) usa ESTA tabela em "modo rota": ver trocarModo.
 
 function escapeHtml(t) {
   const d = document.createElement("div");
@@ -46,7 +47,12 @@ function textoLegivel(hex) {
 function mostrarAba(nome) {
   for (const b of document.querySelectorAll(".aba-btn")) b.classList.toggle("ativo", b.dataset.aba === nome);
   for (const s of document.querySelectorAll(".aba-painel")) s.classList.toggle("oculto", s.id !== `aba-${nome}`);
-  if (nome !== "trabalho") esconderFlutuantes();
+  if (nome !== "trabalho" && nome !== "rota") esconderFlutuantes();
+  if (nome === "rota") { trocarModo("rota"); abrirAbaRota(); }
+  else if (nome === "trabalho") {
+    trocarModo("trabalho");
+    if (!trab.dados && iniciado) carregarTrabalho().catch((e) => avisar("⚠ " + e.message, true));
+  }
 }
 document.querySelector(".prospeccao-abas").addEventListener("click", (ev) => {
   const b = ev.target.closest(".aba-btn");
@@ -111,6 +117,8 @@ function enriquecer(o) {
 }
 
 async function carregarTrabalho() {
+  // no modo Rota (ex.: cor renomeada), só invalida: recarrega ao voltar para o Trabalho
+  if (trab.modo !== "trabalho") { estadoModo.trabalho = null; return; }
   const uf = trab.uf;
   el.trabContador.textContent = "carregando…";
   const t0 = performance.now();
@@ -119,7 +127,7 @@ async function carregarTrabalho() {
   d.consultoresPorId = new Map(d.consultores.map((c) => [c.id, c.nome]));
   d.statusPorHex = new Map(d.status.map((s) => [s.hex, s]));
   trab.dados = d;
-  trab.marcas = new Map(Object.entries(d.marcacoes || {}).map(([id, cor]) => [Number(id), cor]));
+  absorverMarcacoes(d);
   trab.verDe = null; trab.marcasOutro = new Map();
   preencherMarcasDe(d);
   trab.linhas = d.linhas.map(montarLinha);
@@ -179,6 +187,11 @@ function aplicarFiltros() {
   const regional = f.regional ? Number(f.regional) : null;
   const consultor = f.consultor === "sem" ? "sem" : f.consultor ? Number(f.consultor) : null;
   const status = f.status;
+  if (trab.modo === "rota") {
+    trab.filtradas = [...trab.linhas];
+    ordenar(); atualizarContador(); trab.primeiraVisivel = -1; renderizarJanela(true); gravarHash();
+    return;
+  }
   trab.filtradas = trab.linhas.filter((o) => {
     if (!f.ocultas && o.linha_oculta) return false;
     if (f.setor && o.setor !== f.setor) return false;
@@ -211,7 +224,8 @@ function aplicarFiltros() {
 
 function atualizarContador() {
   const n = { verde: 0, vermelho: 0, amarelo: 0 };
-  for (const cor of (trab.verDe ? trab.marcasOutro : trab.marcas).values()) if (cor in n) n[cor]++;
+  if (trab.modo === "rota") return atualizarProgressoRota();
+  for (const o of trab.linhas) if (o.marca in n) n[o.marca]++;
   el.trabContador.textContent = `${inteiro(trab.filtradas.length)} de ${inteiro(trab.linhas.length)}` +
     (n.verde || n.vermelho || n.amarelo
       ? ` · ${trab.verDe ? `de ${trab.verDe.nome}: ` : ""}🟢 ${inteiro(n.verde)} 🔴 ${inteiro(n.vermelho)} 🟡 ${inteiro(n.amarelo)}`
@@ -254,7 +268,7 @@ function serializarFiltros() {
 let ignorarHash = false;
 function gravarHash() {
   const aba = document.querySelector(".aba-btn.ativo")?.dataset.aba || "trabalho";
-  const novo = `#${aba}${aba === "trabalho" ? "?" + serializarFiltros() : ""}`;
+  const novo = `#${aba}${aba === "trabalho" ? "?" + serializarFiltros() : aba === "rota" ? "?" + serializarRota() : ""}`;
   if (location.hash !== novo) { ignorarHash = true; history.replaceState(null, "", novo); ignorarHash = false; }
 }
 function lerHash() {
@@ -269,7 +283,8 @@ function lerHash() {
   const flags = new Set((q.get("flags") || "").split(",")); f.ocultas = flags.has("ocultas"); f.semTelefone = flags.has("semTelefone"); f.inexistente = flags.has("inexistente"); f.nunca = flags.has("nunca"); f.nuncaCdr = flags.has("nuncaCdr");
   f.de = q.get("de") || ""; f.ate = q.get("ate") || "";
   const ord = (q.get("ord") || "").split(":"); if (ord[0]) trab.ordem = { campo: ord[0], dir: Number(ord[1]) === -1 ? -1 : 1 };
-  return ["trabalho", "gerencial", "cores", "cobertura"].includes(aba) ? aba : "trabalho";
+  if (aba === "rota") lerHashRota(q);
+  return ["rota", "trabalho", "gerencial", "cores", "cobertura"].includes(aba) ? aba : "";
 }
 
 // ---------- tabela virtual ----------
@@ -282,7 +297,7 @@ const COLUNAS = [
     `<button type="button" class="marca-btn marca-${cor}${o.marca === cor ? " ativo" : ""}" data-acao="marca" data-cor="${cor}"${trab.verDe ? " disabled" : ""}
       title="${trab.verDe ? `marcação de ${escapeHtml(trab.verDe.nome)} (só leitura)` : `${cor} (tecla ${CORES_MARCA.indexOf(cor) + 1}) — clique de novo limpa`}"></button>`).join("") },
   { campo: "status", fixa: true, render: (o) => chipStatus(o), editavel: "status" },
-  { campo: "municipioNome", fixa: true, render: (o) => escapeHtml(o.municipioNome) + (o.codigo_ibge ? "" : o.municipio_texto ? ' <span class="trab-sem-match" title="não casou com município oficial">?</span>' : ""), editavel: "municipio" },
+  { campo: "municipioNome", fixa: true, render: (o) => (trab.modo === "rota" && o.rotaPosicao ? `<small class="rota-pos">${o.rotaPosicao}</small>` : "") + escapeHtml(o.municipioNome) + (o.codigo_ibge ? "" : o.municipio_texto ? ' <span class="trab-sem-match" title="não casou com município oficial">?</span>' : ""), editavel: "municipio" },
   { campo: "regionalSigla", render: (o) => escapeHtml(o.regionalSigla) },
   { campo: "setor", render: (o) => escapeHtml(o.setor), editavel: "setor" },
   { campo: "responsavel", render: (o) => escapeHtml(o.responsavel || ""), editavel: "texto" },
@@ -299,6 +314,8 @@ const COLUNAS = [
   { campo: "observacoes", render: (o) => escapeHtml(o.observacoes || ""), editavel: "texto" },
   { campo: "acoes", render: (o) => `<button type="button" class="trab-btn" data-acao="registrar" title="registrar contato (R)">📞</button><button type="button" class="trab-btn" data-acao="detalhes" title="detalhes e histórico (D)">▸</button>` },
 ];
+// colunas em uso: no modo Rota entra a coluna de baixa depois do município (js/rota.js)
+let COLS = COLUNAS;
 
 function chipStatus(o) {
   const hex = o.statusHexVisual;
@@ -308,9 +325,11 @@ function chipStatus(o) {
 }
 
 function htmlLinha(o, idx) {
-  const classes = ["trab-linha", o.marca ? `trab-marca-${o.marca}` : "", o.linha_oculta ? "trab-oculta" : "", o.id === trab.selecionado ? "trab-selecionada" : "", o.editado_em ? "trab-editada" : ""].filter(Boolean).join(" ");
+  const classes = ["trab-linha", o.marca ? `trab-marca-${o.marca}` : "", o.linha_oculta ? "trab-oculta" : "", o.id === trab.selecionado ? "trab-selecionada" : "", o.editado_em ? "trab-editada" : "",
+    trab.modo === "rota" && o.rotaGrupoInicio && trab.ordem.campo === "rotaPosicao" && idx > 0 ? "rota-grupo" : "",
+    trab.modo === "rota" && o.rotaItem?.baixaMetodo ? "rota-feita" : ""].filter(Boolean).join(" ");
   const cursor = o.id === trab.selecionado ? trab.coluna : -1;
-  return `<tr class="${classes}" data-id="${o.id}" data-idx="${idx}">${COLUNAS.map((c, i) => `<td class="c-${c.campo}${c.editavel ? " editavel" : ""}${c.fixa ? " fixa" : ""}${i === cursor ? " cursor" : ""}" data-campo="${c.campo}">${c.render(o)}</td>`).join("")}</tr>`;
+  return `<tr class="${classes}" data-id="${o.id}" data-idx="${idx}">${COLS.map((c, i) => `<td class="c-${c.campo}${c.editavel ? " editavel" : ""}${c.fixa ? " fixa" : ""}${i === cursor ? " cursor" : ""}" data-campo="${c.campo}">${c.render(o)}</td>`).join("")}</tr>`;
 }
 
 function renderizarJanela(forcar = false) {
@@ -322,10 +341,10 @@ function renderizarJanela(forcar = false) {
   if (!forcar && primeira === trab.primeiraVisivel && ultima === trab.ultimaVisivel) return;
   trab.primeiraVisivel = primeira; trab.ultimaVisivel = ultima;
   const partes = [];
-  if (primeira > 0) partes.push(`<tr class="trab-espaco" style="height:${primeira * ALTURA_LINHA}px"><td colspan="${COLUNAS.length}"></td></tr>`);
+  if (primeira > 0) partes.push(`<tr class="trab-espaco" style="height:${primeira * ALTURA_LINHA}px"><td colspan="${COLS.length}"></td></tr>`);
   for (let i = primeira; i < ultima; i++) partes.push(htmlLinha(trab.filtradas[i], i));
-  if (ultima < total) partes.push(`<tr class="trab-espaco" style="height:${(total - ultima) * ALTURA_LINHA}px"><td colspan="${COLUNAS.length}"></td></tr>`);
-  if (!total) partes.push(`<tr class="trab-espaco"><td colspan="${COLUNAS.length}" class="texto-suave trab-vazio">Nenhum contato com esses filtros.</td></tr>`);
+  if (ultima < total) partes.push(`<tr class="trab-espaco" style="height:${(total - ultima) * ALTURA_LINHA}px"><td colspan="${COLS.length}"></td></tr>`);
+  if (!total) partes.push(`<tr class="trab-espaco"><td colspan="${COLS.length}" class="texto-suave trab-vazio">${trab.modo === "rota" ? "Rota sem contatos." : "Nenhum contato com esses filtros."}</td></tr>`);
   el.trabCorpoTabela.innerHTML = partes.join("");
 }
 
@@ -363,10 +382,52 @@ function rerenderLinha(id) {
 }
 
 function atualizarLinhaLocal(arr) {
+  pendentesOutroModo[trab.modo === "rota" ? "trabalho" : "rota"].set(arr[0], arr);
   const o = montarLinha(arr);
   const atual = trab.porId.get(o.id);
   if (atual) Object.assign(atual, o); else { trab.linhas.unshift(o); trab.porId.set(o.id, o); }
   return trab.porId.get(o.id);
+}
+
+// ---------- modos: Trabalho (UF inteira, com filtros) × Rota (lista do dia) ----------
+// A mesma tabela serve as duas abas, com o mesmo comportamento: troca-se o
+// estado da tabela e os elementos (tabela + gaveta, popover, menu) mudam de
+// seção. É a mesma base: edição feita num modo é repassada à linha do outro.
+trab.modo = "trabalho";
+let iniciado = false;
+const estadoModo = { trabalho: null, rota: null };
+const pendentesOutroModo = { trabalho: new Map(), rota: new Map() }; // id → linha compacta vinda do servidor
+
+function trocarModo(novo) {
+  if (trab.modo === novo) return;
+  if (trab.editando) concluirEdicao(false);
+  esconderFlutuantes();
+  estadoModo[trab.modo] = { dados: trab.dados, linhas: trab.linhas, porId: trab.porId, selecionado: trab.selecionado, ordem: trab.ordem, topo: el.trabScroll.scrollTop };
+  trab.modo = novo;
+  const s = estadoModo[novo] || { dados: null, linhas: [], porId: new Map(), selecionado: null, ordem: novo === "rota" ? { campo: "rotaPosicao", dir: 1 } : { campo: "municipioNome", dir: 1 }, topo: 0 };
+  Object.assign(trab, { dados: s.dados, linhas: s.linhas, filtradas: [], porId: s.porId, selecionado: s.selecionado, ordem: s.ordem, coluna: -1, verDe: null, marcasOutro: new Map() });
+  COLS = novo === "rota" ? colunasDaRota(COLUNAS) : COLUNAS;
+  ajustarCabecalhoRota(novo === "rota");
+  const destino = document.getElementById(novo === "rota" ? "rota-tabela" : "trab-tabela-slot");
+  for (const id of ["trab-corpo", "popover-contato", "menu-status"]) destino.appendChild(document.getElementById(id));
+  el.gaveta.classList.add("oculto");
+  if (el.fMarcasDe.value) el.fMarcasDe.value = "";
+  if (trab.dados) {
+    for (const [id, arr] of pendentesOutroModo[novo]) { const o = trab.porId.get(id); if (o) Object.assign(o, montarLinha(arr)); }
+    for (const o of trab.linhas) o.marca = trab.marcas.get(o.id) || null;
+    aplicarFiltros();
+    el.trabScroll.scrollTop = s.topo || 0;
+    renderizarJanela(true);
+  } else {
+    el.trabCorpoTabela.innerHTML = "";
+  }
+  pendentesOutroModo[novo].clear();
+}
+
+// Marcações do payload (Trabalho ou Rota) entram no mapa único do usuário
+function absorverMarcacoes(d) {
+  for (const l of d.linhas) trab.marcas.delete(l[0]);
+  for (const [id, cor] of Object.entries(d.marcacoes || {})) trab.marcas.set(Number(id), cor);
 }
 
 // ---------- marcação pessoal (verde / vermelho) ----------
@@ -475,8 +536,8 @@ function mostrarCelula(td) {
 
 function moverColuna(delta) {
   if (!trab.selecionado) return;
-  const base = trab.coluna < 0 ? (delta > 0 ? -1 : COLUNAS.length) : trab.coluna;
-  trab.coluna = Math.min(COLUNAS.length - 1, Math.max(0, base + delta));
+  const base = trab.coluna < 0 ? (delta > 0 ? -1 : COLS.length) : trab.coluna;
+  trab.coluna = Math.min(COLS.length - 1, Math.max(0, base + delta));
   rerenderLinha(trab.selecionado);
   mostrarCelula(el.trabCorpoTabela.querySelector(`tr[data-id="${trab.selecionado}"] td.cursor`));
 }
@@ -494,9 +555,9 @@ function iniciarEdicao(td) {
   if (trab.editando) concluirEdicao(true);
   const tr = td.closest("tr");
   const o = trab.porId.get(Number(tr.dataset.id));
-  const col = COLUNAS.find((c) => c.campo === td.dataset.campo);
+  const col = COLS.find((c) => c.campo === td.dataset.campo);
   if (!o || !col || !col.editavel) return;
-  trab.coluna = COLUNAS.indexOf(col); // o cursor acompanha a célula editada
+  trab.coluna = COLS.indexOf(col); // o cursor acompanha a célula editada
   selecionar(o.id); // re-renderiza a linha: a célula clicada saiu do DOM — buscar de novo
   td = el.trabCorpoTabela.querySelector(`tr[data-id="${o.id}"] td[data-campo="${col.campo}"]`);
   if (!td) return;
@@ -630,7 +691,7 @@ function abrirPopover(id, ancora) {
   el.popoverContato.dataset.id = id;
   el.popoverQuem.textContent = `— ${o.municipioNome || "?"} · ${o.responsavel || o.setor}`;
   el.popoverStatus.value = "";
-  el.popoverData.value = hojeIso();
+  el.popoverData.value = trab.modo === "rota" ? dataRegistroRota() : hojeIso();
   el.popoverObs.value = "";
   el.popoverContato.classList.remove("oculto");
   posicionar(el.popoverContato, ancora || el.trabCorpoTabela.querySelector(`tr[data-id="${id}"]`) || el.trabScroll);
@@ -648,6 +709,8 @@ async function salvarPopover() {
     esconderFlutuantes();
     avisar("Contato registrado.");
     if (!el.gaveta.classList.contains("oculto")) abrirGaveta(id, r.historico);
+    if (r.baixaRota) { avisar("Contato registrado — baixa na rota."); estadoModo.rota = null; }
+    if (trab.modo === "rota") recarregarRota().catch((e) => avisar("⚠ " + e.message, true));
     el.trabScroll.focus();
   } catch (err) {
     avisar("⚠ " + err.message, true);
@@ -772,6 +835,7 @@ el.trabCorpoTabela.addEventListener("click", (ev) => {
       return;
     }
     if (btn.dataset.acao === "registrar") abrirPopover(id, btn);
+    if (btn.dataset.acao === "desfazer-baixa") desfazerBaixaRota(id);
     if (btn.dataset.acao === "detalhes") { selecionar(id); abrirGaveta(id); }
     return;
   }
@@ -779,7 +843,7 @@ el.trabCorpoTabela.addEventListener("click", (ev) => {
   if (trab.editando && trab.editando.td === td) return;
   if (td && td.classList.contains("editavel")) iniciarEdicao(td);
   else {
-    if (td) trab.coluna = COLUNAS.findIndex((c) => c.campo === td.dataset.campo);
+    if (td) trab.coluna = COLS.findIndex((c) => c.campo === td.dataset.campo);
     selecionar(id);
   }
 });
@@ -821,7 +885,7 @@ el.trabScroll.addEventListener("keydown", (ev) => {
   else if (ev.key.toLowerCase() === "d" && trab.selecionado) { ev.preventDefault(); abrirGaveta(trab.selecionado); }
   else if (ev.key === "Enter" && trab.selecionado) {
     // Enter edita a célula do cursor; sem cursor (ou célula só de leitura), o Responsável
-    const campo = COLUNAS[trab.coluna]?.editavel ? COLUNAS[trab.coluna].campo : "responsavel";
+    const campo = COLS[trab.coluna]?.editavel ? COLS[trab.coluna].campo : "responsavel";
     const td = el.trabCorpoTabela.querySelector(`tr[data-id="${trab.selecionado}"] td[data-campo="${campo}"]`);
     if (td) { ev.preventDefault(); iniciarEdicao(td); }
   }
@@ -1037,7 +1101,7 @@ document.getElementById("btn-sair").addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST" }).catch(() => {});
   location.href = "/login";
 });
-window.addEventListener("hashchange", () => { if (ignorarHash) return; const aba = lerHash(); mostrarAba(aba); if (trab.dados && trab.uf === el.fUf.value) { preencherFiltrosEstaticos(); aplicarFiltros(); } });
+window.addEventListener("hashchange", () => { if (ignorarHash) return; const aba = lerHash() || "trabalho"; mostrarAba(aba); if (aba === "rota") return; if (trab.dados && trab.uf === el.fUf.value) { preencherFiltrosEstaticos(); aplicarFiltros(); } });
 
 // ---------- Gerencial (admin): drill down por regional ----------
 
@@ -1149,22 +1213,26 @@ document.getElementById("cdr-recruzar").addEventListener("click", async () => {
   } catch (e) { avisar("⚠ " + e.message, true); }
 });
 
-(async () => {
+document.addEventListener("DOMContentLoaded", async () => {
   const aba = lerHash();
   let sessao = null;
   try { sessao = await chamarApi("/api/sessao"); } catch (_) { /* nav.js já redireciona */ }
   const vendedor = sessao?.papel === "vendedor";
+  rotaUi.admin = !vendedor;
   if (vendedor) {
     for (const b of document.querySelectorAll(".aba-btn.so-admin")) b.remove();
     if (sessao.escopo?.ufs?.length && !sessao.escopo.ufs.includes(trab.uf)) trab.uf = sessao.escopo.ufs[0];
-    mostrarAba("trabalho");
-  } else {
-    mostrarAba(aba);
   }
   el.fUf.value = trab.uf;
+  // vendedor sem aba no endereço começa pela Rota do dia (a lista de trabalho dele)
+  const inicial = vendedor ? (aba === "rota" || aba === "trabalho" ? aba : "rota") : aba || "trabalho";
+  iniciado = true;
+  mostrarAba(inicial);
   try {
-    await Promise.all(vendedor ? [carregarTrabalho()] : [carregarTrabalho(), carregarCores(), carregarCobertura(), carregarGerencial(), carregarCdr()]);
+    // a aba inicial já carregou a sua tabela em mostrarAba
+    const cargas = vendedor ? [] : [carregarCores(), carregarCobertura(), carregarGerencial(), carregarCdr()];
+    await Promise.all(cargas);
   } catch (e) {
     avisar("⚠ Não foi possível carregar. (" + e.message + ")", true);
   }
-})();
+});

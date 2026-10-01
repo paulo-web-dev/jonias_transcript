@@ -26,6 +26,7 @@
 
   <main class="pagina-lista territorio-pagina prospeccao-pagina">
     <nav class="prospeccao-abas" role="tablist">
+      <button type="button" class="aba-btn" data-aba="rota">Rota do dia</button>
       <button type="button" class="aba-btn ativo" data-aba="trabalho">Trabalho</button>
       <button type="button" class="aba-btn so-admin" data-aba="gerencial">Gerencial</button>
       <button type="button" class="aba-btn so-admin" data-aba="cores">Cores e status <span class="chip" id="chip-cores">—</span></button>
@@ -91,6 +92,99 @@
       <div id="cdr-ddd" class="texto-suave"></div>
     </section>
 
+    <!-- ===================== ROTA ===================== -->
+    <section id="aba-rota" class="aba-painel oculto">
+      <!-- painel da campanha: só admin (para o vendedor /api/rota/painel responde 403) -->
+      <div id="rota-painel" class="oculto">
+        <div class="rota-campanha fonte-card">
+          <div class="rota-campanha-info">
+            <span class="metrica-rotulo">Campanha</span>
+            <div id="rota-campanha-texto" class="rota-campanha-texto">—</div>
+            <div id="rota-campanha-agenda" class="texto-suave"></div>
+          </div>
+          <div class="rota-campanha-troca">
+            <label class="campo"><span>Setor da campanha (vale na próxima geração)</span>
+              <select id="rota-tipo-troca" class="campo-select"></select></label>
+            <label class="trab-flag" title="rotas de datas futuras sem nenhuma baixa são descartadas e geradas de novo com o setor novo">
+              <input type="checkbox" id="rota-refazer" /> refazer as rotas futuras já geradas que ninguém começou</label>
+            <div class="rota-campanha-botoes">
+              <button type="button" class="btn-mini btn-primario" id="rota-trocar">Trocar setor</button>
+              <button type="button" class="btn-mini" id="rota-gerar" title="gera as rotas que faltam (hoje e, depois das 17h, o próximo dia útil)">Gerar faltantes agora</button>
+            </div>
+          </div>
+        </div>
+        <div class="grade-metricas" id="rota-cards"></div>
+        <h2 class="secao-titulo">Rotas do dia <span class="texto-suave" id="rota-painel-data"></span></h2>
+        <div class="tabela-scroll">
+          <table class="tabela-metricas" id="tabela-rotas-dia">
+            <thead><tr><th style="text-align:left">Consultor</th><th>Rota</th><th>Feitas</th><th>%</th><th>Atendidas</th><th>Baixa manual</th><th>Pendentes</th><th style="text-align:left">Progresso</th><th title="telefones ainda disponíveis para a próxima geração">Estoque</th><th title="estoque ÷ cota">Dias</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <details class="rota-detalhes">
+          <summary class="secao-titulo">Estoque por regional <span class="texto-suave" id="rota-estoque-legenda"></span></summary>
+          <div class="tabela-scroll">
+            <table class="tabela-metricas" id="tabela-rota-regionais">
+              <thead><tr><th>UF</th><th style="text-align:left">Regional</th><th style="text-align:left">Titular</th><th style="text-align:left">Apoios</th><th title="telefones distintos do setor na regional">Telefones do setor</th><th title="fora do bloqueio, sem consultor ou de quem está vinculado">Disponíveis</th><th title="disponíveis ÷ (cota × vinculados)">Dias</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </details>
+        <details class="rota-detalhes" id="rota-tipos-bloco">
+          <summary class="secao-titulo">Tipos de rota (setores das campanhas)</summary>
+          <p class="texto-suave">Cada tipo é um conjunto de abas da prospecção (nome exato por UF) e a cota diária. A campanha usa um tipo de cada vez:
+            a rota do dia nunca mistura setores. Mudar os setores do tipo em campanha vale a partir da próxima geração.</p>
+          <div class="tabela-scroll">
+            <table class="tabela-metricas" id="tabela-rota-tipos">
+              <thead><tr><th style="text-align:left">Nome</th><th>Cota</th><th style="text-align:left">Setores</th><th>Ativo</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="rota-tipo-form fonte-card" id="rota-tipo-form">
+            <h3 id="rota-tipo-form-titulo">Novo tipo de rota</h3>
+            <div class="rota-tipo-linha">
+              <label class="campo"><span>Nome</span><input type="text" id="rt-nome" class="campo-select" placeholder="ex.: Tesouraria" maxlength="80" /></label>
+              <label class="campo"><span>Cota por dia</span><input type="number" id="rt-cota" class="campo-select" min="1" max="500" value="45" /></label>
+              <label class="trab-flag"><input type="checkbox" id="rt-ativo" checked /> ativo</label>
+              <input type="search" id="rt-busca" class="campo-select" placeholder="filtrar abas…" autocomplete="off" />
+              <span class="texto-suave" id="rt-resumo"></span>
+            </div>
+            <div class="rota-setores" id="rt-setores"></div>
+            <p id="rt-erro" class="login-erro oculto"></p>
+            <div class="rota-campanha-botoes">
+              <button type="button" class="btn-mini" id="rt-cancelar">Limpar</button>
+              <button type="button" class="btn-mini btn-primario" id="rt-salvar">Salvar tipo</button>
+            </div>
+          </div>
+        </details>
+        <details class="rota-detalhes">
+          <summary class="secao-titulo">Histórico de campanhas</summary>
+          <ul class="lista-simples" id="rota-historico"></ul>
+        </details>
+      </div>
+
+      <div class="rota-topo">
+        <div class="rota-titulo">
+          <h2 id="rota-titulo">Rota do dia</h2>
+          <span id="rota-subtitulo" class="texto-suave"></span>
+        </div>
+        <div class="rota-controles">
+          <select id="rota-pessoa" class="campo-select oculto" title="administrador: rota de qual consultor"></select>
+          <select id="rota-data" class="campo-select" title="dia da rota"></select>
+          <button type="button" class="btn-mini" id="rota-recarregar" title="buscar baixas novas">↻ atualizar</button>
+        </div>
+      </div>
+      <div class="rota-progresso" id="rota-progresso">
+        <div class="rota-barra" aria-hidden="true"><i class="rota-barra-feitas" id="rota-barra-feitas"></i><i class="rota-barra-atendidas" id="rota-barra-atendidas"></i></div>
+        <div class="rota-numeros" id="rota-numeros"></div>
+      </div>
+      <p id="rota-aviso" class="conflito-aviso oculto"></p>
+      <p class="texto-suave trab-dicas">Ligue na ordem: a rota agrupa os contatos por município e órgão, andando por cidades vizinhas. A baixa vem sozinha
+        quando o CDR do PABX é importado (ligação sua para o número, no dia da rota). Falou por WhatsApp ou o número não casou? <strong>dar baixa</strong>
+        (ou <kbd>R</kbd>) registra o contato. A tabela funciona como a aba Trabalho: edição, status, marcação <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>, detalhes <kbd>D</kbd>.</p>
+      <div id="rota-tabela"></div>
+    </section>
+
     <!-- ===================== TRABALHO ===================== -->
     <section id="aba-trabalho" class="aba-painel">
       <div class="trab-filtros">
@@ -126,7 +220,8 @@
         (só você vê; <kbd>1</kbd> verde, <kbd>2</kbd> vermelho, <kbd>3</kbd> amarelo, a mesma tecla ou <kbd>0</kbd> limpa).
         📞 registra contato (ou tecla <kbd>R</kbd> na linha selecionada); ▸ abre detalhes e histórico (<kbd>D</kbd>). <kbd>↑</kbd><kbd>↓</kbd> navegam nas linhas, <kbd>←</kbd><kbd>→</kbd> nas colunas (<kbd>Enter</kbd> edita a célula);
         <kbd>Shift</kbd>+roda do mouse rola para o lado.</p>
-      <div class="trab-corpo">
+      <div id="trab-tabela-slot">
+      <div class="trab-corpo" id="trab-corpo">
         <div class="trab-scroll" id="trab-scroll" tabindex="0">
           <table class="tabela-metricas trab-tabela" id="trab-tabela">
             <colgroup>
@@ -173,6 +268,7 @@
         </div>
       </div>
       <div id="menu-status" class="trab-menu oculto" role="listbox"></div>
+      </div>
     </section>
 
     <!-- ===================== CORES E STATUS ===================== -->
@@ -248,5 +344,6 @@
   <div id="aviso" class="aviso" role="status"></div>
   <script src="/js/nav.js"></script>
   <script src="/js/prospeccao.js"></script>
+  <script src="/js/rota.js"></script>
 </body>
 </html>

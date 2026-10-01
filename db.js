@@ -1073,6 +1073,87 @@ const MIGRACOES = [
     `);
     console.log(`migração 27: marcação amarela liberada — marcações preservadas: ${antes}`);
   },
+
+  // 28 — ROTA: lista diária de ligações por consultor (decisões do usuário,
+  // 2026-09-30; módulo rota.js). A rota é uma CAMPANHA POR SETOR: o admin
+  // escolhe o tipo (conjunto de abas/setores) e todas as rotas geradas a
+  // partir de `vale_desde` são daquele setor — nunca mistura setores.
+  // - rota_tipos: setores_json = [{uf, setor}] com os nomes EXATOS das abas;
+  //   cota = itens por dia. Configurável na tela, sem mexer no código.
+  // - rota_campanhas: histórico das trocas; vigente numa data = a de
+  //   vale_desde mais recente ≤ data; tipo_id NULL = campanha encerrada.
+  // - rotas: uma por consultor por dia; gerada, NÃO muda (elegiveis = estoque
+  //   do consultor no momento da geração — rota curta fica explicada).
+  // - rota_itens: o histórico de rota. Nunca é apagado (exceto rota futura
+  //   descartada pelo admin antes de começar); o bloqueio por TELEFONE de 30
+  //   dias (ligado/baixa) e 7 dias (entrou e não foi ligado) sai daqui + CDR +
+  //   registros manuais. `telefone` = número no momento da geração.
+  // Seed: tipo "Licitação" com os 6 setores aprovados; nenhuma campanha
+  // vigente — o admin liga a primeira na tela.
+  () => {
+    db.exec(`
+      CREATE TABLE rota_tipos (
+        id            INTEGER PRIMARY KEY,
+        nome          TEXT NOT NULL UNIQUE,
+        setores_json  TEXT NOT NULL,
+        cota          INTEGER NOT NULL DEFAULT 45 CHECK (cota BETWEEN 1 AND 500),
+        ativo         INTEGER NOT NULL DEFAULT 1,
+        criado_em     TEXT NOT NULL,
+        atualizado_em TEXT,
+        usuario_id    INTEGER REFERENCES usuarios(id)
+      );
+      CREATE TABLE rota_campanhas (
+        id          INTEGER PRIMARY KEY,
+        tipo_id     INTEGER REFERENCES rota_tipos(id),   -- NULL = sem campanha
+        vale_desde  TEXT NOT NULL,                        -- AAAA-MM-DD (horário de Brasília)
+        criada_em   TEXT NOT NULL,
+        usuario_id  INTEGER REFERENCES usuarios(id)
+      );
+      CREATE INDEX idx_rota_campanhas_data ON rota_campanhas(vale_desde);
+      CREATE TABLE rotas (
+        id          INTEGER PRIMARY KEY,
+        pessoa_id   INTEGER NOT NULL REFERENCES pessoas(id),
+        data        TEXT NOT NULL,
+        campanha_id INTEGER NOT NULL REFERENCES rota_campanhas(id),
+        tipo_id     INTEGER NOT NULL REFERENCES rota_tipos(id),
+        setores_json TEXT NOT NULL,                       -- setores do tipo NA geração
+        cota        INTEGER NOT NULL,
+        elegiveis   INTEGER NOT NULL,
+        gerada_em   TEXT NOT NULL,
+        gerada_por  INTEGER REFERENCES usuarios(id),      -- NULL = automática (17h)
+        UNIQUE (pessoa_id, data)
+      );
+      CREATE INDEX idx_rotas_data ON rotas(data);
+      CREATE TABLE rota_itens (
+        id               INTEGER PRIMARY KEY,
+        rota_id          INTEGER NOT NULL REFERENCES rotas(id) ON DELETE CASCADE,
+        contato_id       INTEGER NOT NULL REFERENCES contatos_ativo(id),
+        posicao          INTEGER NOT NULL,
+        telefone         TEXT NOT NULL,
+        setor            TEXT NOT NULL,
+        codigo_ibge      INTEGER,
+        baixa_em         TEXT,
+        baixa_metodo     TEXT CHECK (baixa_metodo IN ('cdr', 'manual')),
+        ligacao_id       INTEGER REFERENCES ligacoes(id),
+        atendida         INTEGER,
+        baixa_usuario_id INTEGER REFERENCES usuarios(id),
+        UNIQUE (rota_id, contato_id)
+      );
+      CREATE INDEX idx_rota_itens_telefone ON rota_itens(telefone);
+      CREATE INDEX idx_rota_itens_contato ON rota_itens(contato_id);
+    `);
+    const licitacao = [
+      { uf: "PR", setor: "LICITAÇÃO PM" },
+      { uf: "PR", setor: "LICITAÇÃO CM" },
+      { uf: "PR", setor: "LICITAÇÃO PM - com população" },
+      { uf: "PR", setor: "Licitação CM com Papulação" },
+      { uf: "SC", setor: "LICITAÇÃO PM" },
+      { uf: "SC", setor: "LICITAÇÃO CM" },
+    ];
+    db.prepare("INSERT INTO rota_tipos (nome, setores_json, cota, criado_em) VALUES ('Licitação', ?, 45, ?)")
+      .run(JSON.stringify(licitacao), new Date().toISOString());
+    console.log("migração 28: rota criada — tipo \"Licitação\" (6 setores, 45/dia); nenhuma campanha vigente até o admin ligar.");
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

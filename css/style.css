@@ -1556,3 +1556,47 @@ body[data-papel="vendedor"] .so-admin { display: none !important; }
 .bloqueio-detalhe summary { cursor: pointer; color: var(--acento-2); margin: 0.3rem 0; }
 .bloqueio-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.8rem; }
 #confirmar-sobrescrita:not(.oculto) { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+
+/* ===================== Prospecção — aba ROTA (migração 28) ===================== */
+.rota-topo { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0.6rem 1rem; margin: 0.4rem 0 0.5rem; }
+.rota-titulo h2 { margin: 0; font-size: 1.25rem; }
+.rota-titulo span { display: block; font-size: 0.8rem; margin-top: 0.15rem; }
+.rota-controles { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.rota-progresso { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; margin-bottom: 0.5rem; }
+.rota-barra { position: relative; flex: 0 1 360px; min-width: 180px; height: 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }
+.rota-barra i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; transition: width 0.4s ease; }
+.rota-barra-feitas { background: rgba(56, 214, 224, 0.45); }
+.rota-barra-atendidas { background: var(--verde); }
+.rota-barra-mini { height: 8px; min-width: 120px; }
+.rota-numeros { font-size: 0.86rem; color: var(--texto-suave); }
+.rota-numeros strong { color: var(--texto); font-size: 1.05rem; }
+.rota-ok { color: var(--verde); }
+.rota-nao { color: var(--amarelo); }
+/* tabela em modo rota: posição no município, faixa entre municípios, coluna de baixa */
+.rota-pos { display: inline-block; min-width: 1.6em; margin-right: 0.35rem; color: var(--texto-suave); font-variant-numeric: tabular-nums; text-align: right; }
+.trab-tabela tbody tr.rota-grupo td { border-top: 2px solid rgba(56, 214, 224, 0.35); }
+.trab-tabela tbody tr.rota-feita td:not(.fixa):not(.c-rotaBaixa) { opacity: 0.6; }
+col.c-baixa { width: 165px; }
+.rota-baixa { font-size: 0.76rem; white-space: nowrap; }
+.rota-btn-baixa { padding: 0.1rem 0.55rem; font-size: 0.74rem; }
+.rota-desfazer { margin-left: 0.25rem; }
+/* painel da campanha (admin) */
+.rota-campanha { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; align-items: flex-end; margin-bottom: 0.8rem; }
+.rota-campanha-info { flex: 1 1 360px; }
+.rota-campanha-texto { font-size: 1.15rem; margin: 0.2rem 0 0.35rem; }
+.rota-campanha-troca { display: flex; flex-direction: column; gap: 0.4rem; flex: 0 1 420px; }
+.rota-campanha-troca .campo-select { width: 100%; }
+.rota-campanha-botoes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.metrica-card.rota-card-alerta { border-color: rgba(255, 200, 87, 0.45); }
+#tabela-rotas-dia tbody tr[data-pessoa] { cursor: pointer; }
+#tabela-rotas-dia tbody tr.rota-linha-atual td { background: rgba(108, 123, 255, 0.12); }
+.rota-detalhes { margin: 0.8rem 0; }
+.rota-detalhes > summary { cursor: pointer; list-style: revert; }
+.rota-tipo-form { margin-top: 0.8rem; }
+.rota-tipo-linha { display: flex; flex-wrap: wrap; gap: 0.5rem 0.8rem; align-items: flex-end; margin-bottom: 0.6rem; }
+.rota-setores { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0.6rem; max-height: 340px; overflow: auto; }
+.rota-setores-uf { border: 1px solid var(--borda-painel); border-radius: 10px; padding: 0.4rem 0.6rem; margin: 0; }
+.rota-setores-uf legend { padding: 0 0.3rem; color: var(--acento-2); font-weight: 600; }
+.rota-setor { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; padding: 0.15rem 0; }
+.rota-setor span { flex: 1; }
+@media (max-width: 700px) { .rota-topo { align-items: flex-start; } .rota-barra { flex-basis: 100%; } }
