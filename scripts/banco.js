@@ -31,6 +31,7 @@ const TABELAS = [
   "usuarios", "pessoas", "carteiras", "contatos_ativo", "contatos_ativo_historico",
   "marcacoes_prospeccao", "cores_prospeccao", "ligacoes", "oportunidades",
   "matriculas", "turmas", "metas", "periodos", "feedbacks", "aulas", "importacoes",
+  "ramal_vigencias", "rota_tipos", "rota_campanhas", "rotas", "rota_itens",
 ];
 
 function tamanhos() {
@@ -60,6 +61,13 @@ function conferir() {
   console.log(`última edição de contato     ${ultimo("SELECT MAX(editado_em) FROM contatos_ativo")}`);
   console.log(`última marcação              ${ultimo("SELECT MAX(marcado_em) FROM marcacoes_prospeccao")}`);
   console.log(`última importação            ${ultimo("SELECT MAX(iniciado_em) FROM importacoes")}`);
+  // Por cor: a migração 27 recria a tabela e tem de preservar cada contagem.
+  if (existe.has("marcacoes_prospeccao")) {
+    const cores = db.prepare("SELECT cor, COUNT(*) n FROM marcacoes_prospeccao GROUP BY cor ORDER BY cor").all();
+    console.log(`marcações por cor            ${cores.map((c) => `${c.cor} ${c.n}`).join(" · ") || "—"}`);
+  }
+  // Ligações por ramal: a migração 26 divide o 2004 entre Douglas e Jhonnata.
+  console.log(`ligações do ramal 2004       ${ultimo("SELECT COUNT(*) FROM ligacoes WHERE ramal = '2004'")}`);
   // Importações recusadas guardam o motivo real (a tela antiga só dizia "erro 422")
   if (existe.has("importacoes")) {
     const erros = db.prepare(

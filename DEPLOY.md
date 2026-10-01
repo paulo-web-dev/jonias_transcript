@@ -198,8 +198,12 @@ docker compose logs --tail 40 SVC
 No log, a linha que importa é:
 
 ```
-🗄  Banco: /app/data/aula-ai.db (DB_PATH) · user_version 25 · 16320 contato(s) de prospecção
+🗄  Banco: /app/data/aula-ai.db (DB_PATH) · user_version 28 · 16320 contato(s) de prospecção
 ```
+
+(`user_version` = a versão das migrações do código que subiu; 28 desde
+2026-09-30. Se o banco vinha de uma versão anterior, as linhas `migração N:`
+aparecem logo acima — ver a Parte C.)
 
 - `(padrão local)` no lugar de `(DB_PATH)` significa que a variável não chegou
   ao container. Pare (`docker compose stop SVC`) e volte ao passo 8. Nesse modo
@@ -276,3 +280,57 @@ docker compose start SVC
   `.gitignore`);
 - usar `DB_CRIAR_NOVO=1` em produção. Ele só serve para criar um banco novo e
   vazio de propósito.
+
+---
+
+## Parte C — deploy das migrações 26, 27 e 28 (outubro de 2026)
+
+Vale para o primeiro deploy que leva os commits 5721d3d (Dockerfile/compose
+versionados), 42e3b1b (migrações 26 e 27) e 4e6c4a4 (migração 28, Rota do
+dia). **Primeiro descubra em que pé está o servidor**:
+
+```sh
+docker compose logs SVC 2>&1 | grep "Banco:" | tail -1
+```
+
+- Diz `/app/data/aula-ai.db (DB_PATH)` → a Parte A já foi feita: siga a
+  Parte B, com as conferências abaixo.
+- Diz `(padrão local)`, `/app/aula-ai.db` ou não aparece → a Parte A **ainda
+  não foi feita**: faça a Parte A inteira (ela já constrói o código novo no
+  passo 9) e use as conferências abaixo no passo 10.
+
+As três migrações rodam sozinhas no boot, uma transação cada; uma que falha
+não deixa nada pela metade e o servidor não sobe (o banco fica como estava).
+
+**O que o log do boot precisa mostrar** (entre o build e a linha `🗄 Banco:`):
+
+| Linha | Conferir |
+|---|---|
+| `migração 26: ramal 2004 com vigência — N ligação(ões) desde 22/09/2026 passaram ao Jhonnata; M seguem do Douglas.` | N + M = `ligações do ramal 2004` do `conferir` de antes. **Anotar N**: é o tamanho da quarta quebra de comparabilidade (CLAUDE.md, `pessoas`) |
+| `migração 26: backfill Jhonnata — …` e `Gerencial ganhou "Paulo Sergio Orfanelli" — …` | só informativas (podem não aparecer se for zero) |
+| `migração 27: marcação amarela liberada — marcações preservadas: N` | N = `marcacoes_prospeccao` de antes. Se divergir, a migração aborta sozinha com `contagem das marcações divergiu` |
+| `migração 28: rota criada — tipo "Licitação" (6 setores, 45/dia); nenhuma campanha vigente até o admin ligar.` | nenhuma rota é gerada enquanto ninguém ligar uma campanha |
+| `🗄 Banco: /app/data/aula-ai.db (DB_PATH) · user_version 28 · N contato(s)` | N = `contatos_ativo` de antes |
+
+Depois, `conferir` e `diff antes.txt depois.txt`. O que **pode** mudar:
+`user_version` (→ 28), `ramal_vigencias` (→ 2), `rota_tipos` (→ 1),
+`rota_campanhas`/`rotas`/`rota_itens` (de "não existe" → 0), `pessoas` (+1,
+Jhonnata) e os carimbos/tamanhos. Todo o resto, igual. `marcações por
+cor` igual, linha a linha.
+
+**Ligar a Rota do dia (só depois do deploy conferido, em outro momento):**
+
+1. Estoque, só leitura (aceita `"setor1|setor2"` como 2º argumento):
+   ```sh
+   docker compose exec -T SVC node - /app/data/aula-ai.db < scripts/viabilidade-rota.js | tee viabilidade-AAAAMMDD.txt
+   ```
+   Olhar: consultores sem carteira (ficam sem rota), dias de estoque por
+   consultor e contatos fora de todas as rotas. **SC só entra se a planilha
+   de SC estiver importada** — em 2026-09-22 a produção tinha 0 contatos de SC
+   (o 422 sem causa conhecida; o motivo aparece em "últimas importações
+   recusadas" do `conferir`).
+2. Em `/prospeccao` → aba Rota do dia (admin), conferir o painel da campanha e
+   escolher "Licitação". Vale a partir da próxima data útil sem rota; as rotas
+   saem às 17h (Brasília) para o dia útil seguinte, ou na hora pelo botão
+   "gerar".
+3. Avisar a equipe: o vendedor passa a abrir `/prospeccao` na aba Rota do dia.
