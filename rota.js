@@ -581,6 +581,21 @@ function progressoTv() {
   return { data, campanha: campanha?.tipoId ? campanha.nome : null, ativa, porPessoa };
 }
 
+// Rotas da SEMANA por consultor (telas STATUS, SEMANA e RANKING da TV):
+// um registro por rota com itens e feitas. Feita = baixa pelo CDR ou manual.
+// Semana corrente de Brasília, de segunda até hoje.
+function rotasDaSemanaTv() {
+  const { data: ate } = agoraBrasilia();
+  const semanaDe = somarDias(ate, -((new Date(`${ate}T12:00:00Z`).getUTCDay() + 6) % 7));
+  return db.prepare(
+    `SELECT p.nome, r.data, r.cota, COUNT(i.id) itens, COALESCE(SUM(i.baixa_metodo IS NOT NULL), 0) feitas,
+            COALESCE(SUM(i.atendida = 1), 0) atendidas
+     FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id LEFT JOIN rota_itens i ON i.rota_id = r.id
+     WHERE r.data BETWEEN ? AND ? AND p.tipo = 'consultor' AND p.ativo = 1 AND p.entra_tv = 1
+     GROUP BY r.id ORDER BY r.data`
+  ).all(semanaDe, ate);
+}
+
 function painel(dataArg) {
   const { data: hoje, hora } = agoraBrasilia();
   const data = dataArg && RE_DATA.test(dataArg) ? dataArg : hoje;
@@ -695,7 +710,7 @@ module.exports = {
   listarTipos, lerTipo, setoresDisponiveis, gravarTipo,
   campanhaVigente, trocarCampanha,
   bloqueiosPara, sobreposicao, gerarRotas, garantirRotas,
-  baixarPeloCdr, baixarPorRegistro, desfazerBaixa, itemDaTela, progressoTv,
+  baixarPeloCdr, baixarPorRegistro, desfazerBaixa, itemDaTela, progressoTv, rotasDaSemanaTv,
   rotaDoDia, painel,
   BLOQUEIO_DIAS, BLOQUEIO_SEM_LIGACAO_DIAS, HORA_GERACAO,
 };

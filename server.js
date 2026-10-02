@@ -194,7 +194,7 @@ app.get("/api/tv/dados", (req, res) => {
   const ok = tokenTvValido(req);
   if (ok === null) return res.status(503).json({ error: "Modo TV desabilitado." });
   if (!ok) return res.status(401).json({ error: "Token inválido." });
-  res.json({ ...dadosTvCompleto(), rota: rota.progressoTv(), som: configSomTv() });
+  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv() });
 });
 
 // SSE: empurra "dados atualizados" para as TVs quando uma ingestão termina.

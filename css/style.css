@@ -1115,6 +1115,65 @@ body.tv { padding: 1.4vw 2vw; overflow: hidden; display: flex; flex-direction: c
 .tv-podio-nome { font-size: 1.05vw; font-weight: 800; }
 .tv-podio-valor { font-size: 1.25vw; font-weight: 800; color: var(--acento-2); font-variant-numeric: tabular-nums; }
 
+/* STATUS: uma linha por consultor — ROTA de hoje | PIPELINE da semana | selo.
+   Dois andares por bloco (número + barra/situação; detalhe) para caber 6–7
+   linhas na TV 16:9. Estados: ok verde, pendente âmbar (dia em curso), fora
+   vermelho, neutro cinza */
+.tv-st-linhas { display: flex; flex-direction: column; gap: 0.6vw; flex: 1; min-height: 0; }
+.tv-st-linha {
+  display: grid; grid-template-columns: 12vw 1fr 1fr 10vw; gap: 1.6vw; align-items: center;
+  padding: 0.45vw 1vw; border-radius: 12px; border: 2px solid transparent; background: rgba(255, 255, 255, 0.03);
+}
+.tv-st-cabecalho { background: none; padding-top: 0; padding-bottom: 0; font-size: 0.95vw; letter-spacing: 1.5px; color: var(--texto-suave); font-weight: 700; }
+.tv-st-emdia { background: rgba(61, 220, 132, 0.12); border-color: var(--verde); }
+.tv-st-nome { font-size: 2vw; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-st-bloco { display: flex; flex-direction: column; gap: 0.15vw; min-width: 0; --estado: var(--texto-suave); }
+.tv-st-topo { display: flex; align-items: center; gap: 1vw; }
+.tv-st-topo .tv-trilha { flex: 1; height: 1vw; margin: 0; }
+.tv-st-valor { font-size: 2.3vw; font-weight: 900; line-height: 1.05; color: var(--estado); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tv-st-situacao { font-size: 1.3vw; font-weight: 800; color: var(--estado); white-space: nowrap; }
+.tv-st-sub { font-size: 1.1vw; color: var(--texto-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-st-curta { color: var(--acento-2); font-weight: 700; }
+.st-ok { --estado: var(--verde); }
+.st-pendente { --estado: var(--amarelo); }
+.st-fora { --estado: var(--vermelho); }
+.st-neutro { --estado: var(--texto-suave); }
+.st-txt-fora { color: var(--vermelho); font-weight: 700; }
+.tv-st-selo { font-size: 1.9vw; font-weight: 900; color: var(--verde); text-align: center; letter-spacing: 1px; white-space: nowrap; }
+.tv-st-legenda { font-size: 1.05vw; color: var(--texto-suave); text-align: center; margin-top: 0.4vw; }
+.tv-st-compacto { gap: 0.35vw; }
+.tv-st-compacto .tv-st-linha { padding: 0.25vw 1vw; }
+.tv-st-compacto .tv-st-valor { font-size: 1.9vw; }
+.tv-st-compacto .tv-st-nome { font-size: 1.7vw; }
+
+/* RANKING DE VENDAS: pódio grande; quem está fora do prêmio fica cinza e
+   mostra o motivo em vermelho */
+.tv-pr-regra {
+  font-size: 1.5vw; text-align: center; padding: 0.6vw 1vw; margin-bottom: 1.2vw;
+  border: 2px solid var(--amarelo); border-radius: 12px; color: var(--texto); background: rgba(255, 200, 87, 0.08);
+}
+.tv-pr-regra b { color: var(--amarelo); }
+.tv-pr-podio { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 1.4vw; align-items: end; flex: 1; min-height: 0; }
+.tv-pr-bloco {
+  background: rgba(255, 255, 255, 0.05); border: 2px solid var(--borda-painel); border-radius: 16px 16px 0 0;
+  text-align: center; padding: 1vw 1vw 1.2vw; display: flex; flex-direction: column; gap: 0.3vw;
+}
+.tv-pr-bloco.podio-1 { min-height: 26vw; background: rgba(108, 123, 255, 0.14); border-color: var(--acento); }
+.tv-pr-bloco.podio-2 { min-height: 22vw; }
+.tv-pr-bloco.podio-3 { min-height: 19vw; }
+.tv-pr-vencedor-bloco { border-color: var(--verde) !important; box-shadow: 0 0 1.6vw rgba(61, 220, 132, 0.35); }
+.tv-pr-medalha { font-size: 3.4vw; line-height: 1; }
+.tv-pr-nome { font-size: 2.3vw; font-weight: 900; }
+.tv-pr-valor { font-size: 2.8vw; font-weight: 900; color: var(--acento-2); font-variant-numeric: tabular-nums; }
+.tv-pr-matr { font-size: 1.2vw; color: var(--texto-suave); }
+.tv-pr-fora .tv-pr-medalha, .tv-pr-fora .tv-pr-valor { filter: grayscale(1); opacity: 0.55; }
+.tv-pr-fora .tv-pr-valor { color: var(--texto-suave); }
+.tv-pr-fora-selo { font-size: 1.4vw; font-weight: 900; letter-spacing: 2px; color: var(--vermelho); }
+.tv-pr-requisitos { list-style: none; margin: 0.4vw 0 0; padding: 0; text-align: left; display: flex; flex-direction: column; gap: 0.3vw; }
+.tv-pr-requisitos li { font-size: 1.3vw; font-weight: 700; color: var(--estado); }
+.tv-pr-vencedor { font-size: 1.6vw; text-align: center; margin-top: 1vw; }
+.tv-pr-vencedor b { color: var(--verde); }
+
 /* Mês: a visão mais espaçosa — barras grandes */
 /* Mês: gauges semicirculares de receita × meta (leem melhor de longe que barra) */
 #visao-mes .tv-barras-mes { display: flex; gap: 2.5vw; flex: 1; justify-content: center; align-items: center; flex-wrap: wrap; }

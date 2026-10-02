@@ -137,7 +137,9 @@ function diasBatidos(porDia, de, ate, metaDia) {
 // apenasPessoaId (Fase 3): calcula SÓ para essa pessoa — as consultas filtram
 // por pessoa_id no SQL e o retorno não traz equipe/canais/empresa (dado de
 // outros nunca sai do banco para o vendedor).
-function calcularMetricas(de, ate, apenasPessoaId = null) {
+// `qualidade: false` pula a qualidade do pipeline (ticket zero, retroativo,
+// conversão) — a TV não mostra e não precisa pagar por ela.
+function calcularMetricas(de, ate, apenasPessoaId = null, { qualidade: comQualidade = true } = {}) {
   const fim = ate + "T23:59:59";
   const nDiasUteis = diasUteis(de, ate);
   const metas = metasVigentes(de, ate);
@@ -175,12 +177,13 @@ function calcularMetricas(de, ate, apenasPessoaId = null) {
      FROM oportunidades WHERE fase_01_em BETWEEN ? AND ? AND ${fp} GROUP BY pessoa_id, dia`).all(de, fim, ...extra)) {
     (pipelinePorDia.get(r.pessoa_id) ?? pipelinePorDia.set(r.pessoa_id, new Map()).get(r.pessoa_id)).set(r.dia, r.centavos);
   }
-  const qualidade = porPessoaId(db.prepare(
+  const qualidade = !comQualidade ? new Map() : porPessoaId(db.prepare(
     `SELECT o.pessoa_id, COUNT(*) leads,
             SUM(${SQL_TICKET_ORIGEM} = 0) zero_na_origem,
             SUM(MIN(COALESCE(o.ticket_centavos, 0), (${SQL_TICKET_RETROATIVO}))) retroativo
      FROM oportunidades o WHERE o.fase_01_em BETWEEN ? AND ? AND o.${fp} GROUP BY o.pessoa_id`).all(de, fim, ...extra));
-  const conversao = conversaoPipeline(ate, apenasPessoaId);
+  const conversao = comQualidade ? conversaoPipeline(ate, apenasPessoaId)
+    : { leadsAte: null, porPessoa: new Map(), equipe: null };
   const funil = db.prepare(
     `SELECT pessoa_id, fase_atual, COUNT(*) n FROM oportunidades
      WHERE fase_01_em BETWEEN ? AND ? AND ${fp}
@@ -255,7 +258,7 @@ function calcularMetricas(de, ate, apenasPessoaId = null) {
       pipeline: {
         ...comMeta(pip.centavos, metaPipelineDia),
         dias: diasBatidos(pipelinePorDia.get(p.id), de, ate, metaPipelineDia),
-        qualidade: {
+        qualidade: !comQualidade ? null : {
           leads: qual.leads,
           zeroNaOrigem: qual.zero_na_origem,
           pctZeroNaOrigem: qual.leads ? pct(qual.zero_na_origem, qual.leads) : null,
@@ -297,7 +300,7 @@ function calcularMetricas(de, ate, apenasPessoaId = null) {
     metaLeads: soma((p) => p.funil.leadsNovos.meta || 0) || null,
     pipelineCentavos: soma((p) => p.pipeline.valor),
     metaPipelineCentavos: soma((p) => p.pipeline.meta || 0) || null,
-    conversaoPipeline: { ...conversao.equipe, leadsAte: conversao.leadsAte },
+    conversaoPipeline: conversao.equipe ? { ...conversao.equipe, leadsAte: conversao.leadsAte } : null,
     perdidas: soma((p) => p.funil.perdidas),
     vendas: soma((p) => p.funil.vendas),
     matriculas: soma((p) => p.matriculas.valor),
@@ -450,8 +453,75 @@ function calcularRitmo(valor, metaDia, horaUltimoDado) {
   return { projecao, estado, fracao };
 }
 
-function dadosTvCompleto() {
-  const agora = new Date();
+// ---------- STATUS e PRÊMIO da semana (telas da TV, decisões de 2026-10-02) ----------
+// Por consultor do painel: ROTA (hoje e semana) e PIPELINE (semana acumulada).
+// - Rota OK no dia = feitas ÷ itens = 100% (rota curta fecha com o que recebeu);
+//   semana = todos os dias ENCERRADOS com rota fecharam 100%; hoje só conta
+//   quando fecha (dia em curso não reprova). Sem rota na semana = neutro.
+// - Pipeline: o acumulado da semana tem de cobrir meta diária × dias úteis
+//   encerrados ("fora" abaixo disso); "ok" quando já cobre também hoje,
+//   "pendente" quando hoje ainda falta. Sem meta = neutro.
+// - Prêmio = maior RECEITA de matrículas da semana entre quem não está "fora"
+//   em nenhum dos dois (pré-requisitos, não critério de desempate).
+function statusSemanaTv({ hoje, semanaDe, painelSemana, painelDia, rotaSemana }) {
+  const hojeUtil = diasUteis(hoje, hoje) === 1;
+  const encerrados = diasUteis(semanaDe, hoje) - (hojeUtil ? 1 : 0);
+  const rotasDe = new Map();
+  for (const r of rotaSemana) (rotasDe.get(r.nome) ?? rotasDe.set(r.nome, []).get(r.nome)).push(r);
+  const diaDe = new Map(painelDia.map((p) => [p.pessoaId, p]));
+  return painelSemana.map((p) => {
+    // ---- Rota ----
+    const rotas = (rotasDe.get(p.nome) || []).filter((r) => r.itens > 0);
+    const passadas = rotas.filter((r) => r.data < hoje);
+    const deHoje = rotas.find((r) => r.data === hoje) || null;
+    const passadasOk = passadas.filter((r) => r.feitas >= r.itens).length;
+    const hojeOk = !!deHoje && deHoje.feitas >= deHoje.itens;
+    const rota = {
+      hoje: deHoje ? {
+        itens: deHoje.itens, feitas: deHoje.feitas, atendidas: deHoje.atendidas, cota: deHoje.cota,
+        pct: Math.floor((deHoje.feitas / deHoje.itens) * 100), curta: deHoje.itens < deHoje.cota,
+      } : null,
+      diasOk: passadasOk + (hojeOk ? 1 : 0),
+      diasAvaliados: passadas.length + (hojeOk ? 1 : 0),
+      diasPerdidos: passadas.length - passadasOk,
+      feitas: rotas.reduce((s, r) => s + r.feitas, 0),
+      itens: rotas.reduce((s, r) => s + r.itens, 0),
+    };
+    rota.estado = !rotas.length ? "sem_rota" : rota.diasPerdidos > 0 ? "fora" : deHoje && !hojeOk ? "pendente" : "ok";
+    // ---- Pipeline ----
+    const metaDia = p.pipeline.metaDia;
+    const valor = p.pipeline.valor;
+    const metaAteOntem = metaDia != null ? metaDia * encerrados : null;
+    const metaAteHoje = metaDia != null ? metaDia * (encerrados + (hojeUtil ? 1 : 0)) : null;
+    const pipeline = {
+      valor,
+      metaDia,
+      metaSemana: metaDia != null ? metaDia * 5 : null,
+      metaAteHoje,
+      faltaCentavos: metaAteHoje != null ? Math.max(0, metaAteHoje - valor) : null,
+      hojeCentavos: diaDe.get(p.pessoaId)?.pipeline.valor ?? 0,
+      dias: p.pipeline.dias, // {batidos, avaliados}: dia útil encerrado + hoje se já bateu
+      estado: metaDia == null ? "sem_meta" : valor >= metaAteHoje ? "ok" : valor >= metaAteOntem ? "pendente" : "fora",
+    };
+    const emDia = (!rota.hoje || hojeOk) && pipeline.estado === "ok" && (!!rota.hoje || metaDia != null);
+    return {
+      nome: p.nome,
+      receitaCentavos: p.receitaCentavos,
+      matriculas: p.matriculas.valor,
+      rota,
+      pipeline,
+      emDia,
+      qualificado: rota.estado !== "fora" && pipeline.estado !== "fora",
+    };
+  });
+}
+
+const SEM_QUALIDADE = { qualidade: false };
+
+function dadosTvCompleto({ rotaSemana = [] } = {}) {
+  // Data de Brasília (o container roda em UTC; a Rota já usa Brasília): meio-dia
+  // local da data de hoje, só para derivar segunda, mês e semana passada
+  const agora = new Date(hojeBrasilia() + "T12:00:00");
   const hoje = isoDia(agora);
   const segunda = new Date(agora);
   segunda.setDate(agora.getDate() - ((agora.getDay() + 6) % 7));
@@ -508,7 +578,7 @@ function dadosTvCompleto() {
   });
 
   // ---- Dia (parcial, com ritmo) ----
-  const mDia = calcularMetricas(hoje, hoje);
+  const mDia = calcularMetricas(hoje, hoje, null, SEM_QUALIDADE);
   const ultimoDadoHoje = db
     .prepare("SELECT MAX(data_hora) v FROM ligacoes WHERE data_hora >= ?")
     .get(hoje).v;
@@ -519,7 +589,7 @@ function dadosTvCompleto() {
   const dataPassada = new Date(agora);
   dataPassada.setDate(agora.getDate() - 7);
   const diaPassado = isoDia(dataPassada);
-  const mPassado = calcularMetricas(diaPassado, diaPassado);
+  const mPassado = calcularMetricas(diaPassado, diaPassado, null, SEM_QUALIDADE);
   const passadoPainel = mPassado.porPessoa.filter((p) => nomesPainel.has(p.nome));
   const somaPassado = (fn) => passadoPainel.reduce((s, p) => s + fn(p), 0);
   const comparativo = {
@@ -603,13 +673,23 @@ function dadosTvCompleto() {
   // ---- Semana corrente (meta FECHADA: metaDia × 5, seja segunda ou sexta —
   // decisão do usuário 2026-08-19: o alvo não muda de tamanho conforme a
   // semana avança; o contexto temporal vem do "dia N de 5" no título) ----
-  const mSemana = calcularMetricas(semanaDe, hoje);
+  const mSemana = calcularMetricas(semanaDe, hoje, null, SEM_QUALIDADE);
   const metaSemanaDe = (m) => (m.metaDia != null ? Math.round(m.metaDia * 5 * 10) / 10 : null);
   const comMetaFechada = (m) => {
     const meta = metaSemanaDe(m);
     return { valor: m.valor, meta, atingimento: meta ? pct(m.valor, meta) : null };
   };
   const painelSemana = doPainel(mSemana.porPessoa);
+  const status = statusSemanaTv({ hoje, semanaDe, painelSemana, painelDia: doPainel(mDia.porPessoa), rotaSemana });
+  const statusDe = new Map(status.map((x) => [x.nome, x]));
+  // Pipeline por dia da semana (curva acumulada da SEMANA) — centavos
+  const pipelinePorDia = new Map();
+  for (const r of db.prepare(
+    `SELECT pe.nome, substr(o.fase_01_em, 1, 10) dia, SUM(COALESCE(o.ticket_centavos, 0)) c
+       FROM oportunidades o JOIN pessoas pe ON pe.id = o.pessoa_id
+      WHERE o.fase_01_em BETWEEN ? AND ? GROUP BY pe.nome, dia`).all(semanaDe, hoje + "T23:59:59")) {
+    (pipelinePorDia.get(r.nome) ?? pipelinePorDia.set(r.nome, new Map()).get(r.nome)).set(r.dia, r.c);
+  }
   const somaPainelSemana = (fn) => painelSemana.reduce((s, p) => s + fn(p), 0);
   // Meta de RECEITA POR SEMANA de cada vendedor (receita_semana, própria ou
   // padrão) — visão RECEITA DA SEMANA da TV. Número próprio (não é
@@ -642,6 +722,9 @@ function dadosTvCompleto() {
       matriculas: comMetaFechada(p.matriculas),
       receitaCentavos: p.receitaCentavos,
       receita: receitaComMeta(p),
+      // Pipeline × meta FECHADA da semana (metaDia × 5) e a rota da semana
+      pipeline: { ...comMetaFechada(p.pipeline), dias: p.pipeline.dias },
+      rota: statusDe.get(p.nome)?.rota ?? null,
     })),
     metaReceitaPadraoCentavos: metasSemana.padrao.receita_semana ?? null,
     equipe: {
@@ -663,8 +746,11 @@ function dadosTvCompleto() {
     rankingLigacoes: doPainel(mSemana.porPessoa)
       .map((p) => ({ nome: p.nome, valor: p.ligacoes.discadas.valor }))
       .sort((a, b) => b.valor - a.valor),
-    rankingLeads: doPainel(mSemana.porPessoa)
-      .map((p) => ({ nome: p.nome, valor: p.funil.leadsNovos.valor }))
+    rankingPipeline: painelSemana
+      .map((p) => ({ nome: p.nome, valor: p.pipeline.valor }))
+      .sort((a, b) => b.valor - a.valor),
+    rankingRota: status
+      .map((x) => ({ nome: x.nome, valor: x.rota.feitas }))
       .sort((a, b) => b.valor - a.valor),
     // Pódio de receita: a carteira Gerencial concorre aqui (só em receita —
     // nunca em ligações/leads), decisão do usuário 2026-08-25
@@ -675,16 +761,18 @@ function dadosTvCompleto() {
     // Curva acumulada da semana × traçado ideal (soma das metas diárias de quem
     // está no painel, até a meta fechada na sexta); valores só para os dias já
     // decorridos, ideal desenhado no cliente
+    // Curva acumulada do PIPELINE na semana × ritmo da meta diária padrão
+    // (R$ 8.400/dia até R$ 42.000 na sexta); só os dias já decorridos
     acumulado: (() => {
       const decorridos = diasSemanaCheia.filter((di) => di <= hoje);
-      const metaSemana = metaDiscadasSemana || null;
+      const metaDia = metasSemana.padrao.pipeline_dia ?? null;
       return {
         dias: diasSemanaCheia,
-        metaDia: metaSemana != null ? metaSemana / 5 : null,
-        metaSemana,
-        porPessoa: doPainel(mSemana.porPessoa).map((p) => {
+        metaDia,
+        metaSemana: metaDia != null ? metaDia * 5 : null,
+        porPessoa: painelSemana.map((p) => {
           let soma = 0;
-          return { nome: p.nome, valores: decorridos.map((di) => (soma += discadasEm(p.nome, di))) };
+          return { nome: p.nome, valores: decorridos.map((di) => (soma += pipelinePorDia.get(p.nome)?.get(di) ?? 0)) };
         }),
       };
     })(),
@@ -709,7 +797,7 @@ function dadosTvCompleto() {
   const decorridos = diasUteis(mesDe, hoje);
   // Contagens do mês (ligações/leads/matrículas) × metas MENSAIS próprias
   // (ligacoes_mes etc.) — independentes das diárias, cadastradas no painel
-  const mMes = calcularMetricas(mesDe, hoje);
+  const mMes = calcularMetricas(mesDe, hoje, null, SEM_QUALIDADE);
   const mesPorId = new Map(mMes.porPessoa.map((p) => [p.pessoaId, p]));
   const metaMesDe = (id, ind) => metasMes.porPessoa[id]?.[ind] ?? metasMes.padrao[ind] ?? null;
   const comMetaMes = (valor, meta) => ({ valor, meta, atingimento: meta ? pct(valor, meta) : null });
@@ -728,7 +816,9 @@ function dadosTvCompleto() {
         atingimento: meta ? pct(receita, meta) : null,
         faltaCentavos: meta ? Math.max(0, meta - receita) : null,
         discadas: comMetaMes(m?.ligacoes.discadas.valor || 0, metaMesDe(c.id, "ligacoes_mes")),
-        leads: comMetaMes(m?.funil.leadsNovos.valor || 0, metaMesDe(c.id, "leads_mes")),
+        // Pipeline do mês × meta diária × dias úteis do mês inteiro (derivada)
+        pipeline: comMetaMes(m?.pipeline.valor || 0,
+          m?.pipeline.metaDia != null ? m.pipeline.metaDia * diasUteis(mesDe, mesFim) : null),
         matriculas: comMetaMes(m?.matriculas.valor || 0, metaMesDe(c.id, "matriculas_mes")),
       };
     }),
@@ -743,7 +833,27 @@ function dadosTvCompleto() {
       : null,
   };
 
-  return { atualizadoEm: new Date().toISOString(), jornada: JORNADA, frescor, dia, semana, mes, funil, parados: paradosTv(hoje) };
+  // ---- STATUS (quem está em dia hoje) e RANKING DE VENDAS com o prêmio ----
+  const ranking = [...status].sort((a, b) => b.receitaCentavos - a.receitaCentavos || a.nome.localeCompare(b.nome));
+  ranking.forEach((x, i) => { x.posicao = i + 1; });
+  const vencedor = ranking.find((x) => x.qualificado && x.receitaCentavos > 0) || null;
+  const statusTv = {
+    data: hoje,
+    semanaDe,
+    diaDaSemana: mSemana.diasUteis,
+    porPessoa: status,
+    // Sai da rotação sem rota hoje E sem meta de pipeline para ninguém
+    ativo: status.some((x) => x.rota.hoje) || status.some((x) => x.pipeline.metaDia != null),
+  };
+  const premio = {
+    semanaDe,
+    diaDaSemana: mSemana.diasUteis,
+    ranking,
+    vencedor: vencedor ? { nome: vencedor.nome, posicao: vencedor.posicao, receitaCentavos: vencedor.receitaCentavos } : null,
+    // Sai da rotação enquanto ninguém do painel vendeu na semana
+    ativo: ranking.some((x) => x.receitaCentavos > 0),
+  };
+  return { atualizadoEm: new Date().toISOString(), jornada: JORNADA, frescor, dia, semana, mes, funil, status: statusTv, premio, parados: paradosTv(hoje) };
 }
 
 // ---------- Leads parados no funil (telas AMARELA e VERMELHA da TV) ----------

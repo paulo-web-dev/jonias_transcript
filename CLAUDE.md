@@ -652,7 +652,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
 | `GET /api/oportunidades/sem-ticket` | leads ATIVOS com ticket zero (`leadsSemTicket()`): por consultor, total, mais antigo, faixas de idade e a lista (número, conta, fase, criada, dias, `noUltimoArquivo`); admin = todos os consultores ativos, vendedor = só os dele (SQL) |
 | `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
-| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: `rota` (progresso da Rota do dia, `progressoTv()` em `rota.js`), dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20 desde 2026-10-01; 30 de 25/09 a 30/09, antes 45), `?fixo=dia\|rota\|semana\|receita\|mes\|parados3\|parados10\|destaque`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
+| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: `status` e `premio` (telas STATUS e RANKING, `statusSemanaTv()` em `metricas.js` sobre `rotasDaSemanaTv()` de `rota.js`), `rota` (progresso da Rota do dia, `progressoTv()`), dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20 desde 2026-10-01; 30 de 25/09 a 30/09, antes 45), `?fixo=status\|ranking\|semana\|receita\|mes\|parados3\|parados10\|destaque` (HOJE e ROTA DO DIA saíram em 2026-10-02, com o `?dia=sempre`), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
 | `GET /api/metas`, `PUT /api/metas`, `PUT /api/metas/config` | painel `/metas` (`resumoMetas()`): padrão vigente, valor efetivo por consultor (própria ou herdada, com "desde" e vigência futura), meta da equipe + soma das individuais, receita do mês com/sem Gerencial, histórico. PUT `{pessoaId: null\|id, escopo: dia\|semana\|mes\|equipe, vigenteDesde, valores: {ligacoes, leads, matriculas, receita \| receita (semana) \| semana, mes}}` — campo ausente não mexe, `null`/"" = sem meta (pessoa: volta a herdar), reais → centavos; data inválida/retroativa, escopo equipe com pessoa, consultor inexistente → 400/404. `/config` `{incluiGerencial: bool}`. Ambos emitem SSE `{tipo:"config"}` — a TV refaz o fetch em silêncio (sem pulso/toast) |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
@@ -1150,7 +1150,7 @@ de consultor, o casamento do consultor da planilha e `/usuarios`.
   60 s.
 - Rotação: 20 s por tela (`?giro=N` continua).
 
-### 🚧 Meta de pipeline, rota como meta e TV de status/prêmio (iniciada em 2026-10-02)
+### ✅ Meta de pipeline, rota como meta e TV de status/prêmio (2026-10-02, migração 29)
 Decisões do usuário (2026-10-02), em duas fases aprovadas separadamente:
 - ✅ **Fase 1 — metas, motor e telas internas** (migração 29). **Pipeline do
   dia = Σ ticket ATUAL das oportunidades com `fase_01_em` no dia, por
@@ -1183,13 +1183,44 @@ Decisões do usuário (2026-10-02), em duas fases aprovadas separadamente:
   equipe), `/metas` (coluna Pipeline; semana/mês derivados exibidos) e o
   dossiê do feedback (bloco `pipeline`). Snapshot congelado antes não tem
   `pipeline`: as telas mostram "—" e pedem recongelar.
-- ⏳ **Fase 2 — TV**: tela STATUS (rota % + pipeline do dia por consultor,
-  "N de M dias" da semana, destaque "EM DIA" nos dois) no lugar de HOJE e
-  ROTA; RANKING DE VENDAS (pódio de receita de matrículas da semana com rota e
-  pipeline ✓/✗ — prêmio = vendas, com rota 100% e pipeline como
-  PRÉ-REQUISITO, critério acumulado da semana, dia em curso não reprova);
-  SEMANA reformulada (pipeline × R$ 42.000 + dias com rota 100% + matrículas);
-  MÊS troca leads por pipeline. Até a Fase 2, a TV mostra leads sem meta.
+- ✅ **Fase 2 — TV** (2026-10-02, sem migração). Rotação: **STATUS →
+  RANKING DE VENDAS → SEMANA → RECEITA → MÊS → parados** (cartão da meta
+  intercalado, 20 s, `entra_painel`/`entra_tv` respeitados). HOJE (45
+  ligações) e ROTA DO DIA saíram — a festa de 45 ligações e a de leads também.
+  Regras em `statusSemanaTv()` (`metricas.js`), sobre as rotas da semana
+  (`rotasDaSemanaTv()` em `rota.js`):
+  - **Rota**: hoje = feitas ÷ itens (rota curta fecha com o que recebeu, dito
+    na tela); semana = todo dia ENCERRADO com rota fechou 100%; hoje só conta
+    quando fecha. Estados `ok | pendente (hoje em curso) | fora (perdeu dia) |
+    sem_rota` (neutro, não conta contra).
+  - **Pipeline**: STATUS mostra **"bateu N de M dias"** (pedido do usuário —
+    binário do dia parecia injusto); o ✓ é o ACUMULADO da semana ≥ meta diária
+    × dias até hoje (`ok`), `pendente` = cobre até ontem e hoje ainda falta,
+    `fora` = abaixo até ontem. Sem meta = neutro.
+  - **EM DIA** (destaque verde + festa na virada) = rota de hoje 100% (ou sem
+    rota hoje) e pipeline `ok`. A festa ROTA CONCLUÍDA continua; se as duas
+    viradas vêm juntas, uma festa só.
+  - **Prêmio** = maior receita de MATRÍCULAS da semana entre quem não está
+    `fora` em rota nem em pipeline (pré-requisitos, não desempate). Pódio dos 3
+    primeiros em vendas com os requisitos de cada um; quem está fora vê o
+    motivo exato ("Rota: 100% em só 3 de 4 dias", "Pipeline: R$ X de R$ Y —
+    faltam R$ Z") e a linha "se a semana fechasse agora, o prêmio iria para…"
+    (com o aviso quando o líder em vendas está fora). Faixa fixa: "o prêmio é
+    de VENDAS — só concorre quem está com a ROTA 100% e o PIPELINE NA META".
+  - **Nada de qualidade do pipeline na TV** (decisão do usuário: ticket zero,
+    retroativo e concentração são conversa individual — ficam em
+    /relatorios, /saude e /meu-painel); a TV chama o motor com
+    `{qualidade: false}`.
+  - SEMANA: pipeline × R$ 42.000 (meta fechada), "N de M dias na meta", rota
+    100% em N de M dias e matrículas; pódios Pipeline / Rota (feitas) /
+    Receita; curva acumulada do pipeline × ritmo de R$ 8.400/dia. MÊS: 📈
+    pipeline × meta diária × dias úteis do mês no lugar de ✨ leads.
+  - Saída da rotação: STATUS sem rota hoje E sem meta de pipeline; RANKING
+    enquanto ninguém do painel vendeu na semana.
+  - O payload da TV passou a usar a data de **Brasília** (o container roda em
+    UTC; antes, depois das 21 h a TV já "virava o dia").
+  - Medido: com 6 consultores, a tela STATUS ocupa ~50vw de altura (cabe numa
+    TV 16:9, 56vw); com mais de 6 entra o modo compacto.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

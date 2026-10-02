@@ -334,3 +334,32 @@ cor` igual, linha a linha.
    saem às 17h (Brasília) para o dia útil seguinte, ou na hora pelo botão
    "gerar".
 3. Avisar a equipe: o vendedor passa a abrir `/prospeccao` na aba Rota do dia.
+
+---
+
+## Parte D — meta de pipeline e TV de status/prêmio (migração 29, outubro de 2026)
+
+Vale para o deploy que leva os commits da migração 29 (meta de pipeline) e
+das telas novas da TV. A produção já está no volume (Parte A feita): siga a
+**Parte B** (backup + `conferir` → `git pull` → build → up) com estas
+conferências no log do boot:
+
+| Linha | Conferir |
+|---|---|
+| `migração 29: N meta(s) preservadas; pipeline_dia = R$ 8.400 desde 05/10; M meta(s) de leads encerradas em 04/10` | N = número de linhas de `metas` antes + 0 (a nova entra depois da contagem). M ≥ 1 (o padrão de leads; mais se alguém tinha meta própria) |
+| `… ⚠ K meta(s) de leads com início depois de 04/10 seguem valendo` | só aparece se existir; nesse caso, encerrar em `/metas` |
+| `🗄 Banco: /app/data/aula-ai.db (DB_PATH) · user_version 29 · N contato(s)` | N = `contatos_ativo` de antes |
+
+Depois de subir:
+
+1. `/metas`: coluna **📈 Pipeline** com "→ R$ 8.400 a partir de 05/10/2026"
+   (até domingo aparece como futura); no histórico, Leads/dia fechada em 04/10.
+2. TV: a rotação passa a ser STATUS → RANKING DE VENDAS → SEMANA → RECEITA →
+   MÊS → parados. URLs com `?fixo=dia` ou `?fixo=rota` deixam de fixar
+   (caem na rotação normal) — trocar por `?fixo=status`. `?festa=demo` mostra
+   a festa nova "EM DIA".
+3. Até 05/10 o pipeline não tem meta: STATUS mostra só a rota (e sai da
+   rotação se não houver rota hoje) e o RANKING mostra os pré-requisitos de
+   pipeline como "sem meta" (neutro).
+4. Períodos já congelados em `/relatorios` não têm pipeline: recongelar se
+   quiser ver as colunas novas e a "Qualidade do pipeline".

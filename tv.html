@@ -19,16 +19,22 @@
   </header>
 
   <main class="tv-visoes">
-    <section class="tv-visao" id="visao-dia">
-      <h2 id="dia-titulo">HOJE</h2>
-      <div class="tv-selo oculto" id="dia-selo"></div>
-      <div class="tv-corpo">
-        <div class="tv-linhas" id="dia-linhas"></div>
-        <div class="tv-podios">
-          <div class="tv-podio" id="dia-podio"><h3>🏆 Ligações do dia</h3><div class="tv-podio-blocos"></div></div>
-          <div class="tv-funil" id="dia-funil"><h3>🎯 Funil — oportunidades ativas</h3><div class="tv-funil-corpo"></div></div>
-        </div>
-      </div>
+    <!-- STATUS: quem está em dia hoje — ROTA de hoje (% concluída) e PIPELINE da
+         semana ("bateu N de M dias"; OK = acumulado cobre a meta até hoje). Os
+         dois OK = destaque "EM DIA". Substituiu HOJE e ROTA DO DIA (2026-10-02). -->
+    <section class="tv-visao" id="visao-status">
+      <h2 id="status-titulo">STATUS</h2>
+      <div class="tv-st-linhas" id="status-linhas"></div>
+      <div class="tv-st-legenda" id="status-legenda"></div>
+    </section>
+
+    <!-- RANKING DE VENDAS da semana: pódio por receita de matrículas; rota e
+         pipeline são PRÉ-REQUISITO do prêmio (critério acumulado da semana). -->
+    <section class="tv-visao" id="visao-ranking">
+      <h2 id="ranking-titulo">RANKING DE VENDAS DA SEMANA</h2>
+      <div class="tv-pr-regra">🏆 O PRÊMIO É DE <b>VENDAS</b> — só concorre quem está com a <b>ROTA 100%</b> e o <b>PIPELINE NA META</b></div>
+      <div class="tv-pr-podio" id="ranking-podio"></div>
+      <div class="tv-pr-vencedor" id="ranking-vencedor"></div>
     </section>
 
     <section class="tv-visao" id="visao-semana">
@@ -39,18 +45,11 @@
           <div class="tv-acumulado" id="semana-acumulado"></div>
         </div>
         <div class="tv-podios">
-          <div class="tv-podio" id="podio-lig"><h3>📞 Ligações</h3><div class="tv-podio-blocos"></div></div>
-          <div class="tv-podio" id="podio-leads"><h3>✨ Leads</h3><div class="tv-podio-blocos"></div></div>
+          <div class="tv-podio" id="podio-lig"><h3>📈 Pipeline</h3><div class="tv-podio-blocos"></div></div>
+          <div class="tv-podio" id="podio-leads"><h3>🗺 Rota (feitas)</h3><div class="tv-podio-blocos"></div></div>
           <div class="tv-podio" id="podio-rec"><h3>💰 Receita</h3><div class="tv-podio-blocos"></div></div>
         </div>
       </div>
-    </section>
-
-    <!-- Rota do dia: % concluído por consultor (feitas ÷ itens da rota). Sai da
-         rotação sem campanha vigente ou sem rota hoje. -->
-    <section class="tv-visao" id="visao-rota">
-      <h2 id="rota-titulo">ROTA DO DIA</h2>
-      <div class="tv-linhas tv-linhas-largas" id="rota-linhas"></div>
     </section>
 
     <section class="tv-visao" id="visao-receita">

@@ -15,8 +15,7 @@ const GIRO_MS = Math.max(6, Number(params.get("giro")) || 20) * 1000;
 // Cartão de destaque (falta para a meta da semana): entra ENTRE cada tela da
 // rotação, com duração própria — ?destaque=N segundos (padrão 12, mín. 4)
 const DESTAQUE_MS = Math.max(4, Number(params.get("destaque")) || 12) * 1000;
-const FIXO = params.get("fixo"); // dia | rota | semana | receita | mes | parados3 | parados10 | destaque
-const DIA_SEMPRE = params.get("dia") === "sempre";
+const FIXO = params.get("fixo"); // status | ranking | semana | receita | mes | parados3 | parados10 | destaque
 // Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
 // ?som=1 / ?som=0 é override por dispositivo. Silêncio é o padrão, não falha.
 const SOM_OVERRIDE = params.has("som") ? params.get("som") !== "0" : null;
@@ -154,22 +153,9 @@ function brilhar(elemento, classe = "tv-glow") {
 
 const CORES_SERIE = ["var(--acento-2)", "var(--verde)", "var(--amarelo)", "var(--acento)"];
 
-// Tendência em miniatura: discadas dos últimos 5 dias úteis
-function svgSparkline(vals) {
-  if (!vals || vals.length < 2) return "";
-  const W = 150, H = 44, P = 7;
-  const max = Math.max(...vals, 1);
-  const x = (i) => P + (i * (W - 2 * P)) / (vals.length - 1);
-  const y = (v) => H - P - (v / max) * (H - 2 * P);
-  const u = vals.length - 1;
-  return `<svg viewBox="0 0 ${W} ${H}" class="tv-spark-svg">
-    <polyline points="${vals.map((v, i) => `${x(i)},${y(v)}`).join(" ")}" fill="none"
-      stroke="var(--acento-2)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
-    <circle cx="${x(u)}" cy="${y(vals[u])}" r="6" fill="var(--acento-2)"/></svg>`;
-}
-
-// Curva acumulada da semana × traçado ideal (45/dia até a meta na sexta)
-function svgAcumulado(a) {
+// Curva acumulada da semana × traçado ideal (pipeline: meta diária até a
+// meta fechada na sexta). `fmt` formata os valores (R$ compacto).
+function svgAcumulado(a, fmt = num) {
   if (!a || !a.metaSemana || !a.porPessoa.length || !a.porPessoa[0].valores.length) return "";
   const W = 780, H = 210, PL = 18, PR = 190, PT = 30, PB = 34;
   const maxY = Math.max(a.metaSemana, ...a.porPessoa.map((p) => p.valores[p.valores.length - 1] || 0)) * 1.06;
@@ -190,31 +176,13 @@ function svgAcumulado(a) {
   const DIAS = ["seg", "ter", "qua", "qui", "sex"];
   return `<svg viewBox="0 0 ${W} ${H}" class="tv-chart">
     <polyline points="${ideal}" fill="none" stroke="var(--texto-suave)" stroke-width="4" stroke-dasharray="12 10" opacity="0.85"/>
-    <text x="${x(4)}" y="${y(a.metaSemana) - 12}" font-size="23" fill="var(--texto-suave)" text-anchor="end">ritmo p/ ${a.metaSemana}</text>
+    <text x="${x(4)}" y="${y(a.metaSemana) - 12}" font-size="23" fill="var(--texto-suave)" text-anchor="end">ritmo p/ ${fmt(a.metaSemana)}</text>
     ${DIAS.map((d2, i) => `<text x="${x(i)}" y="${H - 6}" font-size="22" fill="var(--texto-suave)" text-anchor="middle">${d2}</text>`).join("")}
     ${rot.map((f) => `
       <polyline points="${f.pts}" fill="none" stroke="${f.cor}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
       <circle cx="${f.vx}" cy="${f.vy}" r="9" fill="${f.cor}"/>
-      <text x="${f.vx + 16}" y="${f.ry + 8}" font-size="26" font-weight="800" fill="${f.cor}">${f.nome} ${num(f.valor)}</text>`).join("")}
+      <text x="${f.vx + 16}" y="${f.ry + 8}" font-size="26" font-weight="800" fill="${f.cor}">${f.nome} ${fmt(f.valor)}</text>`).join("")}
   </svg>`;
-}
-
-// Funil de oportunidades ativas por fase (onde está represado)
-function svgFunil(fases) {
-  if (!fases || !fases.length) return "";
-  const W = 460, ROW = 78, PAD = 6;
-  const H = fases.length * ROW + PAD * 2;
-  const max = Math.max(...fases.map((f) => f.n), 1);
-  return `<svg viewBox="0 0 ${W} ${H}" class="tv-chart">` + fases.map((f, i) => {
-    const w = Math.max(56, (f.n / max) * (W - 16));
-    const y0 = PAD + i * ROW;
-    const nome = String(f.fase).replace(/^\d+_/, "");
-    // contorno escuro atrás do texto claro: legível sobre a barra E sobre o fundo
-    return `<rect x="${(W - w) / 2}" y="${y0}" width="${w}" height="${ROW - 16}" rx="14"
-        fill="${CORES_SERIE[i % CORES_SERIE.length]}" opacity="0.9"/>
-      <text x="${W / 2}" y="${y0 + (ROW - 16) / 2 + 10}" text-anchor="middle" font-size="28"
-        font-weight="800" fill="#e8ecf4" stroke="#0b0e17" stroke-width="6" paint-order="stroke">${nome} · ${num(f.n)}</text>`;
-  }).join("") + `</svg>`;
 }
 
 // Gauge semicircular da receita do mês × meta — lê melhor de longe que barra fina
@@ -232,13 +200,12 @@ function svgGauge() {
 
 // ---------- Linhas por consultor (barra longa + detalhe subordinado) ----------
 
-function montarLinhas(container, nomes, comSpark) {
+function montarLinhas(container, nomes) {
   container.innerHTML = nomes.map((nome) => `
     <div class="tv-linha" data-nome="${nome}">
       <div class="tv-linha-topo">
         <span class="tv-linha-nome">${nome}</span>
         <span class="tv-linha-valor"><b data-campo="principal" data-v="0">0</b><i data-campo="principal-meta"></i></span>
-        ${comSpark ? '<span class="tv-spark" data-campo="spark" title="discadas — últimos 5 dias úteis"></span>' : ""}
         <span class="tv-linha-status" data-campo="status"></span>
       </div>
       <div class="tv-trilha"><div class="tv-fill" data-campo="barra"></div></div>
@@ -337,16 +304,19 @@ function proximaCelebracao() {
 
 // ---------- Rotação entre visões ----------
 
-const VISOES = ["dia", "rota", "destaque", "semana", "receita", "mes", "parados3", "parados10"];
+const VISOES = ["status", "ranking", "destaque", "semana", "receita", "mes", "parados3", "parados10"];
 let receitaAvisada = false;
 let visoesAtivas = [];
 let visaoAtual = 0;
 let destaqueAvisado = false;
-let rotaAvisada = false;
-const paradosAvisados = new Set();
+const foraAvisadas = new Set(); // log no console uma vez por motivo de saída
+function avisarFora(visao, motivo) {
+  if (foraAvisadas.has(visao)) return;
+  foraAvisadas.add(visao);
+  console.log(`[tv] tela ${visao} fora da rotação: ${motivo}`);
+}
 
 function aplicarVisoes(d) {
-  const mostrarDia = d.dia.emCurso && (d.dia.temDadoHoje || DIA_SEMPRE);
   // O cartão só entra com meta da semana cadastrada (painel /metas)
   const temDestaque = d.semana.equipe.receita?.metaCentavos != null;
   if (!temDestaque && !destaqueAvisado) {
@@ -361,25 +331,21 @@ function aplicarVisoes(d) {
     console.log("[tv] visão RECEITA DA SEMANA fora da rotação: nenhuma meta de receita semanal (receita_semana) cadastrada em /metas");
   }
   const telas = [];
-  if (mostrarDia) telas.push("dia");
-  // ROTA DO DIA: só com campanha vigente e rota com itens hoje
-  if (d.rota?.ativa) { telas.push("rota"); rotaAvisada = false; }
-  else if (!rotaAvisada) {
-    rotaAvisada = true;
-    console.log(`[tv] tela ROTA DO DIA fora da rotação: ${d.rota?.campanha ? "nenhuma rota com itens hoje" : "nenhuma campanha da Rota vigente hoje"}`);
-  }
+  // STATUS: sai sem rota hoje E sem meta de pipeline para ninguém
+  if (d.status?.ativo) { telas.push("status"); foraAvisadas.delete("status"); }
+  else avisarFora("status", "nenhuma rota hoje e nenhuma meta de pipeline vigente");
+  // RANKING: sai enquanto ninguém do painel vendeu na semana
+  if (d.premio?.ativo) { telas.push("ranking"); foraAvisadas.delete("ranking"); }
+  else avisarFora("ranking", "nenhuma venda (matrícula) do painel na semana");
   telas.push("semana");
   if (temReceita) telas.push("receita");
   telas.push("mes");
   // Leads parados: cada faixa só entra com alguém nela (tela vazia sai da rotação)
   for (const [visao, faixa] of [["parados3", "amarela"], ["parados10", "vermelha"]]) {
-    if (d.parados?.faixas[faixa]?.total) { telas.push(visao); paradosAvisados.delete(visao); }
-    else if (!paradosAvisados.has(visao)) {
-      paradosAvisados.add(visao);
-      console.log(`[tv] tela ${visao} fora da rotação: nenhuma oportunidade ativa na faixa ${faixa}`);
-    }
+    if (d.parados?.faixas[faixa]?.total) { telas.push(visao); foraAvisadas.delete(visao); }
+    else avisarFora(visao, `nenhuma oportunidade ativa na faixa ${faixa}`);
   }
-  // destaque intercalado: HOJE → cartão → SEMANA → cartão → RECEITA → cartão → MÊS → cartão → PARADOS 3–9 → cartão → PARADOS 10+ → cartão
+  // destaque intercalado: STATUS → cartão → RANKING → cartão → SEMANA → cartão → …
   const novas = temDestaque ? telas.flatMap((t) => [t, "destaque"]) : telas;
   const fixoValido = FIXO && novas.includes(FIXO) ? FIXO : null;
   visoesAtivas = fixoValido ? [fixoValido] : novas;
@@ -388,7 +354,7 @@ function aplicarVisoes(d) {
   mostrarVisao(visoesAtivas[visaoAtual]);
 }
 
-const NOMES_VISAO = { dia: "HOJE", rota: "ROTA DO DIA", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
+const NOMES_VISAO = { status: "STATUS", ranking: "RANKING DE VENDAS", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
 
 function mostrarVisao(nome) {
   if (nome === "parados3" || nome === "parados10") ajustarCards(nome);
@@ -415,46 +381,125 @@ function agendarGiro() {
 }
 agendarGiro();
 
-// ---------- ROTA DO DIA ----------
-// Linhas remontadas quando muda quem tem rota (a rota de hoje pode nascer com a TV aberta)
-function renderizarRota(r) {
-  if (!r) return;
-  const alvo = el("rota-linhas");
-  const nomes = r.porPessoa.map((p) => p.nome);
-  if (alvo.dataset.nomes !== nomes.join("|")) {
-    montarLinhas(alvo, nomes, false);
-    alvo.dataset.nomes = nomes.join("|");
-    alvo.classList.toggle("tv-linhas-compactas", nomes.length > 5);
+// ---------- STATUS (quem está em dia hoje) ----------
+// ROTA = rota de HOJE (% feitas ÷ itens; rota curta fecha com o que recebeu).
+// PIPELINE = semana ("bateu N de M dias"; ✓ quando o acumulado cobre a meta
+// diária × dias até hoje — o dia em curso não reprova). Nada de qualidade do
+// pipeline aqui: ticket zero/retroativo/concentração ficam nas telas internas.
+const CLASSE_ESTADO = { ok: "st-ok", pendente: "st-pendente", fora: "st-fora", sem_rota: "st-neutro", sem_meta: "st-neutro" };
+const diasTxt = (n) => `${num(n)} dia${n === 1 ? "" : "s"}`;
+
+function blocoRotaStatus(r) {
+  if (!r.hoje) {
+    return `<div class="tv-st-bloco st-neutro">
+      <div class="tv-st-topo"><span class="tv-st-valor">—</span></div>
+      <div class="tv-st-sub">sem rota hoje</div></div>`;
   }
-  el("rota-titulo").textContent = `ROTA DO DIA ${dataBr(r.data)}${r.campanha ? ` — ${r.campanha.toUpperCase()}` : ""}`;
-  for (const p of r.porPessoa) {
-    const linha = alvo.querySelector(`[data-nome="${p.nome}"]`);
-    if (!linha) continue;
-    if (!p.itens) {
-      atualizarLinha(linha, { semDados: true });
-      linha.querySelector('[data-campo="status"]').textContent = "rota vazia — sem estoque";
-      continue;
-    }
-    atualizarLinha(linha, {
-      principal: p.pct, formatar: (v) => `${num(v)}%`, meta: null, pct: p.pct,
-      status: `${num(p.feitas)} de ${num(p.itens)} feitas`,
-      statusClasse: p.pct >= 100 ? "status-adiantado" : "status-no_ritmo",
-      detalhe: `✓ ${num(p.atendidas)} atendida${p.atendidas === 1 ? "" : "s"}` + (p.curta ? ` · rota curta (cota ${num(p.cota)})` : ""),
-      cruzouMeta: p.cruzou,
-    });
+  const h = r.hoje;
+  const ok = h.feitas >= h.itens;
+  const estado = ok ? "st-ok" : r.diasPerdidos ? "st-fora" : "st-pendente";
+  // Rota curta: a cota dele é o tamanho da rota — explícito, senão parece que fez menos
+  const curta = h.curta ? ` · <span class="tv-st-curta">rota curta: recebeu ${num(h.itens)} (estoque acabou)</span>` : "";
+  const semana = r.diasAvaliados
+    ? ` · <span class="${r.diasPerdidos ? "st-txt-fora" : ""}">semana: 100% em ${num(r.diasOk)} de ${diasTxt(r.diasAvaliados)}</span>` : "";
+  return `<div class="tv-st-bloco ${estado}">
+    <div class="tv-st-topo"><span class="tv-st-valor">${num(h.pct)}%${ok ? " ✓" : ""}</span>
+      <div class="tv-trilha"><div class="tv-fill${ok ? " fill-ok" : ""}" style="width:${Math.min(100, h.pct)}%"></div></div></div>
+    <div class="tv-st-sub">${num(h.feitas)} de ${num(h.itens)} feitas${curta}${semana}</div></div>`;
+}
+
+function blocoPipelineStatus(p) {
+  if (p.metaDia == null) {
+    return `<div class="tv-st-bloco st-neutro">
+      <div class="tv-st-topo"><span class="tv-st-valor">${kReais(p.valor)}</span></div>
+      <div class="tv-st-sub">sem meta de pipeline</div></div>`;
   }
+  const dias = p.dias || { batidos: 0, avaliados: 0 };
+  const principal = dias.avaliados
+    ? `${num(dias.batidos)} de ${diasTxt(dias.avaliados)}`
+    : `${kReais(p.hojeCentavos)} hoje`;
+  const situacao = p.estado === "ok" ? "✓ acumulado na meta"
+    : p.estado === "pendente" ? `hoje faltam ${kReais(p.faltaCentavos)}`
+    : `faltam ${kReais(p.faltaCentavos)}`;
+  return `<div class="tv-st-bloco ${CLASSE_ESTADO[p.estado]}">
+    <div class="tv-st-topo"><span class="tv-st-valor">${principal}</span><span class="tv-st-situacao">${situacao}</span></div>
+    <div class="tv-st-sub">semana ${kReais(p.valor)} de ${kReais(p.metaAteHoje)} até hoje · hoje ${kReais(p.hojeCentavos)} de ${kReais(p.metaDia)}</div></div>`;
+}
+
+function renderizarStatus(st) {
+  if (!st) return;
+  el("status-titulo").textContent = `STATUS DE HOJE ${dataBr(st.data)} — QUEM ESTÁ EM DIA · dia ${num(st.diaDaSemana)} de 5`;
+  const alvo = el("status-linhas");
+  alvo.classList.toggle("tv-st-compacto", st.porPessoa.length > 6);
+  const html = `<div class="tv-st-linha tv-st-cabecalho"><span></span><span>🗺 ROTA DE HOJE</span>` +
+    `<span>📈 PIPELINE — DIAS NA META DA SEMANA</span><span></span></div>` +
+    st.porPessoa.map((x) => `
+    <div class="tv-st-linha${x.emDia ? " tv-st-emdia" : ""}" data-nome="${esc(x.nome)}">
+      <div class="tv-st-nome">${esc(x.nome)}</div>
+      ${blocoRotaStatus(x.rota)}
+      ${blocoPipelineStatus(x.pipeline)}
+      <div class="tv-st-selo">${x.emDia ? "✓ EM DIA" : ""}</div>
+    </div>`).join("");
+  if (alvo.dataset.h !== html) { alvo.innerHTML = html; alvo.dataset.h = html; }
+  const legenda = "EM DIA = rota de hoje 100% e pipeline da semana na meta (meta diária × dias até hoje) · o dia em curso nunca reprova";
+  if (el("status-legenda").textContent !== legenda) el("status-legenda").textContent = legenda;
+}
+
+// ---------- RANKING DE VENDAS (prêmio da semana) ----------
+// Pódio pela receita de matrículas da semana. Rota e pipeline são
+// PRÉ-REQUISITO: quem está fora vê exatamente por quê ("rota 100% em 3 de 4
+// dias", "pipeline: faltam R$ X").
+function linhasPremio(x) {
+  const r = x.rota, p = x.pipeline;
+  const linhas = [];
+  if (r.estado === "sem_rota") linhas.push(`<li class="st-neutro">🗺 Rota: sem rota na semana</li>`);
+  else if (r.estado === "fora") linhas.push(`<li class="st-fora">✗ Rota: 100% em só ${num(r.diasOk)} de ${diasTxt(r.diasAvaliados)}</li>`);
+  else if (r.estado === "pendente") linhas.push(`<li class="st-pendente">🗺 Rota ✓ ${r.diasAvaliados ? `${num(r.diasOk)} de ${diasTxt(r.diasAvaliados)} · ` : ""}hoje em ${num(r.hoje?.pct ?? 0)}%</li>`);
+  else linhas.push(`<li class="st-ok">✓ Rota 100% em ${num(r.diasOk)} de ${diasTxt(r.diasAvaliados)}</li>`);
+  if (p.estado === "sem_meta") linhas.push(`<li class="st-neutro">📈 Pipeline: sem meta</li>`);
+  else if (p.estado === "fora") linhas.push(`<li class="st-fora">✗ Pipeline: ${kReais(p.valor)} de ${kReais(p.metaAteHoje)} — faltam ${kReais(p.faltaCentavos)}</li>`);
+  else if (p.estado === "pendente") linhas.push(`<li class="st-pendente">📈 Pipeline ✓ até ontem · hoje faltam ${kReais(p.faltaCentavos)}</li>`);
+  else linhas.push(`<li class="st-ok">✓ Pipeline ${kReais(p.valor)} de ${kReais(p.metaAteHoje)}</li>`);
+  return linhas.join("");
+}
+
+function renderizarPremio(pr) {
+  if (!pr) return;
+  el("ranking-titulo").textContent = `RANKING DE VENDAS DA SEMANA ${dataBr(pr.semanaDe)} · dia ${num(pr.diaDaSemana)} de 5`;
+  const top = pr.ranking.slice(0, 3);
+  const ordem = [top[1], top[0], top[2]]; // 2º, 1º, 3º
+  const alturas = ["podio-2", "podio-1", "podio-3"];
+  const medalhas = ["🥈", "🥇", "🥉"];
+  const html = ordem.map((x, i) => !x ? `<div class="tv-pr-bloco ${alturas[i]} tv-podio-vazio"></div>` : `
+    <div class="tv-pr-bloco ${alturas[i]}${x.qualificado ? "" : " tv-pr-fora"}${pr.vencedor?.nome === x.nome ? " tv-pr-vencedor-bloco" : ""}">
+      <div class="tv-pr-medalha">${medalhas[i]}</div>
+      <div class="tv-pr-nome">${esc(x.nome)}</div>
+      <div class="tv-pr-valor">${kReais(x.receitaCentavos)}</div>
+      <div class="tv-pr-matr">${num(x.matriculas)} matrícula${x.matriculas === 1 ? "" : "s"}</div>
+      ${x.qualificado ? "" : `<div class="tv-pr-fora-selo">FORA DO PRÊMIO</div>`}
+      <ul class="tv-pr-requisitos">${linhasPremio(x)}</ul>
+    </div>`).join("");
+  const podio = el("ranking-podio");
+  if (podio.dataset.h !== html) { podio.innerHTML = html; podio.dataset.h = html; }
+  const v = pr.vencedor;
+  const lider = pr.ranking[0];
+  const texto = v
+    ? `🏆 Se a semana fechasse agora, o prêmio iria para <b>${esc(v.nome)}</b> — ${v.posicao}º em vendas · ${kReais(v.receitaCentavos)}` +
+      (lider && lider.nome !== v.nome ? ` <span class="st-txt-fora">(${esc(lider.nome)} lidera em vendas, mas está fora dos pré-requisitos)</span>` : "")
+    : `Ninguém com venda na semana cumpre rota e pipeline ainda — o prêmio está em aberto`;
+  if (el("ranking-vencedor").innerHTML !== texto) el("ranking-vencedor").innerHTML = texto;
 }
 
 // ---------- Render ----------
 
 let anterior = null; // apenas o payload anterior (substituído, nunca acumulado)
+const brilharStatus = new Set();
 let montado = false;
 let ultimaAtualizacao = null;
 
 function montar(d) {
-  montarLinhas(el("dia-linhas"), d.dia.porPessoa.map((p) => p.nome), true);
-  montarLinhas(el("semana-linhas"), d.semana.porPessoa.map((p) => p.nome), false);
-  montarLinhas(el("receita-linhas"), d.semana.porPessoa.map((p) => p.nome), false);
+  montarLinhas(el("semana-linhas"), d.semana.porPessoa.map((p) => p.nome));
+  montarLinhas(el("receita-linhas"), d.semana.porPessoa.map((p) => p.nome));
   el("receita-linhas").classList.toggle("tv-linhas-compactas", d.semana.porPessoa.length > 5);
   el("mes-barras").innerHTML = d.mes.porPessoa.map((p) => `
     <div class="tv-gauge" data-nome="${p.nome}">
@@ -514,17 +559,6 @@ function renderizar(d, origem) {
       console.log(`[tv] celebração suprimida: ${novasHoje} matrículas novas de hoje num único evento (teto ${TETO_CELEBRACAO}) — números atualizados normalmente`);
     }
 
-    // Meta do DIA batida (45 ligações) também é festa — só na virada <100 → ≥100
-    if (anterior.dia.data === d.dia.data) {
-      for (const p of d.dia.porPessoa) {
-        const antes = anterior.dia.porPessoa.find((a) => a.nome === p.nome);
-        if (!antes) continue;
-        if ((antes.discadas.atingimento ?? 0) < 100 && (p.discadas.atingimento ?? 0) >= 100) {
-          celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.discadas.valor)} ligações — meta do dia!`);
-        }
-      }
-    }
-
     const mesmaSemana = anterior.semana.de === d.semana.de;
     for (const p of d.semana.porPessoa) {
       const antes = anterior.semana.porPessoa.find((a) => a.nome === p.nome);
@@ -532,102 +566,70 @@ function renderizar(d, origem) {
       if (JSON.stringify(antes) !== JSON.stringify(p)) mudancas.houve = true;
       const cruzou = (m) => ((antes[m]?.atingimento ?? 0) < 100) && ((p[m]?.atingimento ?? 0) >= 100);
       mudancas[p.nome] = {
-        cruzouDiscadas: cruzou("discadas"),
+        cruzouPipeline: cruzou("pipeline"),
         cruzouMatriculas: cruzou("matriculas"),
         cruzouReceita: cruzou("receita"),
         mudou: JSON.stringify(antes) !== JSON.stringify(p),
         mudouReceita: JSON.stringify(antes.receita) !== JSON.stringify(p.receita),
       };
       if (mesmaSemana) {
-        if (cruzou("discadas")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.discadas.valor)} ligações — meta da semana!`);
-        if (cruzou("leads")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.leads.valor)} leads — meta da semana!`);
+        if (cruzou("pipeline")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${reais(p.pipeline.valor)} de pipeline — meta da semana!`);
         if (cruzou("matriculas")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${num(p.matriculas.valor)} matrículas — meta da semana!`);
         if (cruzou("receita")) celebrar("🏆 META BATIDA 🏆", `${p.nome} · ${reais(p.receita.valor)} — meta de receita da semana!`);
       }
     }
   }
-  // Rota do dia fechada em 100% (feitas ÷ itens) é festa — só na virada, no mesmo dia
-  if (anterior?.rota && d.rota && anterior.rota.data === d.rota.data) {
-    for (const p of d.rota.porPessoa) {
-      const antes = anterior.rota.porPessoa.find((a) => a.nome === p.nome);
-      if (!antes || !p.itens) continue;
-      p.cruzou = (antes.pct ?? 0) < 100 && p.pct >= 100;
-      if (p.cruzou) celebrar("🏆 ROTA CONCLUÍDA 🏆", `${p.nome} · ${num(p.feitas)} de ${num(p.itens)} da rota — 100%!`);
+  // STATUS: virar "EM DIA" (rota de hoje 100% + pipeline na meta) é festa; a
+  // rota fechada em 100% também — se as duas viradas vêm juntas, uma festa só
+  if (anterior?.status && d.status && anterior.status.data === d.status.data) {
+    for (const x of d.status.porPessoa) {
+      const antes = anterior.status.porPessoa.find((a) => a.nome === x.nome);
+      if (!antes) continue;
+      const fechouRota = x.rota.hoje && (antes.rota.hoje?.pct ?? 0) < 100 && x.rota.hoje.pct >= 100;
+      if (!antes.emDia && x.emDia) {
+        celebrar("✅ EM DIA ✅", `${x.nome} · rota de hoje 100% e pipeline da semana na meta!`);
+      } else if (fechouRota) {
+        celebrar("🏆 ROTA CONCLUÍDA 🏆", `${x.nome} · ${num(x.rota.hoje.feitas)} de ${num(x.rota.hoje.itens)} da rota — 100%!`);
+      }
+      if (!antes.emDia && x.emDia || fechouRota) brilharStatus.add(x.nome);
     }
   }
   anterior = d;
-  renderizarRota(d.rota);
-
-  // ---- HOJE ----
-  el("dia-titulo").textContent = d.dia.emCurso
-    ? `HOJE ${dataBr(d.dia.data)} — em curso, dados até ${d.dia.temDadoHoje ? horaBr(d.dia.dadosAte) : "—"}`
-    : `HOJE ${dataBr(d.dia.data)}`;
-  const selo = el("dia-selo");
-  selo.classList.toggle("oculto", d.dia.temDadoHoje);
-  if (!d.dia.temDadoHoje) selo.textContent = `SEM DADO DE HOJE — último: ${dataHoraBr(d.dia.dadosAte)}`;
-  // "terça passada: 39" — o número que a equipe entende de imediato; métrica
-  // sem dado na semana anterior é omitida em silêncio
-  const DIAS_SEMANA = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
-  const c = d.dia.comparativo || {};
-  const rotuloPassado = c.data
-    ? DIAS_SEMANA[new Date(c.data + "T00:00:00").getDay()] + " passada"
-    : "";
-  for (const p of d.dia.porPessoa) {
-    const linha = document.querySelector(`#dia-linhas [data-nome="${p.nome}"]`);
-    if (!linha) continue;
-    const semDados = !p.discadas.valor && !p.leads.valor && !p.matriculas.valor && !p.receitaCentavos;
-    const rotulos = { adiantado: "↗ adiantado", no_ritmo: "→ no ritmo", atrasado: "↘ atrasado" };
-    // Legibilidade: só o comparativo do número principal (discadas); o resto
-    // do detalhe fino vive nos relatórios internos, não na tela exposta
-    const sp = p.semanaPassada;
-    const comparTexto = sp && c.temDiscadas
-      ? ` · ${rotuloPassado}: 📞 ${num(sp.discadas)}`
-      : "";
-    atualizarLinha(linha, {
-      semDados,
-      principal: p.discadas.valor,
-      meta: p.discadas.metaDia,
-      pct: p.discadas.atingimento,
-      status: p.discadas.estado
-        ? `proj. ${num(p.discadas.projecao)} · ${rotulos[p.discadas.estado]}`
-        : (p.discadas.valor ? "projeção em breve" : ""),
-      statusClasse: p.discadas.estado ? "status-" + p.discadas.estado : "status-neutro",
-      detalhe: `✨ ${num(p.leads.valor)} leads · 🎓 ${num(p.matriculas.valor)} matr.${comparTexto}`,
-      mudou: mudancas[p.nome]?.mudou,
-      cruzouMeta: mudancas[p.nome]?.cruzouDiscadas,
-    });
-    trocarSvg(linha.querySelector('[data-campo="spark"]'), svgSparkline(p.sparkline));
-  }
-  atualizarPodio(el("dia-podio"), d.dia.rankingLigacoes.map((r) => ({ nome: r.nome, valor: r.valor })), num);
-  const funilHtml = svgFunil(d.funil);
-  el("dia-funil").classList.toggle("oculto", !funilHtml);
-  trocarSvg(document.querySelector("#dia-funil .tv-funil-corpo"), funilHtml);
+  renderizarStatus(d.status);
+  renderizarPremio(d.premio);
+  for (const nome of brilharStatus) brilhar(document.querySelector(`#status-linhas [data-nome="${CSS.escape(nome)}"]`), "tv-glow-meta");
+  brilharStatus.clear();
 
   // ---- SEMANA ----
   el("semana-titulo").textContent =
-    `SEMANA ${dataBr(d.semana.de)} → ${dataBr(d.semana.ate)} · dia ${d.semana.diasUteis} de 5`;
+    `SEMANA ${dataBr(d.semana.de)} → ${dataBr(d.semana.ate)} · PIPELINE × META · dia ${d.semana.diasUteis} de 5`;
   for (const p of d.semana.porPessoa) {
     const linha = document.querySelector(`#semana-linhas [data-nome="${p.nome}"]`);
     if (!linha) continue;
-    const semDados = !p.discadas.valor && !p.leads.valor && !p.matriculas.valor && !p.receitaCentavos;
-    const a = p.discadas.atingimento;
+    const pip = p.pipeline || { valor: 0, meta: null, atingimento: null };
+    const rota = p.rota;
+    const semDados = !pip.valor && !rota?.itens && !p.matriculas.valor && !p.receitaCentavos;
+    const a = pip.atingimento;
+    const dias = pip.dias;
+    const rotaTxt = !rota || !rota.itens ? "🗺 sem rota"
+      : `🗺 rota 100% em ${num(rota.diasOk)} de ${diasTxt(rota.diasAvaliados)}${rota.diasPerdidos ? " ✗" : ""}`;
     atualizarLinha(linha, {
       semDados,
-      principal: p.discadas.valor,
-      meta: p.discadas.meta,
+      principal: pip.valor,
+      formatar: kReais,
+      meta: pip.meta != null ? kReais(pip.meta) : null,
       pct: a,
-      status: a == null ? "" : a >= 100 ? "✓ meta" : `${a.toLocaleString("pt-BR")}%`,
+      status: dias && dias.avaliados ? `📈 ${num(dias.batidos)} de ${diasTxt(dias.avaliados)} na meta` : a == null ? "" : `${Math.round(a)}%`,
       statusClasse: a == null ? "status-neutro" : a >= 100 ? "status-adiantado" : a >= 70 ? "status-no_ritmo" : "status-atrasado",
-      detalhe: `✨ ${num(p.leads.valor)} / ${metaFmt(p.leads.meta)} leads · ` +
-        `🎓 ${num(p.matriculas.valor)} / ${metaFmt(p.matriculas.meta)} matr.${(p.matriculas.atingimento ?? 0) >= 100 ? " ✓" : ""}`,
+      detalhe: `${rotaTxt} · 🎓 ${num(p.matriculas.valor)} / ${metaFmt(p.matriculas.meta)} matr.${(p.matriculas.atingimento ?? 0) >= 100 ? " ✓" : ""}`,
       mudou: mudancas[p.nome]?.mudou,
-      cruzouMeta: mudancas[p.nome]?.cruzouDiscadas || mudancas[p.nome]?.cruzouMatriculas,
+      cruzouMeta: mudancas[p.nome]?.cruzouPipeline || mudancas[p.nome]?.cruzouMatriculas,
     });
   }
-  atualizarPodio(el("podio-lig"), d.semana.rankingLigacoes, num);
-  atualizarPodio(el("podio-leads"), d.semana.rankingLeads, num);
+  atualizarPodio(el("podio-lig"), d.semana.rankingPipeline, kReais);
+  atualizarPodio(el("podio-leads"), d.semana.rankingRota, num);
   atualizarPodio(el("podio-rec"), d.semana.rankingReceita, kReais);
-  trocarSvg(el("semana-acumulado"), svgAcumulado(d.semana.acumulado));
+  trocarSvg(el("semana-acumulado"), svgAcumulado(d.semana.acumulado, kReais));
 
   // ---- RECEITA DA SEMANA: % atingido e falta para a meta semanal de cada
   // vendedor (receita_semana própria ou padrão; número grande, barra longa) ----
@@ -679,10 +681,11 @@ function renderizar(d, origem) {
     card.querySelector('[data-campo="extra"]').textContent = p.metaCentavos
       ? `meta ${kReais(p.metaCentavos)} · faltam ${kReais(p.faltaCentavos)}`
       : "sem meta de receita";
-    // Metas MENSAIS de ligações/leads/matrículas — só o que estiver cadastrado
-    const mensal = [["📞", p.discadas], ["✨", p.leads], ["🎓", p.matriculas]]
+    // Metas do MÊS: ligações/matrículas mensais cadastradas e o pipeline
+    // (meta diária × dias úteis do mês) — só o que tiver meta
+    const mensal = [["📞", p.discadas, num], ["📈", p.pipeline, kReais], ["🎓", p.matriculas, num]]
       .filter(([, m]) => m && m.meta != null)
-      .map(([ic, m]) => `<span class="${(m.atingimento ?? 0) >= 100 ? "ok" : ""}">${ic} ${num(m.valor)}/${metaFmt(m.meta)}</span>`)
+      .map(([ic, m, f]) => `<span class="${(m.atingimento ?? 0) >= 100 ? "ok" : ""}">${ic} ${f(m.valor)}/${f(m.meta)}</span>`)
       .join(" · ");
     const alvoMensal = card.querySelector('[data-campo="mensal"]');
     if (alvoMensal && alvoMensal.dataset.h !== mensal) { alvoMensal.innerHTML = mensal; alvoMensal.dataset.h = mensal; }
@@ -894,6 +897,6 @@ setInterval(() => atualizar("polling"), POLLING_MS);
 if (params.get("festa") === "demo") {
   setTimeout(() => {
     celebrar("🎉 MATRÍCULA NOVA 🎉", "TESTE · +1 matrícula · +R$ 2.980");
-    celebrar("🏆 META BATIDA 🏆", "TESTE · 225 ligações — meta da semana!");
+    celebrar("✅ EM DIA ✅", "TESTE · rota de hoje 100% e pipeline da semana na meta!");
   }, 2500);
 }
