@@ -25,7 +25,7 @@ const { sincronizarMysql, credenciaisMysql } = require("./sincronizacao.js");
 const {
   calcularMetricas, diasUteis, saudeDosDados, dadosTvCompleto,
   resumoMetas, gravarMetas, INDICADORES, INDICADORES_RECEITA, configBool,
-  metricasDaPessoa, resumoMetasDaPessoa,
+  metricasDaPessoa, resumoMetasDaPessoa, leadsSemTicket,
 } = require("./metricas.js");
 const { prepararFatosFeedback, gerarFeedbackMarkdown } = require("./feedback.js");
 const territorio = require("./territorio.js");
@@ -1201,6 +1201,15 @@ app.post("/api/periodos/:id/feedbacks", async (req, res) => {
 
 app.get("/api/saude", (req, res) => {
   res.json(saudeDosDados());
+});
+
+// Leads ativos com ticket zero (não somam pipeline): admin vê todos os
+// consultores; vendedor, só os dele (filtrado no SQL)
+app.get("/api/oportunidades/sem-ticket", (req, res) => {
+  const escopo = escopoDe(req.usuario);
+  if (!escopo) return res.json(leadsSemTicket());
+  if (!escopo.pessoaId) return res.json({ total: 0, porPessoa: [], ultimaImportacao: null });
+  res.json(leadsSemTicket(escopo.pessoaId));
 });
 
 // ---------- Sessão, senha, usuários e carteiras (Fase 3 da prospecção) ----------

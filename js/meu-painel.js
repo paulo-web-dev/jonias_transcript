@@ -41,12 +41,34 @@ async function carregar(de, ate) {
   const meta = (c) => (c.meta != null ? ` / ${c.meta.toLocaleString("pt-BR")}` : "");
   document.getElementById("cards").innerHTML = [
     card("Ligações discadas", `${inteiro(eu.ligacoes.discadas.valor)}<small>${meta(eu.ligacoes.discadas)}</small>`, `${eu.ligacoes.atendidas} atendidas · taxa ${pct(eu.ligacoes.taxaAtendimento)} · TMA ${eu.ligacoes.tmaSeg != null ? eu.ligacoes.tmaSeg + " s" : "—"}`, classePct(eu.ligacoes.discadas.atingimento)),
+    card("Pipeline", `${reais(eu.pipeline.valor)}<small>${eu.pipeline.meta != null ? " / " + reais(eu.pipeline.meta) : ""}</small>`,
+      (eu.pipeline.dias ? `bateu a meta diária em <strong>${eu.pipeline.dias.batidos} de ${eu.pipeline.dias.avaliados}</strong> dia(s) útil(eis)` : "sem meta de pipeline no período") +
+        ` · soma do ticket dos leads criados`, classePct(eu.pipeline.atingimento)),
     card("Leads novos", `${inteiro(eu.funil.leadsNovos.valor)}<small>${meta(eu.funil.leadsNovos)}</small>`, `${eu.funil.perdidas} perdidas · ${eu.funil.vendas} vendas no CRM`, classePct(eu.funil.leadsNovos.atingimento)),
     card("Matrículas", `${inteiro(eu.matriculas.valor)}<small>${meta(eu.matriculas)}</small>`, `atingimento ${pct(eu.matriculas.atingimento)}`, classePct(eu.matriculas.atingimento)),
     card("Receita", reais(eu.receitaCentavos), eu.receita.meta != null ? `meta ${reais(eu.receita.meta)} · ${pct(eu.receita.atingimento)}` : "sem meta de receita cadastrada", classePct(eu.receita.atingimento)),
     card("Dias úteis no período", inteiro(m.diasUteis), "seg–sex, sem feriados"),
   ].join("");
+  const q = eu.pipeline.qualidade;
+  document.getElementById("qualidade-cards").innerHTML = [
+    card("Leads sem ticket ao entrar", pct(q.pctZeroNaOrigem), `${inteiro(q.zeroNaOrigem)} de ${inteiro(q.leads)} lead(s) do período — sem ticket não somam pipeline`),
+    card("Ticket preenchido depois", pct(q.pctRetroativo), `${reais(q.retroativoCentavos)} do pipeline veio de ticket aumentado depois do dia da criação`),
+    card("Peso do maior ticket", pct(q.pctMaiorTicket), `o maior lead do período: ${reais(q.maiorTicketCentavos)}`),
+    card("Conversão em matrícula", pct(q.conversao.pct), `${reais(q.conversao.matriculas)} em matrículas de ${reais(q.conversao.pipeline)} de pipeline (leads até ${dataBr(q.conversao.leadsAte)})`),
+  ].join("");
+  await carregarSemTicket();
   await carregarCdr(de, ate);
+}
+
+async function carregarSemTicket() {
+  const r = await chamarApi("/api/oportunidades/sem-ticket");
+  const g = r.porPessoa[0];
+  document.getElementById("sem-ticket").innerHTML = g
+    ? `<p><strong>${g.total}</strong> lead(s) ativo(s) sem ticket no Omie — o mais antigo há ${g.maisAntigoDias} dia(s). Preencha o ticket no CRM: só assim entram no seu pipeline.</p>
+       <div class="tabela-scroll"><table class="tabela-metricas"><thead><tr><th style="text-align:left">Oportunidade</th><th style="text-align:left">Conta</th><th>Fase</th><th>Criada</th><th>Dias</th></tr></thead>
+       <tbody>${g.itens.map((o) => `<tr class="sem-clique"><td style="text-align:left">${escapeHtml(o.numero)}</td><td style="text-align:left">${escapeHtml(o.conta || "")}</td>
+         <td>${escapeHtml(o.fase || "")}</td><td>${dataBr(o.criadaEm)}</td><td>${o.dias}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="texto-suave">✔ Nenhum lead ativo sem ticket.</p>`;
 }
 
 // Fase 4: minhas ligações do PABX × municípios da carteira (só leitura; o servidor corta pelo escopo)

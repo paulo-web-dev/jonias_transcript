@@ -66,6 +66,74 @@ function porPessoaId(linhas) {
   return new Map(linhas.map((l) => [l.pessoa_id, l]));
 }
 
+// ---------- Pipeline (meta desde 2026-10-05, migração 29) ----------
+// Ticket com que a oportunidade apareceu na PRIMEIRA importação: o valor
+// anterior da mudança de ticket mais antiga; sem mudança, o atual. (A data de
+// criação no Omie pode ser anterior à primeira importação — é "1ª observação".)
+const SQL_TICKET_ORIGEM = `(CASE WHEN EXISTS (SELECT 1 FROM oportunidade_mudancas m
+    WHERE m.oportunidade_id = o.id AND m.campo = 'ticket_centavos')
+  THEN COALESCE((SELECT CAST(m.valor_anterior AS INTEGER) FROM oportunidade_mudancas m
+    WHERE m.oportunidade_id = o.id AND m.campo = 'ticket_centavos' ORDER BY m.observado_em, m.id LIMIT 1), 0)
+  ELSE COALESCE(o.ticket_centavos, 0) END)`;
+// Quanto do ticket atual veio de aumentos vistos DEPOIS do dia da criação
+// (preenchimento retroativo). Só é visível quando a oportunidade vem em duas
+// importações: é piso. Limitado ao ticket atual na consulta que usa.
+const SQL_TICKET_RETROATIVO = `COALESCE((SELECT SUM(MAX(0, CAST(m.valor_novo AS INTEGER) - COALESCE(CAST(m.valor_anterior AS INTEGER), 0)))
+  FROM oportunidade_mudancas m WHERE m.oportunidade_id = o.id AND m.campo = 'ticket_centavos'
+    AND substr(m.observado_em, 1, 10) > substr(o.fase_01_em, 1, 10)), 0)`;
+// Leads precisam de tempo para virar matrícula: a conversão olha os criados
+// até 30 dias antes do fim do período, desde o começo do histórico.
+const CONVERSAO_MATURACAO_DIAS = 30;
+
+const formatoBrasilia = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+});
+const hojeBrasilia = () => formatoBrasilia.format(new Date());
+
+// Conversão histórica pipeline → matrícula: Σ receita das matrículas (não
+// canceladas) ligadas às oportunidades ÷ Σ ticket dessas oportunidades
+// (só ticket > 0). Mesma fonte dos R$ 75.000 de receita.
+function conversaoPipeline(ate, apenasPessoaId = null) {
+  const limite = new Date(ate + "T12:00:00Z");
+  limite.setUTCDate(limite.getUTCDate() - CONVERSAO_MATURACAO_DIAS);
+  const leadsAte = limite.toISOString().slice(0, 10);
+  const filtro = apenasPessoaId ? "o.pessoa_id = ?" : "o.pessoa_id IN (SELECT id FROM pessoas WHERE tipo = 'consultor')";
+  const linhas = db.prepare(
+    `SELECT o.pessoa_id, SUM(o.ticket_centavos) pipeline,
+            SUM(COALESCE((SELECT SUM(COALESCE(m.valor_centavos, 0)) FROM matriculas m
+              WHERE m.oportunidade_id = o.id AND (m.status IS NULL OR m.status != 'canceled')), 0)) matriculas
+     FROM oportunidades o
+     WHERE o.fase_01_em <= ? AND COALESCE(o.ticket_centavos, 0) > 0 AND ${filtro}
+     GROUP BY o.pessoa_id`
+  ).all(leadsAte + "T23:59:59", ...(apenasPessoaId ? [apenasPessoaId] : []));
+  const porPessoa = new Map(linhas.map((l) => [l.pessoa_id, { pipeline: l.pipeline, matriculas: l.matriculas }]));
+  const pipelineEq = linhas.reduce((s, l) => s + l.pipeline, 0);
+  const matriculasEq = linhas.reduce((s, l) => s + l.matriculas, 0);
+  return {
+    leadsAte,
+    porPessoa,
+    equipe: { pipeline: pipelineEq, matriculas: matriculasEq, pct: pipelineEq ? pct(matriculasEq, pipelineEq) : null },
+  };
+}
+
+// Dias úteis do período em que o valor diário bateu a meta. Avaliados: os
+// dias já encerrados (até `ate`) e o dia em curso SÓ se já bateu — o dia
+// que ainda não acabou nunca reprova.
+function diasBatidos(porDia, de, ate, metaDia) {
+  if (metaDia == null) return null;
+  const hoje = hojeBrasilia();
+  let batidos = 0, avaliados = 0;
+  for (let d = new Date(de + "T12:00:00Z"); d.toISOString().slice(0, 10) <= ate; d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().slice(0, 10);
+    if (d.getUTCDay() === 0 || d.getUTCDay() === 6 || iso > hoje) continue;
+    const bateu = (porDia?.get(iso) || 0) >= metaDia;
+    if (iso === hoje && !bateu) continue;
+    avaliados++;
+    if (bateu) batidos++;
+  }
+  return { batidos, avaliados };
+}
+
 // apenasPessoaId (Fase 3): calcula SÓ para essa pessoa — as consultas filtram
 // por pessoa_id no SQL e o retorno não traz equipe/canais/empresa (dado de
 // outros nunca sai do banco para o vendedor).
@@ -98,6 +166,21 @@ function calcularMetricas(de, ate, apenasPessoaId = null) {
   const leads = porPessoaId(db.prepare(
     `SELECT pessoa_id, COUNT(*) n FROM oportunidades
      WHERE fase_01_em BETWEEN ? AND ? AND ${fp} GROUP BY pessoa_id`).all(de, fim, ...extra));
+  const pipeline = porPessoaId(db.prepare(
+    `SELECT pessoa_id, SUM(COALESCE(ticket_centavos, 0)) centavos, MAX(COALESCE(ticket_centavos, 0)) maior
+     FROM oportunidades WHERE fase_01_em BETWEEN ? AND ? AND ${fp} GROUP BY pessoa_id`).all(de, fim, ...extra));
+  const pipelinePorDia = new Map(); // pessoa → Map(dia → centavos)
+  for (const r of db.prepare(
+    `SELECT pessoa_id, substr(fase_01_em, 1, 10) dia, SUM(COALESCE(ticket_centavos, 0)) centavos
+     FROM oportunidades WHERE fase_01_em BETWEEN ? AND ? AND ${fp} GROUP BY pessoa_id, dia`).all(de, fim, ...extra)) {
+    (pipelinePorDia.get(r.pessoa_id) ?? pipelinePorDia.set(r.pessoa_id, new Map()).get(r.pessoa_id)).set(r.dia, r.centavos);
+  }
+  const qualidade = porPessoaId(db.prepare(
+    `SELECT o.pessoa_id, COUNT(*) leads,
+            SUM(${SQL_TICKET_ORIGEM} = 0) zero_na_origem,
+            SUM(MIN(COALESCE(o.ticket_centavos, 0), (${SQL_TICKET_RETROATIVO}))) retroativo
+     FROM oportunidades o WHERE o.fase_01_em BETWEEN ? AND ? AND o.${fp} GROUP BY o.pessoa_id`).all(de, fim, ...extra));
+  const conversao = conversaoPipeline(ate, apenasPessoaId);
   const funil = db.prepare(
     `SELECT pessoa_id, fase_atual, COUNT(*) n FROM oportunidades
      WHERE fase_01_em BETWEEN ? AND ? AND ${fp}
@@ -143,6 +226,10 @@ function calcularMetricas(de, ate, apenasPessoaId = null) {
     const perd = perdidas.get(p.id) || { n: 0, aproximadas: 0 };
     const conq = conquistadas.get(p.id) || { n: 0, ticket_centavos: 0 };
     const mat = matriculas.get(p.id) || { n: 0, receita_centavos: 0 };
+    const pip = pipeline.get(p.id) || { centavos: 0, maior: 0 };
+    const qual = qualidade.get(p.id) || { leads: 0, zero_na_origem: 0, retroativo: 0 };
+    const conv = conversao.porPessoa.get(p.id) || { pipeline: 0, matriculas: 0 };
+    const metaPipelineDia = metaDe("pipeline_dia");
     return {
       pessoaId: p.id,
       nome: p.nome,
@@ -161,6 +248,27 @@ function calcularMetricas(de, ate, apenasPessoaId = null) {
         perdidasAproximadas: perd.aproximadas || 0,
         vendas: conq.n,
         ticketCentavos: conq.ticket_centavos,
+      },
+      // Pipeline: Σ ticket atual dos leads criados no período (centavos).
+      // `dias`: quantos dias úteis bateram a meta diária — o dia em curso só
+      // conta se já bateu (nunca reprova antes de acabar).
+      pipeline: {
+        ...comMeta(pip.centavos, metaPipelineDia),
+        dias: diasBatidos(pipelinePorDia.get(p.id), de, ate, metaPipelineDia),
+        qualidade: {
+          leads: qual.leads,
+          zeroNaOrigem: qual.zero_na_origem,
+          pctZeroNaOrigem: qual.leads ? pct(qual.zero_na_origem, qual.leads) : null,
+          retroativoCentavos: qual.retroativo || 0,
+          pctRetroativo: pip.centavos ? pct(qual.retroativo || 0, pip.centavos) : null,
+          maiorTicketCentavos: pip.maior || 0,
+          pctMaiorTicket: pip.centavos ? pct(pip.maior || 0, pip.centavos) : null,
+          conversao: {
+            ...conv,
+            leadsAte: conversao.leadsAte,
+            pct: conv.pipeline ? pct(conv.matriculas, conv.pipeline) : null,
+          },
+        },
       },
       matriculas: comMeta(mat.n, metaDe("matriculas_dia")),
       receitaCentavos: mat.receita_centavos,
@@ -186,7 +294,10 @@ function calcularMetricas(de, ate, apenasPessoaId = null) {
     atendidas: soma((p) => p.ligacoes.atendidas),
     conversaSeg: soma((p) => p.ligacoes.conversaSeg),
     leadsNovos: soma((p) => p.funil.leadsNovos.valor),
-    metaLeads: soma((p) => p.funil.leadsNovos.meta || 0),
+    metaLeads: soma((p) => p.funil.leadsNovos.meta || 0) || null,
+    pipelineCentavos: soma((p) => p.pipeline.valor),
+    metaPipelineCentavos: soma((p) => p.pipeline.meta || 0) || null,
+    conversaoPipeline: { ...conversao.equipe, leadsAte: conversao.leadsAte },
     perdidas: soma((p) => p.funil.perdidas),
     vendas: soma((p) => p.funil.vendas),
     matriculas: soma((p) => p.matriculas.valor),
@@ -723,14 +834,14 @@ function paradosTv(hoje) {
 // (× dias úteis), os "_mes" na visão MÊS da TV; os "_equipe" são o alvo
 // próprio da equipe em R$ (nunca a soma das individuais).
 const INDICADORES = {
-  dia: { ligacoes: "ligacoes_dia", leads: "leads_dia", matriculas: "matriculas_dia", receita: "receita_dia" },
+  dia: { ligacoes: "ligacoes_dia", pipeline: "pipeline_dia", matriculas: "matriculas_dia", receita: "receita_dia" },
   semana: { receita: "receita_semana" },
-  mes: { ligacoes: "ligacoes_mes", leads: "leads_mes", matriculas: "matriculas_mes", receita: "receita_mes" },
+  mes: { ligacoes: "ligacoes_mes", matriculas: "matriculas_mes", receita: "receita_mes" },
   equipe: { semana: "receita_semana_equipe", mes: "receita_mes_equipe" },
 };
 const ESCOPOS_PESSOA = ["dia", "semana", "mes"];
 const INDICADORES_RECEITA = new Set([
-  "receita_dia", "receita_semana", "receita_mes", "receita_semana_equipe", "receita_mes_equipe",
+  "pipeline_dia", "receita_dia", "receita_semana", "receita_mes", "receita_semana_equipe", "receita_mes_equipe",
 ]);
 
 function configBool(chave) {
@@ -864,6 +975,43 @@ function gravarMetas({ pessoaId, vigenteDesde, valores }) {
   return mudancas;
 }
 
+// ---------- Leads ativos sem ticket (lista de trabalho para corrigir o CRM) ----------
+// Oportunidades Ativas com ticket zero: não somam pipeline. Idade = dias
+// corridos desde a criação (fase_01_em; sem ela, a inclusão). `noUltimoArquivo`
+// diz se a oportunidade veio na última importação do Omie — a que não veio
+// pode já ter sido corrigida no CRM sem o sistema saber.
+function leadsSemTicket(apenasPessoaId = null) {
+  const hoje = hojeBrasilia();
+  const ultimaImportacao = db.prepare(
+    "SELECT id, concluido_em FROM importacoes WHERE tipo = 'oportunidades' AND status = 'concluida' ORDER BY id DESC LIMIT 1"
+  ).get() || null;
+  const filtro = apenasPessoaId ? "o.pessoa_id = ?" : "p.tipo = 'consultor' AND p.ativo = 1";
+  const linhas = db.prepare(
+    `SELECT o.pessoa_id pessoaId, p.nome, o.numero, o.conta, o.fase_atual fase,
+            substr(COALESCE(o.fase_01_em, o.incluido_em), 1, 10) criadaEm,
+            CAST(julianday(?) - julianday(substr(COALESCE(o.fase_01_em, o.incluido_em), 1, 10)) AS INTEGER) dias,
+            (o.importacao_id = ?) noUltimoArquivo
+     FROM oportunidades o JOIN pessoas p ON p.id = o.pessoa_id
+     WHERE o.status = 'Ativo' AND COALESCE(o.ticket_centavos, 0) = 0 AND ${filtro}
+     ORDER BY p.nome, dias DESC, o.numero`
+  ).all(hoje, ultimaImportacao?.id ?? -1, ...(apenasPessoaId ? [apenasPessoaId] : []));
+  const porPessoa = new Map();
+  for (const l of linhas) {
+    l.noUltimoArquivo = !!l.noUltimoArquivo;
+    const g = porPessoa.get(l.pessoaId) ?? porPessoa.set(l.pessoaId, { pessoaId: l.pessoaId, nome: l.nome, total: 0, maisAntigoDias: 0, faixas: { ate7: 0, de8a30: 0, mais30: 0 }, itens: [] }).get(l.pessoaId);
+    g.total++;
+    g.maisAntigoDias = Math.max(g.maisAntigoDias, l.dias ?? 0);
+    g.faixas[l.dias <= 7 ? "ate7" : l.dias <= 30 ? "de8a30" : "mais30"]++;
+    g.itens.push({ numero: l.numero, conta: l.conta, fase: l.fase, criadaEm: l.criadaEm, dias: l.dias, noUltimoArquivo: l.noUltimoArquivo });
+  }
+  return {
+    hoje,
+    ultimaImportacao,
+    total: linhas.length,
+    porPessoa: [...porPessoa.values()].sort((a, b) => b.total - a.total),
+  };
+}
+
 // ---------- Escopo de uma pessoa (Fase 3 da prospecção: vendedor) ----------
 // Só o bloco da própria pessoa; nada de equipe, canais, empresa, ranking.
 const metricasDaPessoa = (de, ate, pessoaId) => calcularMetricas(de, ate, pessoaId);
@@ -879,5 +1027,5 @@ function resumoMetasDaPessoa(pessoaId) {
 module.exports = {
   diasUteis, metasVigentes, calcularMetricas, saudeDosDados, dadosTvCompleto,
   resumoMetas, gravarMetas, INDICADORES, INDICADORES_RECEITA, configBool,
-  metricasDaPessoa, resumoMetasDaPessoa,
+  metricasDaPessoa, resumoMetasDaPessoa, leadsSemTicket,
 };

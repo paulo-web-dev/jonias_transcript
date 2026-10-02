@@ -1154,6 +1154,54 @@ const MIGRACOES = [
       .run(JSON.stringify(licitacao), new Date().toISOString());
     console.log("migração 28: rota criada — tipo \"Licitação\" (6 setores, 45/dia); nenhuma campanha vigente até o admin ligar.");
   },
+
+  // 29 — Meta de PIPELINE substitui a de leads (decisões do usuário,
+  // 2026-10-02). Pipeline do dia = Σ ticket ATUAL das oportunidades com
+  // fase_01_em no dia (ticket zero soma zero; ticket preenchido depois só é
+  // sinalizado, não descontado). `pipeline_dia` em centavos, padrão
+  // R$ 8.400 a partir de 2026-10-05; semana e mês saem × dias úteis.
+  // As metas de leads (dia e mês, padrão e próprias) são ENCERRADAS em
+  // 2026-10-04 — nada é apagado: período anterior continua com a meta que
+  // valia. Linha de leads que começaria depois do corte (não deveria existir)
+  // é só listada no log. O SQLite não altera CHECK: a tabela é recriada.
+  () => {
+    const antes = db.prepare("SELECT COUNT(*) n FROM metas").get().n;
+    db.exec(`
+      CREATE TABLE metas_nova (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        pessoa_id     INTEGER REFERENCES pessoas(id),
+        indicador     TEXT    NOT NULL CHECK (indicador IN (
+                        'ligacoes_dia', 'leads_dia', 'matriculas_dia', 'receita_dia', 'pipeline_dia',
+                        'receita_semana',
+                        'ligacoes_mes', 'leads_mes', 'matriculas_mes', 'receita_mes',
+                        'receita_semana_equipe', 'receita_mes_equipe')),
+        valor         REAL    NOT NULL,
+        vigente_desde TEXT    NOT NULL,
+        vigente_ate   TEXT,
+        UNIQUE (indicador, pessoa_id, vigente_desde)
+      );
+      INSERT INTO metas_nova (id, pessoa_id, indicador, valor, vigente_desde, vigente_ate)
+        SELECT id, pessoa_id, indicador, valor, vigente_desde, vigente_ate FROM metas;
+      DROP TABLE metas;
+      ALTER TABLE metas_nova RENAME TO metas;
+    `);
+    const depois = db.prepare("SELECT COUNT(*) n FROM metas").get().n;
+    if (depois !== antes) throw new Error(`migração 29: metas ${antes} → ${depois} — abortada`);
+    const fechadas = db.prepare(
+      `UPDATE metas SET vigente_ate = '2026-10-04'
+       WHERE indicador IN ('leads_dia', 'leads_mes') AND vigente_desde <= '2026-10-04'
+         AND (vigente_ate IS NULL OR vigente_ate > '2026-10-04')`
+    ).run().changes;
+    const futuras = db.prepare(
+      "SELECT COUNT(*) n FROM metas WHERE indicador IN ('leads_dia', 'leads_mes') AND vigente_desde > '2026-10-04'"
+    ).get().n;
+    db.prepare("INSERT INTO metas (pessoa_id, indicador, valor, vigente_desde) VALUES (NULL, 'pipeline_dia', 840000, '2026-10-05')").run();
+    console.log(
+      `migração 29: ${depois} meta(s) preservadas; pipeline_dia = R$ 8.400 desde 05/10; ` +
+      `${fechadas} meta(s) de leads encerradas em 04/10` +
+      (futuras ? ` — ⚠ ${futuras} meta(s) de leads com início depois de 04/10 seguem valendo (conferir em /metas)` : "")
+    );
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

@@ -86,6 +86,7 @@ aula-ai/
 ├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
 ├── scripts/banco.js # manutenção do SQLite: conferir | checkpoint | backup (deploy seguro)
 ├── scripts/viabilidade-rota.js # SÓ LEITURA: estoque de uma campanha da Rota por consultor/regional
+├── scripts/diagnostico-pipeline.js # SÓ LEITURA: pipeline por consultor/dia, ticket zero/retroativo, conversão
 ├── DEPLOY.md        # procedimento de deploy em produção (Docker) e migração do banco p/ o volume
 ├── .dockerignore    # a imagem NUNCA leva banco (*.db, -wal, -shm), backups/, data/, planilhas, .env nem node_modules
 ├── Dockerfile       # 2 estágios: npm ci --omit=dev com toolchain → node:22-bookworm-slim
@@ -172,7 +173,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **28**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **29**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -267,6 +268,9 @@ Central de dados (migração 4; datas/horas operacionais em **horário local**, 
   `status = 'canceled'` **não conta como receita**; matrícula com aluno órfão na
   origem é mantida com dados em branco (nunca descartada em silêncio).
 - `metas(id, pessoa_id NULL=padrão, indicador, valor, vigente_desde/ate)` —
+  **migração 29 (2026-10-02)**: `pipeline_dia` (centavos, padrão R$ 8.400
+  desde 2026-10-05) substitui `leads_dia`/`leads_mes`, encerradas em
+  2026-10-04 (histórico preservado; ver "Meta de pipeline" no roadmap) —
   indicadores (CHECK, migração 16): diários `ligacoes_dia|leads_dia|
   matriculas_dia|receita_dia` (mandam em HOJE/SEMANA da TV e nos relatórios,
   × dias úteis), **semanal `receita_semana`** (por vendedor, número próprio —
@@ -646,6 +650,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/metricas?de=&ate=` | cálculo ao vivo do motor de métricas (preview) |
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
 | `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
+| `GET /api/oportunidades/sem-ticket` | leads ATIVOS com ticket zero (`leadsSemTicket()`): por consultor, total, mais antigo, faixas de idade e a lista (número, conta, fase, criada, dias, `noUltimoArquivo`); admin = todos os consultores ativos, vendedor = só os dele (SQL) |
 | `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
 | `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: `rota` (progresso da Rota do dia, `progressoTv()` em `rota.js`), dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20 desde 2026-10-01; 30 de 25/09 a 30/09, antes 45), `?fixo=dia\|rota\|semana\|receita\|mes\|parados3\|parados10\|destaque`, `?dia=sempre` (mostra HOJE mesmo sem CDR do dia), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
@@ -1144,6 +1149,47 @@ de consultor, o casamento do consultor da planilha e `/usuarios`.
   pelo CDR chega por SSE na importação; a baixa manual chega pelo polling de
   60 s.
 - Rotação: 20 s por tela (`?giro=N` continua).
+
+### 🚧 Meta de pipeline, rota como meta e TV de status/prêmio (iniciada em 2026-10-02)
+Decisões do usuário (2026-10-02), em duas fases aprovadas separadamente:
+- ✅ **Fase 1 — metas, motor e telas internas** (migração 29). **Pipeline do
+  dia = Σ ticket ATUAL das oportunidades com `fase_01_em` no dia, por
+  vendedor** (definição A; ticket zero soma zero; ticket preenchido depois NÃO
+  é descontado, só sinalizado — descontar zeraria quase todos: 74% dos leads
+  da Agnes e 91% dos do Renato nascem sem ticket em produção; o usuário trata
+  o preenchimento com a equipe). Meta `pipeline_dia` R$ 8.400 desde 05/10;
+  semana (× 5 = R$ 42.000) e mês (× dias úteis, out/26 = R$ 184.800) são
+  DERIVADOS, sem indicador próprio. Em produção (18/09–01/10) só Frederico
+  (8/10) e Eduardo (7/10) batiam com regularidade. Metas de leads encerradas
+  em 04/10 (relatório antigo segue com a meta que valia); `ligacoes_dia` (45)
+  continua vigente só para os relatórios internos. Motor
+  (`calcularMetricas`): `porPessoa[].pipeline` = `comMeta` + `dias {batidos,
+  avaliados}` (dia útil encerrado conta; o dia em curso só se já bateu — nunca
+  reprova antes de acabar) + `qualidade`; `equipe.pipelineCentavos`,
+  `metaPipelineCentavos`, `conversaoPipeline`. **Blindagem contra ticket
+  inflado (só visibilidade, nada bloqueia)**: % de leads com ticket zero na
+  1ª importação (`SQL_TICKET_ORIGEM`: valor anterior da mudança de ticket mais
+  antiga), % do pipeline vindo de ticket aumentado depois do dia da criação
+  (`SQL_TICKET_RETROATIVO`, piso — só visível quando a oportunidade vem em
+  duas importações), % do maior ticket e conversão histórica pipeline →
+  matrícula (receita das matrículas ligadas ÷ ticket > 0 dos leads criados
+  até 30 dias antes do fim do período; `conversaoPipeline`). Telas:
+  `/relatorios` (colunas Pipeline/Meta/%/Dias ≥ meta, cartão da equipe,
+  tabela "Qualidade do pipeline" com ⚠ em ticket zero ≥ 50%, retroativo ≥ 30%,
+  maior ticket ≥ 50% ou conversão < metade da equipe — limiares só pintam),
+  `/saude` ("Leads ativos sem ticket" por consultor, há quantos dias — lista
+  de trabalho para corrigir o CRM), `/meu-painel` (pipeline, "bateu N de M
+  dias", os quatro indicadores e os próprios leads sem ticket — sem números da
+  equipe), `/metas` (coluna Pipeline; semana/mês derivados exibidos) e o
+  dossiê do feedback (bloco `pipeline`). Snapshot congelado antes não tem
+  `pipeline`: as telas mostram "—" e pedem recongelar.
+- ⏳ **Fase 2 — TV**: tela STATUS (rota % + pipeline do dia por consultor,
+  "N de M dias" da semana, destaque "EM DIA" nos dois) no lugar de HOJE e
+  ROTA; RANKING DE VENDAS (pódio de receita de matrículas da semana com rota e
+  pipeline ✓/✗ — prêmio = vendas, com rota 100% e pipeline como
+  PRÉ-REQUISITO, critério acumulado da semana, dia em curso não reprova);
+  SEMANA reformulada (pipeline × R$ 42.000 + dias com rota 100% + matrículas);
+  MÊS troca leads por pipeline. Até a Fase 2, a TV mostra leads sem meta.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

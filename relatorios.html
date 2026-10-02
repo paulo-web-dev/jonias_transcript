@@ -56,9 +56,31 @@
               <th>Discadas</th><th>Meta</th><th>%</th>
               <th>Atend.</th><th>Taxa</th><th>TMA</th>
               <th>Leads</th><th>Meta</th><th>%</th>
+              <th>Pipeline</th><th>Meta R$</th><th>%</th><th title="dias úteis em que bateu a meta diária de pipeline">Dias ≥ meta</th>
               <th>Perdidas</th><th>Vendas</th>
               <th>Matríc.</th><th>Meta</th><th>%</th>
               <th>Receita</th><th>Meta R$</th><th>%</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <h3 class="secao-titulo">Qualidade do pipeline</h3>
+      <p class="texto-suave">Os quatro juntos dizem se o pipeline é real. Nada aqui bloqueia ninguém — é visibilidade.
+        <strong>Ticket zero</strong>: leads do período que apareceram na 1ª importação do Omie sem ticket.
+        <strong>Retroativo</strong>: parte do pipeline que veio de ticket aumentado depois do dia da criação (piso:
+        só aparece se a oportunidade veio em duas importações). <strong>Maior ticket</strong>: peso do maior lead no
+        pipeline. <strong>Conversão</strong>: receita das matrículas ligadas ÷ ticket dos leads criados até 30 dias
+        antes do fim do período (todo o histórico). ⚠ = ticket zero ≥ 50%, retroativo ≥ 30%, maior ticket ≥ 50% ou
+        conversão abaixo da metade da equipe. “Sem ticket agora” é ao vivo, não congelado — a lista está na
+        <a href="/saude#sem-ticket">saúde dos dados</a>.</p>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas" id="tabela-qualidade">
+          <thead>
+            <tr>
+              <th>Consultor</th><th>Pipeline</th><th>Leads</th><th>Ticket zero</th><th>Retroativo</th>
+              <th>Maior ticket</th><th>Conversão</th><th>Sem ticket agora</th>
             </tr>
           </thead>
           <tbody></tbody>

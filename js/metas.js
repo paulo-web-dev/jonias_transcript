@@ -63,10 +63,10 @@ const ESCOPOS_PESSOA = ["dia", "semana", "mes"];
 // Semanas por mês (52 ÷ 12) — projeção informativa da meta semanal de receita
 const SEMANAS_POR_MES = 52 / 12;
 const projecaoMes = (semanaCentavos) => Math.round(semanaCentavos * SEMANAS_POR_MES);
-const ROTULO_CAMPO = { ligacoes: "📞 Ligações", leads: "✨ Leads", matriculas: "🎓 Matrículas", receita: "💰 Receita (R$)",
+const ROTULO_CAMPO = { ligacoes: "📞 Ligações", pipeline: "📈 Pipeline (R$/dia)", matriculas: "🎓 Matrículas", receita: "💰 Receita (R$)",
   semana: "💰 Meta da SEMANA (R$)", mes: "💰 Meta do MÊS (R$)" };
 const ROTULO_INDICADOR = {
-  ligacoes_dia: "Ligações/dia", leads_dia: "Leads/dia", matriculas_dia: "Matrículas/dia", receita_dia: "Receita/dia",
+  ligacoes_dia: "Ligações/dia", leads_dia: "Leads/dia", pipeline_dia: "Pipeline/dia", matriculas_dia: "Matrículas/dia", receita_dia: "Receita/dia",
   receita_semana: "Receita/semana",
   ligacoes_mes: "Ligações/mês", leads_mes: "Leads/mês", matriculas_mes: "Matrículas/mês", receita_mes: "Receita/mês",
   receita_semana_equipe: "EQUIPE — receita/semana", receita_mes_equipe: "EQUIPE — receita/mês",
@@ -102,9 +102,28 @@ function textoProjecao(semanaCentavos, mesCentavos) {
   return `projeta ≈ ${reais(proj)}/mês (× 52 ÷ 12) · ${mes}`;
 }
 
+// Pipeline só tem meta DIÁRIA; semana e mês são derivados (× dias úteis) —
+// mostrados para comparar com a receita, sem campo próprio para editar
+function diasUteisDoMes() {
+  const h = new Date();
+  let n = 0;
+  for (let d = new Date(h.getFullYear(), h.getMonth(), 1); d.getMonth() === h.getMonth(); d.setDate(d.getDate() + 1)) {
+    if (d.getDay() >= 1 && d.getDay() <= 5) n++;
+  }
+  return n;
+}
+function celulaPipelineDerivada(escopo, fonte, comHeranca) {
+  const dia = valorEfetivo(fonte, "pipeline_dia", comHeranca);
+  if (dia == null) return `<td class="texto-suave meta-celula meta-celula-vazia">—</td>`;
+  const dias = escopo === "semana" ? 5 : diasUteisDoMes();
+  const rotulo = escopo === "semana" ? "× 5 dias úteis" : `× ${dias} dias úteis deste mês`;
+  return `<td class="meta-celula texto-suave"><strong>${reais(dia * dias)}</strong><br><small>${rotulo} · derivada da diária</small></td>`;
+}
+
 function linhaEscopo(escopo, fonte, comHeranca, pessoaId, nome) {
   const inds = dados.indicadores[escopo];
-  const celulas = ["ligacoes", "leads", "matriculas", "receita"].map((campo) => {
+  const celulas = ["ligacoes", "pipeline", "matriculas", "receita"].map((campo) => {
+    if (campo === "pipeline" && escopo !== "dia") return celulaPipelineDerivada(escopo, fonte, comHeranca);
     if (!inds[campo]) return `<td class="texto-suave meta-celula meta-celula-vazia">—</td>`;
     let celula = celulaMeta(inds[campo], fonte[inds[campo]], comHeranca);
     if (escopo === "semana" && campo === "receita") {
@@ -160,7 +179,7 @@ function render() {
     <div class="fonte-card metas-pessoa">
       <div class="fonte-cabecalho"><h3>${escapeHtml(p.nome)}</h3></div>
       <div class="tabela-scroll"><table class="tabela-metricas tabela-metas">
-        <thead><tr><th>Escopo</th><th>📞 Ligações</th><th>✨ Leads</th><th>🎓 Matrículas</th><th>💰 Receita</th><th></th></tr></thead>
+        <thead><tr><th>Escopo</th><th>📞 Ligações</th><th>📈 Pipeline</th><th>🎓 Matrículas</th><th>💰 Receita</th><th></th></tr></thead>
         <tbody>${ESCOPOS_PESSOA.map((escopo) => linhaEscopo(escopo, dados.porPessoa[p.id], true, p.id, p.nome)).join("")}</tbody>
       </table></div>
     </div>`).join("");

@@ -138,7 +138,11 @@ function renderizarPeriodo(r) {
     card("Receita (equipe)", reais(eq.receitaCentavos),
       eq.metaReceitaCentavos ? `meta ${reais(eq.metaReceitaCentavos)} (soma das metas diárias × dias úteis)` : "") +
     card("Ligações discadas", eq.discadas, `meta ${eq.metaDiscadas} · ${eq.atendidas} atendidas (${pctTexto(eq.taxaAtendimento)})`) +
-    card("Leads novos", eq.leadsNovos, `meta ${eq.metaLeads}`) +
+    card("Pipeline (leads criados)", eq.pipelineCentavos != null ? reais(eq.pipelineCentavos) : "—",
+      eq.pipelineCentavos == null ? "período congelado antes da meta de pipeline — recongele para calcular"
+        : (eq.metaPipelineCentavos ? `meta ${reais(eq.metaPipelineCentavos)} · ` : "") +
+          (eq.conversaoPipeline?.pct != null ? `conversão da equipe ${pctTexto(eq.conversaoPipeline.pct)}` : "")) +
+    card("Leads novos", eq.leadsNovos, eq.metaLeads ? `meta ${eq.metaLeads}` : "sem meta de leads (substituída pelo pipeline em 05/10)") +
     card("TMA da equipe", segundos(eq.tmaSeg), "sobre tempo de conversa") +
     card("Empresa (com canais e sem atribuição)",
       `${d.empresa.matriculas} matr. · ${reais(d.empresa.receitaCentavos)}`,
@@ -162,6 +166,9 @@ function renderizarPeriodo(r) {
       <td>${segundos(p.ligacoes.tmaSeg)}</td>
       <td>${p.funil.leadsNovos.valor}</td><td>${p.funil.leadsNovos.meta ?? "—"}</td>
       <td class="${pctClasse(p.funil.leadsNovos.atingimento)}">${pctTexto(p.funil.leadsNovos.atingimento)}</td>
+      <td>${p.pipeline ? reais(p.pipeline.valor) : "—"}</td><td>${p.pipeline?.meta != null ? reais(p.pipeline.meta) : "—"}</td>
+      <td class="${pctClasse(p.pipeline?.atingimento)}">${pctTexto(p.pipeline?.atingimento)}</td>
+      <td>${p.pipeline?.dias ? `${p.pipeline.dias.batidos} de ${p.pipeline.dias.avaliados}` : "—"}</td>
       <td>${perdidas}</td><td>${p.funil.vendas}</td>
       <td>${p.matriculas.valor}</td><td>${p.matriculas.meta ?? "—"}</td>
       <td class="${pctClasse(p.matriculas.atingimento)}">${pctTexto(p.matriculas.atingimento)}</td>
@@ -175,12 +182,56 @@ function renderizarPeriodo(r) {
   rodape.innerHTML = `<tr>
     <td>Equipe</td><td>${eq.discadas}</td><td>${eq.metaDiscadas}</td><td></td>
     <td>${eq.atendidas}</td><td>${pctTexto(eq.taxaAtendimento)}</td><td>${segundos(eq.tmaSeg)}</td>
-    <td>${eq.leadsNovos}</td><td>${eq.metaLeads}</td><td></td>
+    <td>${eq.leadsNovos}</td><td>${eq.metaLeads ?? "—"}</td><td></td>
+    <td>${eq.pipelineCentavos != null ? reais(eq.pipelineCentavos) : "—"}</td>
+    <td>${eq.metaPipelineCentavos ? reais(eq.metaPipelineCentavos) : "—"}</td><td></td><td></td>
     <td>${eq.perdidas}</td><td>${eq.vendas}</td>
     <td>${eq.matriculas}</td><td>${eq.metaMatriculas}</td><td></td>
     <td>${reais(eq.receitaCentavos)}</td>
     <td>${eq.metaReceitaCentavos ? reais(eq.metaReceitaCentavos) : "—"}</td><td></td></tr>`;
   el.detalhe.classList.add("oculto");
+  renderizarQualidade(d);
+}
+
+// ---------- Qualidade do pipeline (blindagem contra ticket inflado) ----------
+// Só visibilidade: sinaliza, nunca bloqueia. Os limiares abaixo só pintam.
+const LIMIAR = { zero: 50, retroativo: 30, maior: 50, conversaoRelativa: 0.5 };
+async function renderizarQualidade(d) {
+  const corpo = document.querySelector("#tabela-qualidade tbody");
+  const rodape = document.querySelector("#tabela-qualidade tfoot");
+  if (!d.porPessoa.some((p) => p.pipeline?.qualidade)) {
+    corpo.innerHTML = `<tr class="sem-clique"><td colspan="8" class="texto-suave">Período congelado antes da meta de pipeline — recongele para ver a qualidade.</td></tr>`;
+    rodape.innerHTML = "";
+    return;
+  }
+  const semTicket = await chamarApi("/api/oportunidades/sem-ticket").catch(() => null);
+  const semTicketDe = new Map((semTicket?.porPessoa || []).map((g) => [g.pessoaId, g]));
+  const convEq = d.equipe.conversaoPipeline?.pct;
+  const alerta = (cond, texto, dica) => cond
+    ? `<td class="pct-baixo" title="${escapeHtml(dica)}">⚠ ${texto}</td>` : `<td>${texto}</td>`;
+  corpo.innerHTML = d.porPessoa.map((p) => {
+    const q = p.pipeline.qualidade;
+    const st = semTicketDe.get(p.pessoaId);
+    const convBaixa = q.conversao.pct != null && convEq != null && q.conversao.pct < convEq * LIMIAR.conversaoRelativa;
+    return `<tr class="sem-clique">
+      <td class="celula-nome">${escapeHtml(p.nome)}</td>
+      <td>${reais(p.pipeline.valor)}</td>
+      <td>${q.leads}</td>
+      ${alerta(q.pctZeroNaOrigem >= LIMIAR.zero, `${pctTexto(q.pctZeroNaOrigem)} <small class="texto-suave">(${q.zeroNaOrigem})</small>`,
+        "metade ou mais dos leads apareceu sem ticket na 1ª importação")}
+      ${alerta(q.pctRetroativo >= LIMIAR.retroativo, `${pctTexto(q.pctRetroativo)} <small class="texto-suave">${reais(q.retroativoCentavos)}</small>`,
+        "boa parte do pipeline veio de ticket aumentado depois do dia da criação")}
+      ${alerta(q.pctMaiorTicket >= LIMIAR.maior, `${pctTexto(q.pctMaiorTicket)} <small class="texto-suave">${reais(q.maiorTicketCentavos)}</small>`,
+        "um único lead responde por metade ou mais do pipeline")}
+      ${alerta(convBaixa, `${pctTexto(q.conversao.pct)} <small class="texto-suave">${reais(q.conversao.matriculas)} de ${reais(q.conversao.pipeline)}</small>`,
+        `conversão abaixo da metade da equipe (${pctTexto(convEq)})`)}
+      <td>${st ? `${st.total} <small class="texto-suave">mais antigo ${st.maisAntigoDias} d</small>` : semTicket ? "0" : "—"}</td>
+    </tr>`;
+  }).join("");
+  const c = d.equipe.conversaoPipeline;
+  rodape.innerHTML = `<tr><td>Equipe</td><td>${reais(d.equipe.pipelineCentavos)}</td><td></td><td></td><td></td><td></td>
+    <td>${pctTexto(c?.pct)} <small class="texto-suave">leads até ${dataBr(c?.leadsAte)}</small></td>
+    <td>${semTicket ? semTicket.total : "—"}</td></tr>`;
 }
 
 function mostrarDetalhe(p, d) {
@@ -204,6 +255,9 @@ function mostrarDetalhe(p, d) {
         <span class="metrica-extra">ticket ${reais(p.funil.ticketCentavos)}</span></div>
       <div class="metrica-card"><span class="metrica-rotulo">Receita</span>
         <span class="metrica-valor">${reais(p.receitaCentavos)}</span></div>
+      ${p.pipeline ? `<div class="metrica-card"><span class="metrica-rotulo">Pipeline</span>
+        <span class="metrica-valor">${reais(p.pipeline.valor)}</span>
+        <span class="metrica-extra">meta ${p.pipeline.meta != null ? reais(p.pipeline.meta) : "—"} · ${pctTexto(p.pipeline.atingimento)}${p.pipeline.dias ? ` · bateu ${p.pipeline.dias.batidos} de ${p.pipeline.dias.avaliados} dia(s)` : ""}</span></div>` : ""}
     </div>
     <h4>Ligações</h4>
     <ul>

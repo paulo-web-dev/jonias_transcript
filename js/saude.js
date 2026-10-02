@@ -85,6 +85,26 @@ async function carregar() {
       (${escapeHtml(c.numero)})</span><span>${dataHoraBr(c.criada_em)}</span></li>`,
     "nenhum conflito de atribuição");
   document.getElementById("alunos-orfaos").textContent = s.alunosOrfaos;
+  carregarSemTicket();
+}
+
+// Leads ativos sem ticket, por consultor (clique abre a lista)
+async function carregarSemTicket() {
+  const alvo = document.getElementById("lista-sem-ticket");
+  const r = await chamarApi("/api/oportunidades/sem-ticket").catch(() => null);
+  if (!r) { alvo.innerHTML = `<p class="texto-suave">Não foi possível carregar.</p>`; return; }
+  document.getElementById("sem-ticket-arquivo").textContent = r.ultimaImportacao
+    ? `“fora do último arquivo” = não veio na importação do Omie de ${dataHoraBr(r.ultimaImportacao.concluido_em)} — pode já ter sido corrigida no CRM.`
+    : "";
+  alvo.innerHTML = r.porPessoa.length ? r.porPessoa.map((g) => `
+    <details class="sem-ticket-grupo">
+      <summary><strong>${escapeHtml(g.nome)}</strong> — ${g.total} lead(s) · mais antigo há ${g.maisAntigoDias} dia(s)
+        <span class="texto-suave">(até 7 d: ${g.faixas.ate7} · 8–30 d: ${g.faixas.de8a30} · mais de 30 d: ${g.faixas.mais30})</span></summary>
+      <ul class="lista-simples">${g.itens.map((o) => `<li><span>${escapeHtml(o.numero)} — ${escapeHtml(o.conta || "?")}
+        <span class="texto-suave">${escapeHtml(o.fase || "")}${o.noUltimoArquivo ? "" : " · fora do último arquivo"}</span></span>
+        <span>${o.dias} dia(s) · criada ${dataHoraBr(o.criadaEm)}</span></li>`).join("")}</ul>
+    </details>`).join("") : `<p><span class="saude-ok">✔ nenhum lead ativo sem ticket</span></p>`;
+  if (location.hash === "#sem-ticket") document.getElementById("sem-ticket").scrollIntoView();
 }
 
 document.getElementById("btn-sair").addEventListener("click", async () => {

@@ -43,6 +43,14 @@ function comparar(valor, referencia) {
   return "igual à média da equipe";
 }
 
+// Conversão é taxa da equipe (ponderada), não média — texto próprio
+function compararConversao(valor, equipe) {
+  if (valor == null || equipe == null) return null;
+  if (valor > equipe) return "acima da conversão da equipe";
+  if (valor < equipe) return "abaixo da conversão da equipe";
+  return "igual à conversão da equipe";
+}
+
 // Monta o dossiê de fatos de UM consultor a partir do snapshot congelado
 // (dados = saída de calcularMetricas). Retorna null se o consultor não está no
 // snapshot (ex.: snapshot anterior ao cadastro da pessoa).
@@ -103,6 +111,21 @@ function prepararFatosFeedback(periodo, dados, pessoaId) {
       vendasFechadas: p.funil.vendas,
       valorVendido: reais(p.funil.ticketCentavos),
     },
+    // Pipeline (meta desde 05/10/2026; snapshot anterior não tem → null)
+    pipeline: p.pipeline ? {
+      valor: reais(p.pipeline.valor),
+      metaDoPeriodo: p.pipeline.meta != null ? reais(p.pipeline.meta) : null,
+      atingimentoDaMeta: pctTexto(p.pipeline.atingimento),
+      diasEmQueBateuAMetaDiaria: p.pipeline.dias ? `${p.pipeline.dias.batidos} de ${p.pipeline.dias.avaliados}` : null,
+      posicaoNaEquipe: posicao(todos, pessoaId, (c) => c.pipeline?.valor || 0),
+      comparacaoComAMedia: comparar(p.pipeline.valor, n && eq.pipelineCentavos != null ? eq.pipelineCentavos / n : null),
+      leadsQueEntraramSemTicket: pctTexto(p.pipeline.qualidade.pctZeroNaOrigem),
+      parteVindaDeTicketPreenchidoDepois: pctTexto(p.pipeline.qualidade.pctRetroativo),
+      pesoDoMaiorTicket: pctTexto(p.pipeline.qualidade.pctMaiorTicket),
+      conversaoEmMatricula: pctTexto(p.pipeline.qualidade.conversao.pct),
+      conversaoEmMatriculaDaEquipe: pctTexto(eq.conversaoPipeline?.pct),
+      conversaoComparacao: compararConversao(p.pipeline.qualidade.conversao.pct, eq.conversaoPipeline?.pct),
+    } : null,
     matriculas: {
       matriculas: p.matriculas.valor,
       metaDoPeriodo: p.matriculas.meta,
@@ -141,7 +164,9 @@ const SYSTEM_FEEDBACK =
   "## Sugestões para o próximo período — 2 a 4 ações práticas ligadas aos pontos de atenção\n\n" +
   "CONTEXTO DO NEGÓCIO: 'discadas' medem esforço de prospecção; 'atendidas' e taxa de " +
   "atendimento medem qualidade da lista; o tempo médio de conversa não inclui o tempo de " +
-  "toque; leads novos são oportunidades criadas no CRM; matrículas, vendas e receita são " +
+  "toque; leads novos são oportunidades criadas no CRM; pipeline é a soma do ticket dos leads " +
+  "criados no período (a meta de leads foi substituída pela de pipeline em 05/10/2026) e a " +
+  "conversão diz quanto do pipeline já virou matrícula — lead sem ticket não soma pipeline; matrículas, vendas e receita são " +
   "três medidas distintas (uma venda pode virar várias matrículas). Perdidas com data " +
   "aproximada usam a data de atualização do CRM, não a da perda real.";
 

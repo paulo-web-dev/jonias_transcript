@@ -804,6 +804,10 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 0.9rem;
 }
+.fonte-card-larga { grid-column: 1 / -1; }
+.sem-ticket-grupo { border-top: 1px solid var(--borda-painel); padding: 0.5rem 0; }
+.sem-ticket-grupo summary { cursor: pointer; }
+.sem-ticket-grupo .lista-simples { margin-top: 0.5rem; max-height: 22rem; overflow-y: auto; }
 .fonte-card {
   background: var(--fundo-painel);
   border: 1px solid var(--borda-painel);
