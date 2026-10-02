@@ -1219,6 +1219,14 @@ Decisões do usuário (2026-10-02), em duas fases aprovadas separadamente:
     enquanto ninguém do painel vendeu na semana.
   - O payload da TV passou a usar a data de **Brasília** (o container roda em
     UTC; antes, depois das 21 h a TV já "virava o dia").
+  - **Navegação manual** (2026-10-02): setas ‹ › nas laterais (grandes,
+    invisíveis até mexer o mouse ou tocar; somem em 3,5 s) e ← → / PageUp
+    PageDown no teclado (passador de slide). Anda uma TELA entre as que estão
+    na rotação agora (fora por falta de dado continua fora; o cartão da meta
+    é pulado) e pausa o giro por 60 s; uma pílula no rodapé mostra "rotação
+    pausada · volta em N s · ▶ retomar" (clique ou Esc retoma na hora). O
+    refresh durante a pausa não troca a tela escolhida. Com `?fixo=` não há
+    navegação. Sem ninguém tocar, comportamento idêntico ao anterior.
   - Medido: com 6 consultores, a tela STATUS ocupa ~50vw de altura (cabe numa
     TV 16:9, 56vw); com mais de 6 entra o modo compacto.
 

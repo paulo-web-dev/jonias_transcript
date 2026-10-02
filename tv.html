@@ -91,8 +91,15 @@
     </section>
   </main>
 
+  <!-- Navegação manual (setas na tela e ← → no teclado): aparecem ao mexer o
+       mouse e somem sozinhas; navegar pausa a rotação ~60 s. Sem interação,
+       nada aparece e a rotação segue igual. Fora de ação com ?fixo=. -->
+  <button class="tv-nav tv-nav-anterior" id="tv-nav-anterior" type="button" aria-label="tela anterior">‹</button>
+  <button class="tv-nav tv-nav-proxima" id="tv-nav-proxima" type="button" aria-label="próxima tela">›</button>
+
   <footer class="tv-rodape">
     <div class="tv-indicador" id="tv-indicador"></div>
+    <button class="tv-pausa oculto" id="tv-pausa" type="button" title="retomar a rotação agora (Esc)"></button>
     <span id="tv-som" class="oculto">🔕</span>
   </footer>
 

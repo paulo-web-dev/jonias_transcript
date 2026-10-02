@@ -348,7 +348,11 @@ function aplicarVisoes(d) {
   // destaque intercalado: STATUS → cartão → RANKING → cartão → SEMANA → cartão → …
   const novas = temDestaque ? telas.flatMap((t) => [t, "destaque"]) : telas;
   const fixoValido = FIXO && novas.includes(FIXO) ? FIXO : null;
+  const telaAntes = visoesAtivas[visaoAtual];
   visoesAtivas = fixoValido ? [fixoValido] : novas;
+  // Pausado por navegação manual: o refresh não pode trocar a tela que a
+  // pessoa escolheu (se ela saiu da rotação, cai na primeira)
+  if (pausadoAte && telaAntes) visaoAtual = Math.max(0, visoesAtivas.indexOf(telaAntes));
   if (visaoAtual >= visoesAtivas.length) visaoAtual = 0;
   VISOES.forEach((v) => el("visao-" + v).classList.toggle("tv-fora", !visoesAtivas.includes(v)));
   mostrarVisao(visoesAtivas[visaoAtual]);
@@ -370,6 +374,7 @@ function mostrarVisao(nome) {
 let giroTimer = null;
 function agendarGiro() {
   clearTimeout(giroTimer);
+  if (pausadoAte) return; // navegação manual: quem retoma é retomarGiro()
   const duracao = visoesAtivas[visaoAtual] === "destaque" ? DESTAQUE_MS : GIRO_MS;
   giroTimer = setTimeout(() => {
     if (visoesAtivas.length >= 2) {
@@ -379,6 +384,78 @@ function agendarGiro() {
     agendarGiro();
   }, duracao);
 }
+
+// ---------- Navegação manual (setas na tela e ← → no teclado) ----------
+// Anda uma TELA por vez entre as que estão na rotação agora (tela fora por
+// falta de dado continua fora; o cartão intercalado da meta é pulado) e pausa
+// a rotação por PAUSA_MS; ela volta sozinha, a partir da tela em que parou.
+// Sem ninguém tocar, nada disto roda. Com ?fixo= não há para onde navegar.
+const PAUSA_MS = 60000;
+const SETAS_VISIVEIS_MS = 3500;
+let pausadoAte = 0;
+let retomarTimer = null;
+let contagemTimer = null;
+let setasTimer = null;
+
+function navegar(passo) {
+  if (FIXO) return;
+  const telas = visoesAtivas.filter((v) => v !== "destaque");
+  if (telas.length < 2) return;
+  // No cartão, "a tela atual" é a que veio antes dele na rotação
+  let atual = visoesAtivas[visaoAtual];
+  if (atual === "destaque") atual = visoesAtivas[(visaoAtual - 1 + visoesAtivas.length) % visoesAtivas.length];
+  const i = telas.indexOf(atual);
+  const proxima = telas[((i < 0 ? 0 : i) + passo + telas.length) % telas.length];
+  visaoAtual = visoesAtivas.indexOf(proxima);
+  mostrarVisao(proxima);
+  pausar();
+}
+
+function pausar() {
+  pausadoAte = Date.now() + PAUSA_MS;
+  clearTimeout(giroTimer);
+  clearTimeout(retomarTimer);
+  retomarTimer = setTimeout(retomarGiro, PAUSA_MS);
+  if (!contagemTimer) contagemTimer = setInterval(atualizarPausa, 1000);
+  atualizarPausa();
+}
+
+function retomarGiro() {
+  pausadoAte = 0;
+  clearTimeout(retomarTimer);
+  clearInterval(contagemTimer);
+  contagemTimer = null;
+  atualizarPausa();
+  agendarGiro(); // a tela atual ganha o tempo inteiro antes de girar
+}
+
+function atualizarPausa() {
+  const pill = el("tv-pausa");
+  pill.classList.toggle("oculto", !pausadoAte);
+  if (!pausadoAte) return;
+  const s = Math.max(0, Math.ceil((pausadoAte - Date.now()) / 1000));
+  pill.textContent = `⏸ rotação pausada · volta em ${s} s · ▶ retomar`;
+}
+
+function mostrarSetas() {
+  if (FIXO || visoesAtivas.filter((v) => v !== "destaque").length < 2) return;
+  document.body.classList.add("tv-nav-visivel");
+  clearTimeout(setasTimer);
+  setasTimer = setTimeout(() => document.body.classList.remove("tv-nav-visivel"), SETAS_VISIVEIS_MS);
+}
+
+el("tv-nav-anterior").addEventListener("click", () => { navegar(-1); mostrarSetas(); });
+el("tv-nav-proxima").addEventListener("click", () => { navegar(1); mostrarSetas(); });
+el("tv-pausa").addEventListener("click", retomarGiro);
+document.addEventListener("mousemove", mostrarSetas);
+document.addEventListener("touchstart", mostrarSetas, { passive: true });
+document.addEventListener("keydown", (ev) => {
+  // ← → (e PageUp/PageDown, de passadores de slide); Esc retoma na hora
+  if (ev.key === "ArrowRight" || ev.key === "PageDown") { ev.preventDefault(); navegar(1); }
+  else if (ev.key === "ArrowLeft" || ev.key === "PageUp") { ev.preventDefault(); navegar(-1); }
+  else if (ev.key === "Escape" && pausadoAte) retomarGiro();
+});
+
 agendarGiro();
 
 // ---------- STATUS (quem está em dia hoje) ----------
