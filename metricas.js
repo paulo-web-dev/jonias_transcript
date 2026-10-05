@@ -458,11 +458,14 @@ function calcularRitmo(valor, metaDia, horaUltimoDado) {
 // - Rota OK no dia = feitas ÷ itens = 100% (rota curta fecha com o que recebeu);
 //   semana = todos os dias ENCERRADOS com rota fecharam 100%; hoje só conta
 //   quando fecha (dia em curso não reprova). Sem rota na semana = neutro.
-// - Pipeline: o acumulado da semana tem de cobrir meta diária × dias úteis
-//   encerrados ("fora" abaixo disso); "ok" quando já cobre também hoje,
-//   "pendente" quando hoje ainda falta. Sem meta = neutro.
+// - Pipeline (decisão do usuário, 2026-10-05): ELEGÍVEL ao prêmio = acumulado
+//   da semana ≥ meta diária × 5 (R$ 42.000) — por dia não funciona, o lead
+//   grande cai num dia só. `pct` e `faltaSemanaCentavos` medem contra a meta
+//   da semana. O `estado` continua sendo o RITMO (acumulado × meta diária ×
+//   dias até hoje: ok | pendente | fora) e só decide o destaque EM DIA da
+//   STATUS — não decide o prêmio. Sem meta = neutro (não impede o prêmio).
 // - Prêmio = maior RECEITA de matrículas da semana entre quem não está "fora"
-//   em nenhum dos dois (pré-requisitos, não critério de desempate).
+//   na rota e está elegível no pipeline (pré-requisitos, não desempate).
 function statusSemanaTv({ hoje, semanaDe, painelSemana, painelDia, rotaSemana }) {
   const hojeUtil = diasUteis(hoje, hoje) === 1;
   const encerrados = diasUteis(semanaDe, hoje) - (hojeUtil ? 1 : 0);
@@ -493,10 +496,14 @@ function statusSemanaTv({ hoje, semanaDe, painelSemana, painelDia, rotaSemana })
     const valor = p.pipeline.valor;
     const metaAteOntem = metaDia != null ? metaDia * encerrados : null;
     const metaAteHoje = metaDia != null ? metaDia * (encerrados + (hojeUtil ? 1 : 0)) : null;
+    const metaSemana = metaDia != null ? metaDia * 5 : null;
     const pipeline = {
       valor,
       metaDia,
-      metaSemana: metaDia != null ? metaDia * 5 : null,
+      metaSemana,
+      pct: metaSemana ? Math.floor((valor / metaSemana) * 100) : null,
+      faltaSemanaCentavos: metaSemana != null ? Math.max(0, metaSemana - valor) : null,
+      elegivel: metaSemana == null || valor >= metaSemana,
       metaAteHoje,
       faltaCentavos: metaAteHoje != null ? Math.max(0, metaAteHoje - valor) : null,
       hojeCentavos: diaDe.get(p.pessoaId)?.pipeline.valor ?? 0,
@@ -511,7 +518,7 @@ function statusSemanaTv({ hoje, semanaDe, painelSemana, painelDia, rotaSemana })
       rota,
       pipeline,
       emDia,
-      qualificado: rota.estado !== "fora" && pipeline.estado !== "fora",
+      qualificado: rota.estado !== "fora" && pipeline.elegivel,
     };
   });
 }

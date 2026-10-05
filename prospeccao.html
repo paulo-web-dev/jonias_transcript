@@ -103,12 +103,16 @@
             <div id="rota-campanha-agenda" class="texto-suave"></div>
           </div>
           <div class="rota-campanha-troca">
-            <label class="campo"><span>Setor da campanha (vale na próxima geração)</span>
-              <select id="rota-tipo-troca" class="campo-select"></select></label>
-            <label class="trab-flag" title="rotas de datas futuras sem nenhuma baixa são descartadas e geradas de novo com o setor novo">
+            <span class="metrica-rotulo">Fila de setores (vale na próxima geração)</span>
+            <ol id="rota-fila" class="rota-fila"></ol>
+            <div class="rota-fila-add">
+              <select id="rota-fila-tipo" class="campo-select" title="tipo de rota para pôr no fim da fila"></select>
+              <button type="button" class="btn-mini" id="rota-fila-adicionar">+ adicionar à fila</button>
+            </div>
+            <label class="trab-flag" title="rotas de datas futuras sem nenhuma baixa são descartadas e geradas de novo com a fila nova">
               <input type="checkbox" id="rota-refazer" /> refazer as rotas futuras já geradas que ninguém começou</label>
             <div class="rota-campanha-botoes">
-              <button type="button" class="btn-mini btn-primario" id="rota-trocar">Trocar setor</button>
+              <button type="button" class="btn-mini btn-primario" id="rota-trocar">Salvar fila</button>
               <button type="button" class="btn-mini" id="rota-gerar" title="gera as rotas que faltam (hoje e, depois das 17h, o próximo dia útil)">Gerar faltantes agora</button>
             </div>
           </div>
@@ -117,7 +121,7 @@
         <h2 class="secao-titulo">Rotas do dia <span class="texto-suave" id="rota-painel-data"></span></h2>
         <div class="tabela-scroll">
           <table class="tabela-metricas" id="tabela-rotas-dia">
-            <thead><tr><th style="text-align:left">Consultor</th><th>Rota</th><th>Feitas</th><th>%</th><th>Atendidas</th><th>Baixa manual</th><th>Pendentes</th><th style="text-align:left">Progresso</th><th title="telefones ainda disponíveis para a próxima geração">Estoque</th><th title="estoque ÷ cota">Dias</th></tr></thead>
+            <thead><tr><th style="text-align:left">Consultor</th><th>Rota</th><th>Feitas</th><th>%</th><th>Atendidas</th><th>Baixa manual</th><th>Pendentes</th><th style="text-align:left">Progresso</th><th style="text-align:left" title="primeiro setor da fila em que o consultor tem estoque na próxima geração">Setor atual</th><th title="telefones disponíveis no setor atual ÷ cota do setor">Dias no setor</th><th title="Σ telefones de cada setor da fila ÷ cota do setor">Dias na fila</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -125,15 +129,16 @@
           <summary class="secao-titulo">Estoque por regional <span class="texto-suave" id="rota-estoque-legenda"></span></summary>
           <div class="tabela-scroll">
             <table class="tabela-metricas" id="tabela-rota-regionais">
-              <thead><tr><th>UF</th><th style="text-align:left">Regional</th><th style="text-align:left">Titular</th><th style="text-align:left">Apoios</th><th title="telefones distintos do setor na regional">Telefones do setor</th><th title="fora do bloqueio, sem consultor ou de quem está vinculado">Disponíveis</th><th title="disponíveis ÷ (cota × vinculados)">Dias</th></tr></thead>
+              <thead><tr><th>UF</th><th style="text-align:left">Regional</th><th style="text-align:left">Titular</th><th style="text-align:left">Apoios</th><th title="telefones distintos do setor na regional">Telefones do setor</th><th title="fora do bloqueio, sem consultor ou de quem está vinculado — soma dos setores da fila">Disponíveis</th><th title="Σ disponíveis do setor ÷ (cota do setor × vinculados)">Dias na fila</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
         </details>
         <details class="rota-detalhes" id="rota-tipos-bloco">
           <summary class="secao-titulo">Tipos de rota (setores das campanhas)</summary>
-          <p class="texto-suave">Cada tipo é um conjunto de abas da prospecção (nome exato por UF) e a cota diária. A campanha usa um tipo de cada vez:
-            a rota do dia nunca mistura setores. Mudar os setores do tipo em campanha vale a partir da próxima geração.</p>
+          <p class="texto-suave">Cada tipo é um conjunto de abas da prospecção (nome exato por UF) e a cota diária. A campanha é uma FILA de tipos:
+            cada consultor começa no primeiro tipo em que tem estoque e completa a cota com os seguintes no mesmo dia (a cota é a do tipo em que a rota começa).
+            Mudar os setores de um tipo da fila vale a partir da próxima geração.</p>
           <div class="tabela-scroll">
             <table class="tabela-metricas" id="tabela-rota-tipos">
               <thead><tr><th style="text-align:left">Nome</th><th>Cota</th><th style="text-align:left">Setores</th><th>Ativo</th><th></th></tr></thead>

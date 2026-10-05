@@ -1202,6 +1202,109 @@ const MIGRACOES = [
       (futuras ? ` — ⚠ ${futuras} meta(s) de leads com início depois de 04/10 seguem valendo (conferir em /metas)` : "")
     );
   },
+
+  // 30 — Jhonnata saiu da equipe; último dia 2026-10-02 (decisões do usuário,
+  // 2026-10-05). NADA é apagado do histórico: oportunidades, matrículas,
+  // ligações e rotas com baixa continuam dele, e ele continua `ativo = 1`
+  // (os relatórios internos de outubro seguem com ele, como Hirlan/Douglas).
+  // - Fora de painel, TV e feedback (flags 0; também em OCULTOS_TEMPORARIOS_TV).
+  //   Hirlan e Douglas (já fora da TV) saem do feedback na mesma migração.
+  // - Ramal 2004: a vigência dele fecha em 02/10 e o ramal fica sem dono
+  //   (pessoas.ramal NULL, nenhuma vigência aberta). Ligação do 2004 a partir
+  //   de 03/10 que estava com ele perde o dono — o importador faz o mesmo nas
+  //   próximas importações.
+  // - Carteira: os vínculos dele saem (fora das rotas). O log lista cada
+  //   regional, quem continua nela e as que ficam sem titular ou sem ninguém,
+  //   com contagem de contatos — a redistribuição é decisão do usuário em
+  //   /usuarios (definir o titular atribui a ele os contatos sem consultor).
+  // - Contatos com ele como consultor ficam SEM consultor, com histórico
+  //   `pessoa_id` por contato, sem marcar editado_em (não é edição).
+  // - Rotas dele de 03/10 em diante sem nenhuma baixa são descartadas: os
+  //   telefones delas ficariam bloqueados 7 dias para os colegas.
+  // - Usuário vendedor ligado a ele (se houver) é desativado.
+  () => {
+    const SAIDA = "2026-10-02";
+    const jh = db.prepare("SELECT id FROM pessoas WHERE nome = 'Jhonnata' AND tipo = 'consultor'").get()?.id;
+    if (!jh) throw new Error("migração 30: consultor Jhonnata não encontrado — abortada");
+    db.prepare("UPDATE pessoas SET entra_painel = 0, entra_tv = 0, entra_feedback = 0, ramal = NULL WHERE id = ?").run(jh);
+    // Hirlan e Douglas, fora da operação desde agosto, saem também do feedback
+    // (decisão do usuário, 2026-10-05); o histórico segue nos relatórios internos
+    const semFeedback = db.prepare(
+      "UPDATE pessoas SET entra_feedback = 0 WHERE tipo = 'consultor' AND nome IN ('Hirlan', 'Douglas') AND entra_feedback = 1"
+    ).run().changes;
+    console.log(`migração 30: ${semFeedback} consultor(es) (Hirlan/Douglas) fora do feedback individual.`);
+
+    const vig = db.prepare(
+      "UPDATE ramal_vigencias SET vigente_ate = ? WHERE ramal = '2004' AND pessoa_id = ? AND (vigente_ate IS NULL OR vigente_ate > ?)"
+    ).run(SAIDA, jh, SAIDA).changes;
+    const ligs = db.prepare(
+      "UPDATE ligacoes SET pessoa_id = NULL WHERE ramal = '2004' AND pessoa_id = ? AND data_hora >= ?"
+    ).run(jh, "2026-10-03T00:00:00").changes;
+    const ficam = db.prepare("SELECT COUNT(*) n FROM ligacoes WHERE pessoa_id = ?").get(jh).n;
+    console.log(`migração 30: ramal 2004 — vigência do Jhonnata fechada em 02/10 (${vig}); ${ligs} ligação(ões) de 03/10 em diante ficaram sem dono; ${ficam} ligação(ões) seguem dele.`);
+
+    // carteira: retrato antes de remover
+    const contar = db.prepare(
+      `SELECT COUNT(*) total, SUM(a.pessoa_id IS NULL) semConsultor, SUM(a.pessoa_id = ?) dele
+       FROM contatos_ativo a JOIN municipios m ON m.codigo_ibge = a.codigo_ibge WHERE m.regional_principal_id = ?`
+    );
+    const vinculos = db.prepare(
+      `SELECT c.regional_id id, c.papel, r.uf, r.sigla, r.nome FROM carteiras c JOIN regionais r ON r.id = c.regional_id
+       WHERE c.pessoa_id = ? ORDER BY r.uf, r.sigla`
+    ).all(jh);
+    for (const v of vinculos) {
+      const outros = db.prepare(
+        `SELECT p.nome, c.papel FROM carteiras c JOIN pessoas p ON p.id = c.pessoa_id
+         WHERE c.regional_id = ? AND c.pessoa_id <> ? ORDER BY c.papel DESC, p.nome`
+      ).all(v.id, jh);
+      const n = contar.get(jh, v.id);
+      const titular = outros.find((o) => o.papel === "titular");
+      const situacao = !outros.length ? "⚠ ÓRFÃ (ninguém)" : !titular ? `⚠ sem titular (apoio: ${outros.map((o) => o.nome).join(", ")})`
+        : `fica com ${titular.nome}${outros.length > 1 ? ` + ${outros.filter((o) => o !== titular).map((o) => o.nome).join(", ")}` : ""}`;
+      console.log(`migração 30: carteira ${v.uf} ${v.sigla} (${v.nome}) — Jhonnata era ${v.papel}; ${situacao}; ` +
+        `${n.total} contato(s), ${n.dele || 0} dele, ${n.semConsultor || 0} sem consultor.`);
+    }
+    db.prepare("DELETE FROM carteiras WHERE pessoa_id = ?").run(jh);
+
+    const agora = new Date().toISOString();
+    const seus = db.prepare("SELECT id FROM contatos_ativo WHERE pessoa_id = ?").all(jh);
+    const hist = db.prepare(
+      `INSERT INTO contatos_ativo_historico (contato_id, tipo, canal, campo, valor_anterior, valor_novo, observacao, usuario_id, registrado_em)
+       VALUES (?, 'edicao', NULL, 'pessoa_id', ?, NULL, 'liberado: Jhonnata saiu da equipe (último dia 02/10/2026, migração 30)', ?, ?)`
+    );
+    // o histórico exige usuário: a liberação fica no nome do primeiro admin (a observação diz que foi a migração)
+    const admin = db.prepare("SELECT MIN(id) id FROM usuarios WHERE papel = 'admin'").get()?.id;
+    if (seus.length && !admin) throw new Error("migração 30: nenhum admin para registrar o histórico — abortada");
+    const liberar = db.prepare("UPDATE contatos_ativo SET pessoa_id = NULL, atualizado_em = ? WHERE id = ?");
+    for (const { id } of seus) { liberar.run(agora, id); hist.run(id, String(jh), admin, agora); }
+
+    const rotas = db.prepare(
+      `DELETE FROM rotas WHERE pessoa_id = ? AND data > ?
+         AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`
+    ).run(jh, SAIDA).changes;
+    const usuarios = db.prepare("UPDATE usuarios SET ativo = 0 WHERE pessoa_id = ? AND ativo = 1").run(jh).changes;
+    console.log(`migração 30: Jhonnata fora de painel/TV/feedback/rotas — ${vinculos.length} vínculo(s) de carteira removido(s), ` +
+      `${seus.length} contato(s) liberado(s) (sem consultor), ${rotas} rota(s) futura(s) sem baixa descartada(s), ${usuarios} usuário(s) desativado(s).`);
+  },
+
+  // 31 — FILA de setores na campanha da Rota (decisão do usuário,
+  // 2026-10-05). A campanha deixa de ser um tipo só: `fila_json` = ids dos
+  // tipos na ordem (tipo_id continua sendo o primeiro; NULL = encerrada). Cada
+  // consultor começa no primeiro tipo com estoque e completa a cota com os
+  // seguintes no mesmo dia; `rota_itens.tipo_id` diz de qual tipo veio cada
+  // linha (o bloqueio por telefone é dentro do tipo DO ITEM). Backfill: as
+  // campanhas viram fila de um tipo e os itens herdam o tipo da rota.
+  () => {
+    db.exec(`
+      ALTER TABLE rota_campanhas ADD COLUMN fila_json TEXT;
+      ALTER TABLE rota_itens ADD COLUMN tipo_id INTEGER REFERENCES rota_tipos(id);
+    `);
+    const camp = db.prepare("UPDATE rota_campanhas SET fila_json = json_array(tipo_id) WHERE tipo_id IS NOT NULL").run().changes;
+    db.prepare("UPDATE rota_campanhas SET fila_json = '[]' WHERE tipo_id IS NULL").run();
+    const itens = db.prepare("UPDATE rota_itens SET tipo_id = (SELECT r.tipo_id FROM rotas r WHERE r.id = rota_itens.rota_id)").run().changes;
+    db.exec("CREATE INDEX idx_rota_itens_tipo ON rota_itens(tipo_id)");
+    console.log(`migração 31: fila de setores na Rota — ${camp} campanha(s) viraram fila de um tipo; ${itens} item(ns) de rota com o tipo da rota.`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:
@@ -1238,7 +1341,8 @@ for (; versao < MIGRACOES.length; versao++) {
 // Renato não passa por aqui (voltou ao painel na migração 14) e não é tocado.
 //
 // Decisão de 2026-08-19: Hirlan e Douglas fora da TV temporariamente.
-const OCULTOS_TEMPORARIOS_TV = ["Hirlan", "Douglas"];
+// Jhonnata saiu da equipe em 2026-10-02 (migração 30).
+const OCULTOS_TEMPORARIOS_TV = ["Hirlan", "Douglas", "Jhonnata"];
 
 {
   const CHAVE = "tv_ocultos_aplicados";

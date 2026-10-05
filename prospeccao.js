@@ -478,10 +478,11 @@ const COLUNAS_CONTATO = [
 
 // Consultor atual: só a equipe de hoje vira pessoa_id (decisão do usuário,
 // 2026-09-09); qualquer outra grafia fica sem consultor. Jhonnata entrou em
-// 2026-09-30 (já tinha ramal e carteira — a lista fixa o deixava de fora).
+// 2026-09-30 (já tinha ramal e carteira — a lista fixa o deixava de fora) e
+// saiu em 2026-10-02 (migração 30: carteira removida, fora da lista).
 // Para a lista não voltar a divergir da operação, a equipe atual também inclui
 // todo consultor ativo com carteira ou com usuário vendedor ativo.
-const CONSULTORES_ATUAIS = ["Frederico", "Renato", "Eduardo", "Agnes", "Bianca", "Jhonnata"];
+const CONSULTORES_ATUAIS = ["Frederico", "Renato", "Eduardo", "Agnes", "Bianca"];
 function equipeAtual() {
   const marcadores = CONSULTORES_ATUAIS.map(() => "?").join(",");
   return db.prepare(

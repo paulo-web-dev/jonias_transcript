@@ -1189,6 +1189,7 @@ body.tv-nav-visivel .tv-nav { opacity: 1; pointer-events: auto; }
 .tv-pr-fora .tv-pr-medalha, .tv-pr-fora .tv-pr-valor { filter: grayscale(1); opacity: 0.55; }
 .tv-pr-fora .tv-pr-valor { color: var(--texto-suave); }
 .tv-pr-fora-selo { font-size: 1.4vw; font-weight: 900; letter-spacing: 2px; color: var(--vermelho); }
+.tv-pr-fora-selo.tv-pr-ainda { color: var(--amarelo); }
 .tv-pr-requisitos { list-style: none; margin: 0.4vw 0 0; padding: 0; text-align: left; display: flex; flex-direction: column; gap: 0.3vw; }
 .tv-pr-requisitos li { font-size: 1.3vw; font-weight: 700; color: var(--estado); }
 .tv-pr-vencedor { font-size: 1.6vw; text-align: center; margin-top: 1vw; }
@@ -1664,16 +1665,27 @@ body[data-papel="vendedor"] .so-admin { display: none !important; }
 .trab-tabela tbody tr.rota-grupo td { border-top: 2px solid rgba(56, 214, 224, 0.35); }
 .trab-tabela tbody tr.rota-feita td:not(.fixa):not(.c-rotaBaixa) { opacity: 0.6; }
 col.c-baixa { width: 165px; }
+col.c-rota-tipo { width: 120px; }
 .rota-baixa { font-size: 0.76rem; white-space: nowrap; }
 .rota-btn-baixa { padding: 0.1rem 0.55rem; font-size: 0.74rem; }
 .rota-desfazer { margin-left: 0.25rem; }
 /* painel da campanha (admin) */
-.rota-campanha { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; align-items: flex-end; margin-bottom: 0.8rem; }
+.rota-campanha { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem; }
 .rota-campanha-info { flex: 1 1 360px; }
 .rota-campanha-texto { font-size: 1.15rem; margin: 0.2rem 0 0.35rem; }
 .rota-campanha-troca { display: flex; flex-direction: column; gap: 0.4rem; flex: 0 1 420px; }
 .rota-campanha-troca .campo-select { width: 100%; }
 .rota-campanha-botoes { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.rota-fila { margin: 0; padding-left: 1.4rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.rota-fila li { padding: 0.2rem 0.3rem; border: 1px solid var(--borda-painel); border-radius: 8px; }
+.rota-fila li > div { display: flex; align-items: center; gap: 0.4rem; }
+.rota-fila li span { flex: 1; }
+.rota-fila li small { color: var(--texto-suave); }
+.rota-fila-vazia { list-style: none; margin-left: -1.4rem; color: var(--texto-suave); border-style: dashed !important; }
+.rota-fila-add { display: flex; gap: 0.4rem; }
+.rota-fila-add .campo-select { flex: 1; min-width: 0; }
+.rota-tipo-chip { display: inline-block; font-size: 0.72rem; padding: 0.05rem 0.45rem; border-radius: 999px; border: 1px solid rgba(56, 214, 224, 0.4); color: var(--acento-2); white-space: nowrap; }
+.rota-tipos-mini { display: block; font-size: 0.72rem; color: var(--texto-suave); }
 .metrica-card.rota-card-alerta { border-color: rgba(255, 200, 87, 0.45); }
 #tabela-rotas-dia tbody tr[data-pessoa] { cursor: pointer; }
 #tabela-rotas-dia tbody tr.rota-linha-atual td { background: rgba(108, 123, 255, 0.12); }

@@ -460,9 +460,11 @@ agendarGiro();
 
 // ---------- STATUS (quem está em dia hoje) ----------
 // ROTA = rota de HOJE (% feitas ÷ itens; rota curta fecha com o que recebeu).
-// PIPELINE = semana ("bateu N de M dias"; ✓ quando o acumulado cobre a meta
-// diária × dias até hoje — o dia em curso não reprova). Nada de qualidade do
-// pipeline aqui: ticket zero/retroativo/concentração ficam nas telas internas.
+// PIPELINE = acumulado da SEMANA × R$ 42.000 ("R$ 25.200 de R$ 42.000 — 60%")
+// e quanto falta para ficar elegível ao prêmio (decisão de 2026-10-05). O
+// ritmo (meta diária × dias até hoje) aparece embaixo e decide só o EM DIA.
+// Nada de qualidade do pipeline aqui: ticket zero/retroativo/concentração
+// ficam nas telas internas.
 const CLASSE_ESTADO = { ok: "st-ok", pendente: "st-pendente", fora: "st-fora", sem_rota: "st-neutro", sem_meta: "st-neutro" };
 const diasTxt = (n) => `${num(n)} dia${n === 1 ? "" : "s"}`;
 
@@ -476,7 +478,7 @@ function blocoRotaStatus(r) {
   const ok = h.feitas >= h.itens;
   const estado = ok ? "st-ok" : r.diasPerdidos ? "st-fora" : "st-pendente";
   // Rota curta: a cota dele é o tamanho da rota — explícito, senão parece que fez menos
-  const curta = h.curta ? ` · <span class="tv-st-curta">rota curta: recebeu ${num(h.itens)} (estoque acabou)</span>` : "";
+  const curta = h.curta ? ` · <span class="tv-st-curta">rota curta: recebeu ${num(h.itens)} (a fila de setores acabou)</span>` : "";
   const semana = r.diasAvaliados
     ? ` · <span class="${r.diasPerdidos ? "st-txt-fora" : ""}">semana: 100% em ${num(r.diasOk)} de ${diasTxt(r.diasAvaliados)}</span>` : "";
   return `<div class="tv-st-bloco ${estado}">
@@ -491,16 +493,17 @@ function blocoPipelineStatus(p) {
       <div class="tv-st-topo"><span class="tv-st-valor">${kReais(p.valor)}</span></div>
       <div class="tv-st-sub">sem meta de pipeline</div></div>`;
   }
-  const dias = p.dias || { batidos: 0, avaliados: 0 };
-  const principal = dias.avaliados
-    ? `${num(dias.batidos)} de ${diasTxt(dias.avaliados)}`
-    : `${kReais(p.hojeCentavos)} hoje`;
-  const situacao = p.estado === "ok" ? "✓ acumulado na meta"
-    : p.estado === "pendente" ? `hoje faltam ${kReais(p.faltaCentavos)}`
-    : `faltam ${kReais(p.faltaCentavos)}`;
-  return `<div class="tv-st-bloco ${CLASSE_ESTADO[p.estado]}">
-    <div class="tv-st-topo"><span class="tv-st-valor">${principal}</span><span class="tv-st-situacao">${situacao}</span></div>
-    <div class="tv-st-sub">semana ${kReais(p.valor)} de ${kReais(p.metaAteHoje)} até hoje · hoje ${kReais(p.hojeCentavos)} de ${kReais(p.metaDia)}</div></div>`;
+  // cor: elegível = verde; abaixo dos R$ 42.000, o ritmo diz se está a caminho
+  const classe = p.elegivel ? "st-ok" : p.estado === "fora" ? "st-fora" : "st-pendente";
+  const situacao = p.elegivel ? "✓ elegível" : `faltam ${reais(p.faltaSemanaCentavos)}`;
+  // ritmo = meta diária × dias até hoje (decide o EM DIA); "pendente" = cobre até ontem, hoje ainda falta
+  const ritmo = p.estado === "fora" ? `<span class="st-txt-fora">abaixo do ritmo</span>`
+    : p.estado === "pendente" ? `ritmo: hoje faltam ${kReais(p.faltaCentavos)}` : "✓ no ritmo";
+  return `<div class="tv-st-bloco ${classe}">
+    <div class="tv-st-topo"><span class="tv-st-valor">${num(p.pct)}%${p.elegivel ? " ✓" : ""}</span>
+      <div class="tv-trilha"><div class="tv-fill${p.elegivel ? " fill-ok" : ""}" style="width:${Math.min(100, p.pct)}%"></div></div>
+      <span class="tv-st-situacao">${situacao}</span></div>
+    <div class="tv-st-sub">${reais(p.valor)} de ${reais(p.metaSemana)} · ${ritmo} · hoje ${kReais(p.hojeCentavos)}</div></div>`;
 }
 
 function renderizarStatus(st) {
@@ -509,7 +512,7 @@ function renderizarStatus(st) {
   const alvo = el("status-linhas");
   alvo.classList.toggle("tv-st-compacto", st.porPessoa.length > 6);
   const html = `<div class="tv-st-linha tv-st-cabecalho"><span></span><span>🗺 ROTA DE HOJE</span>` +
-    `<span>📈 PIPELINE — DIAS NA META DA SEMANA</span><span></span></div>` +
+    `<span>📈 PIPELINE DA SEMANA × META DO PRÊMIO</span><span></span></div>` +
     st.porPessoa.map((x) => `
     <div class="tv-st-linha${x.emDia ? " tv-st-emdia" : ""}" data-nome="${esc(x.nome)}">
       <div class="tv-st-nome">${esc(x.nome)}</div>
@@ -518,14 +521,16 @@ function renderizarStatus(st) {
       <div class="tv-st-selo">${x.emDia ? "✓ EM DIA" : ""}</div>
     </div>`).join("");
   if (alvo.dataset.h !== html) { alvo.innerHTML = html; alvo.dataset.h = html; }
-  const legenda = "EM DIA = rota de hoje 100% e pipeline da semana na meta (meta diária × dias até hoje) · o dia em curso nunca reprova";
+  const legenda = "EM DIA = rota de hoje 100% e pipeline no ritmo (meta diária × dias até hoje) · prêmio: pipeline da semana ≥ meta da semana";
   if (el("status-legenda").textContent !== legenda) el("status-legenda").textContent = legenda;
 }
 
 // ---------- RANKING DE VENDAS (prêmio da semana) ----------
 // Pódio pela receita de matrículas da semana. Rota e pipeline são
 // PRÉ-REQUISITO: quem está fora vê exatamente por quê ("rota 100% em 3 de 4
-// dias", "pipeline: faltam R$ X").
+// dias", "pipeline: R$ X de R$ 42.000 — N% · faltam R$ Y"). Rota perdida é
+// definitiva (FORA DO PRÊMIO); pipeline abaixo da meta da semana ainda dá
+// para alcançar (AINDA NÃO ELEGÍVEL).
 function linhasPremio(x) {
   const r = x.rota, p = x.pipeline;
   const linhas = [];
@@ -534,15 +539,18 @@ function linhasPremio(x) {
   else if (r.estado === "pendente") linhas.push(`<li class="st-pendente">🗺 Rota ✓ ${r.diasAvaliados ? `${num(r.diasOk)} de ${diasTxt(r.diasAvaliados)} · ` : ""}hoje em ${num(r.hoje?.pct ?? 0)}%</li>`);
   else linhas.push(`<li class="st-ok">✓ Rota 100% em ${num(r.diasOk)} de ${diasTxt(r.diasAvaliados)}</li>`);
   if (p.estado === "sem_meta") linhas.push(`<li class="st-neutro">📈 Pipeline: sem meta</li>`);
-  else if (p.estado === "fora") linhas.push(`<li class="st-fora">✗ Pipeline: ${kReais(p.valor)} de ${kReais(p.metaAteHoje)} — faltam ${kReais(p.faltaCentavos)}</li>`);
-  else if (p.estado === "pendente") linhas.push(`<li class="st-pendente">📈 Pipeline ✓ até ontem · hoje faltam ${kReais(p.faltaCentavos)}</li>`);
-  else linhas.push(`<li class="st-ok">✓ Pipeline ${kReais(p.valor)} de ${kReais(p.metaAteHoje)}</li>`);
+  else if (p.elegivel) linhas.push(`<li class="st-ok">✓ Pipeline ${kReais(p.valor)} de ${kReais(p.metaSemana)} — ${num(p.pct)}%</li>`);
+  else linhas.push(`<li class="st-pendente">📈 Pipeline ${kReais(p.valor)} de ${kReais(p.metaSemana)} — ${num(p.pct)}% · faltam ${kReais(p.faltaSemanaCentavos)}</li>`);
   return linhas.join("");
 }
 
 function renderizarPremio(pr) {
   if (!pr) return;
   el("ranking-titulo").textContent = `RANKING DE VENDAS DA SEMANA ${dataBr(pr.semanaDe)} · dia ${num(pr.diaDaSemana)} de 5`;
+  // meta da semana na faixa da regra: a padrão (a mais comum entre os do painel)
+  const metas = pr.ranking.map((x) => x.pipeline.metaSemana).filter((m) => m != null);
+  const metaComum = metas.sort((a, b) => metas.filter((m) => m === b).length - metas.filter((m) => m === a).length)[0];
+  if (metaComum != null && el("ranking-meta-pipeline").textContent !== reais(metaComum)) el("ranking-meta-pipeline").textContent = reais(metaComum);
   const top = pr.ranking.slice(0, 3);
   const ordem = [top[1], top[0], top[2]]; // 2º, 1º, 3º
   const alturas = ["podio-2", "podio-1", "podio-3"];
@@ -553,7 +561,9 @@ function renderizarPremio(pr) {
       <div class="tv-pr-nome">${esc(x.nome)}</div>
       <div class="tv-pr-valor">${kReais(x.receitaCentavos)}</div>
       <div class="tv-pr-matr">${num(x.matriculas)} matrícula${x.matriculas === 1 ? "" : "s"}</div>
-      ${x.qualificado ? "" : `<div class="tv-pr-fora-selo">FORA DO PRÊMIO</div>`}
+      ${x.qualificado ? "" : x.rota.estado === "fora"
+        ? `<div class="tv-pr-fora-selo">FORA DO PRÊMIO</div>`
+        : `<div class="tv-pr-fora-selo tv-pr-ainda">AINDA NÃO ELEGÍVEL</div>`}
       <ul class="tv-pr-requisitos">${linhasPremio(x)}</ul>
     </div>`).join("");
   const podio = el("ranking-podio");
@@ -562,8 +572,8 @@ function renderizarPremio(pr) {
   const lider = pr.ranking[0];
   const texto = v
     ? `🏆 Se a semana fechasse agora, o prêmio iria para <b>${esc(v.nome)}</b> — ${v.posicao}º em vendas · ${kReais(v.receitaCentavos)}` +
-      (lider && lider.nome !== v.nome ? ` <span class="st-txt-fora">(${esc(lider.nome)} lidera em vendas, mas está fora dos pré-requisitos)</span>` : "")
-    : `Ninguém com venda na semana cumpre rota e pipeline ainda — o prêmio está em aberto`;
+      (lider && lider.nome !== v.nome ? ` <span class="st-txt-fora">(${esc(lider.nome)} lidera em vendas, mas ${lider.rota.estado === "fora" ? "está fora dos pré-requisitos" : "ainda não cumpre os pré-requisitos"})</span>` : "")
+    : `Ninguém com venda na semana cumpre rota 100% e pipeline da semana ainda — o prêmio está em aberto`;
   if (el("ranking-vencedor").innerHTML !== texto) el("ranking-vencedor").innerHTML = texto;
 }
 
@@ -664,7 +674,7 @@ function renderizar(d, origem) {
       if (!antes) continue;
       const fechouRota = x.rota.hoje && (antes.rota.hoje?.pct ?? 0) < 100 && x.rota.hoje.pct >= 100;
       if (!antes.emDia && x.emDia) {
-        celebrar("✅ EM DIA ✅", `${x.nome} · rota de hoje 100% e pipeline da semana na meta!`);
+        celebrar("✅ EM DIA ✅", `${x.nome} · rota de hoje 100% e pipeline no ritmo da semana!`);
       } else if (fechouRota) {
         celebrar("🏆 ROTA CONCLUÍDA 🏆", `${x.nome} · ${num(x.rota.hoje.feitas)} de ${num(x.rota.hoje.itens)} da rota — 100%!`);
       }
@@ -974,6 +984,6 @@ setInterval(() => atualizar("polling"), POLLING_MS);
 if (params.get("festa") === "demo") {
   setTimeout(() => {
     celebrar("🎉 MATRÍCULA NOVA 🎉", "TESTE · +1 matrícula · +R$ 2.980");
-    celebrar("✅ EM DIA ✅", "TESTE · rota de hoje 100% e pipeline da semana na meta!");
+    celebrar("✅ EM DIA ✅", "TESTE · rota de hoje 100% e pipeline no ritmo da semana!");
   }, 2500);
 }

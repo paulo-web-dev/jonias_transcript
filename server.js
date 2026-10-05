@@ -883,8 +883,9 @@ app.get("/api/rota/painel", (req, res) => {
 
 app.post("/api/rota/campanha", (req, res) => {
   try {
-    const { tipoId = null, refazerFuturas = false } = req.body || {};
-    res.json(rota.trocarCampanha({ tipoId, refazerFuturas: refazerFuturas === true }, req.usuario.id));
+    // { fila: [ids na ordem] } (vazia = encerrar); { tipoId } sozinho = fila de um
+    const { fila, tipoId = null, refazerFuturas = false } = req.body || {};
+    res.json(rota.trocarCampanha({ fila, tipoId, refazerFuturas: refazerFuturas === true }, req.usuario.id));
   } catch (err) {
     responderErroRota("rota/campanha", err, res);
   }

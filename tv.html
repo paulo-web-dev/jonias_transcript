@@ -20,8 +20,9 @@
 
   <main class="tv-visoes">
     <!-- STATUS: quem está em dia hoje — ROTA de hoje (% concluída) e PIPELINE da
-         semana ("bateu N de M dias"; OK = acumulado cobre a meta até hoje). Os
-         dois OK = destaque "EM DIA". Substituiu HOJE e ROTA DO DIA (2026-10-02). -->
+         semana (% da meta do prêmio, R$ 42.000, e quanto falta; o ritmo — meta
+         diária × dias até hoje — decide o destaque "EM DIA" junto com a rota).
+         Substituiu HOJE e ROTA DO DIA (2026-10-02). -->
     <section class="tv-visao" id="visao-status">
       <h2 id="status-titulo">STATUS</h2>
       <div class="tv-st-linhas" id="status-linhas"></div>
@@ -32,7 +33,7 @@
          pipeline são PRÉ-REQUISITO do prêmio (critério acumulado da semana). -->
     <section class="tv-visao" id="visao-ranking">
       <h2 id="ranking-titulo">RANKING DE VENDAS DA SEMANA</h2>
-      <div class="tv-pr-regra">🏆 O PRÊMIO É DE <b>VENDAS</b> — só concorre quem está com a <b>ROTA 100%</b> e o <b>PIPELINE NA META</b></div>
+      <div class="tv-pr-regra">🏆 O PRÊMIO É DE <b>VENDAS</b> — só concorre quem está com a <b>ROTA 100%</b> e o <b>PIPELINE DA SEMANA NA META</b> (<span id="ranking-meta-pipeline">R$ 42.000</span>)</div>
       <div class="tv-pr-podio" id="ranking-podio"></div>
       <div class="tv-pr-vencedor" id="ranking-vencedor"></div>
     </section>

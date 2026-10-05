@@ -87,6 +87,7 @@ aula-ai/
 ├── scripts/banco.js # manutenção do SQLite: conferir | checkpoint | backup (deploy seguro)
 ├── scripts/viabilidade-rota.js # SÓ LEITURA: estoque de uma campanha da Rota por consultor/regional
 ├── scripts/diagnostico-pipeline.js # SÓ LEITURA: pipeline por consultor/dia, ticket zero/retroativo, conversão
+├── scripts/carteira-consultor.js # SÓ LEITURA: carteira de um consultor e as regionais que ficam órfãs se ele sair
 ├── DEPLOY.md        # procedimento de deploy em produção (Docker) e migração do banco p/ o volume
 ├── .dockerignore    # a imagem NUNCA leva banco (*.db, -wal, -shm), backups/, data/, planilhas, .env nem node_modules
 ├── Dockerfile       # 2 estágios: npm ci --omit=dev com toolchain → node:22-bookworm-slim
@@ -173,7 +174,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **29**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **31**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -577,21 +578,23 @@ abandonado). Fase 1 = carga com fidelidade total:
   antiga (o log mostra as contagens preservadas).
 - **Migração 28 (2026-09-30) — ROTA do dia** (`rota.js` + `js/rota.js`, **zero
   IA**). Lista diária de ligações por consultor, gerada automaticamente.
-  Decisões do usuário: a rota é uma **CAMPANHA POR SETOR** (o admin escolhe o
-  tipo e todas as rotas a partir de então são dele; esgotou, escolhe o
-  próximo) — **nunca mistura setores**; estoque acabado = **rota curta**, visível
-  no painel, nada de completar com outro setor.
+  Decisões do usuário: a rota era uma **CAMPANHA POR SETOR** (um tipo só,
+  nunca misturava setores). **Desde a migração 31 (2026-10-05) a campanha é
+  uma FILA ORDENADA de tipos** — ver "Fila de setores" no roadmap; rota curta
+  só quando a fila inteira acabou para o consultor.
   `rota_tipos(id, nome, setores_json [{uf, setor}] com o nome EXATO da aba,
   cota=45, ativo)` — seed "Licitação" = PR `LICITAÇÃO PM`, `LICITAÇÃO CM`,
   `LICITAÇÃO PM - com população`, `Licitação CM com Papulação` e SC
   `LICITAÇÃO PM`, `LICITAÇÃO CM`; novos tipos pela tela, sem código.
-  `rota_campanhas(tipo_id NULL = encerrada, vale_desde)` — vigente numa data =
+  `rota_campanhas(tipo_id NULL = encerrada, fila_json [ids na ordem; tipo_id =
+  o primeiro], vale_desde)` — vigente numa data =
   `vale_desde` mais recente ≤ data; a troca vale na próxima data útil SEM rota
   gerada (opção "refazer as rotas futuras que ninguém começou").
   `rotas(pessoa_id, data UNIQUE, campanha_id, tipo_id, setores_json, cota,
   elegiveis)` e `rota_itens(rota_id, contato_id, posicao, telefone, setor,
   codigo_ibge, baixa_em, baixa_metodo cdr|manual, ligacao_id, atendida,
-  baixa_usuario_id)` — **é o histórico de rota**, nunca apagado (exceto rota
+  baixa_usuario_id, tipo_id [migração 31: tipo da fila de onde veio a linha;
+  em `rotas`, tipo_id/cota = do tipo em que a rota começou])` — **é o histórico de rota**, nunca apagado (exceto rota
   futura descartada na troca). Regras: só regionais da carteira (regional
   principal); contato sem consultor ou do próprio (de outro consultor não
   entra — e contato de consultor SEM vínculo na regional não entra em rota
@@ -690,7 +693,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/rota?data=&pessoa=` | rota do dia (`data` padrão = hoje em Brasília): `rota` (itens com baixa, `progresso`) + `contatos` no formato do payload da aba Trabalho (corte do vendedor igual); vendedor: só a própria (`pessoa` de outro = 404); admin sem `pessoa` = a primeira do dia, `pessoas` = quem tem rota |
 | `DELETE /api/rota/itens/:id/baixa` | desfaz baixa MANUAL (a do CDR → 400); item de outro consultor (vendedor) = 404 |
 | `GET /api/rota/painel?data=` | admin: campanha (hoje / data / próxima geração / histórico), `rotasDia` com progresso, `estoque` da próxima geração (telefones, dias da equipe, por consultor e regional, `orfaos`, `semCarteira`), `acumulado` da campanha, `tipos` |
-| `POST /api/rota/campanha` | admin: `{tipoId \| null, refazerFuturas}` → vale na próxima data útil sem rota; gera o que já for devido |
+| `POST /api/rota/campanha` | admin: `{fila: [ids na ordem] (vazia = encerrar), refazerFuturas}` (`{tipoId}` sozinho = fila de um) → vale na próxima data útil sem rota; gera o que já for devido; tipo repetido/inativo → 400, inexistente → 404 |
 | `POST /api/rota/gerar` | admin: gera as rotas faltantes (hoje e, após 17h, o próximo dia útil) |
 | `GET/POST /api/rota/tipos`, `PUT /api/rota/tipos/:id` | admin: tipos de rota + setores disponíveis (uf, aba, linhas, aptas); setor inexistente/cota fora de 1–500/nome repetido → 400 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
@@ -932,7 +935,7 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   desde a migração 17 (2026-09-04), herdeiro do ramal 2001 e de todo o seu
   histórico;
   **Hirlan e Douglas fora da TV temporariamente desde
-  2026-08-19, agora via `OCULTOS_TEMPORARIOS_TV` no fim do `db.js`** — lista
+  2026-08-19 (Jhonnata desde a saída, migração 30), via `OCULTOS_TEMPORARIOS_TV` no fim do `db.js`; fora também do feedback desde a migração 30** — lista
   aplicada em TODO startup, depois das migrações, então sobrevive a banco
   recriado do zero e a UPDATE manual em contrário. Reverter = remover o nome
   da lista e reiniciar (a restauração para 1/1 é automática e atinge só quem
@@ -1193,20 +1196,25 @@ Decisões do usuário (2026-10-02), em duas fases aprovadas separadamente:
     na tela); semana = todo dia ENCERRADO com rota fechou 100%; hoje só conta
     quando fecha. Estados `ok | pendente (hoje em curso) | fora (perdeu dia) |
     sem_rota` (neutro, não conta contra).
-  - **Pipeline**: STATUS mostra **"bateu N de M dias"** (pedido do usuário —
-    binário do dia parecia injusto); o ✓ é o ACUMULADO da semana ≥ meta diária
-    × dias até hoje (`ok`), `pendente` = cobre até ontem e hoje ainda falta,
-    `fora` = abaixo até ontem. Sem meta = neutro.
+  - **Pipeline**: ~~"bateu N de M dias"~~ — **desde 2026-10-05 a STATUS mostra
+    o % do ACUMULADO DA SEMANA × meta diária × 5 (R$ 42.000)**, "R$ 25.200 de
+    R$ 42.000", barra e "faltam R$ X" / "✓ elegível". O `estado` continua
+    sendo o RITMO (acumulado ≥ meta diária × dias até hoje = `ok`; `pendente`
+    = cobre até ontem e hoje ainda falta; `fora` = abaixo até ontem), exibido
+    na linha de baixo, e só decide o EM DIA. Sem meta = neutro.
   - **EM DIA** (destaque verde + festa na virada) = rota de hoje 100% (ou sem
     rota hoje) e pipeline `ok`. A festa ROTA CONCLUÍDA continua; se as duas
     viradas vêm juntas, uma festa só.
   - **Prêmio** = maior receita de MATRÍCULAS da semana entre quem não está
-    `fora` em rota nem em pipeline (pré-requisitos, não desempate). Pódio dos 3
-    primeiros em vendas com os requisitos de cada um; quem está fora vê o
-    motivo exato ("Rota: 100% em só 3 de 4 dias", "Pipeline: R$ X de R$ Y —
-    faltam R$ Z") e a linha "se a semana fechasse agora, o prêmio iria para…"
-    (com o aviso quando o líder em vendas está fora). Faixa fixa: "o prêmio é
-    de VENDAS — só concorre quem está com a ROTA 100% e o PIPELINE NA META".
+    `fora` na rota e tem **pipeline ACUMULADO DA SEMANA ≥ R$ 42.000**
+    (`pipeline.elegivel`; decisão do usuário, 2026-10-05: por dia não
+    funciona, o lead grande cai num dia só). A meta diária de R$ 8.400 segue
+    nos relatórios internos. Pré-requisitos, não desempate. Pódio dos 3
+    primeiros em vendas com os requisitos de cada um: rota perdida = "FORA DO
+    PRÊMIO" (definitivo); pipeline abaixo = "AINDA NÃO ELEGÍVEL" com "R$ 25,2k
+    de R$ 42k — 60% · faltam R$ 16,8k"; e a linha "se a semana fechasse agora,
+    o prêmio iria para…". Faixa fixa: "… ROTA 100% e o PIPELINE DA SEMANA NA
+    META (R$ 42.000)" (o valor vem do payload).
   - **Nada de qualidade do pipeline na TV** (decisão do usuário: ticket zero,
     retroativo e concentração são conversa individual — ficam em
     /relatorios, /saude e /meu-painel); a TV chama o motor com
@@ -1229,6 +1237,44 @@ Decisões do usuário (2026-10-02), em duas fases aprovadas separadamente:
     navegação. Sem ninguém tocar, comportamento idêntico ao anterior.
   - Medido: com 6 consultores, a tela STATUS ocupa ~50vw de altura (cabe numa
     TV 16:9, 56vw); com mais de 6 entra o modo compacto.
+
+### ✅ Saída do Jhonnata, fila de setores e pipeline semanal no prêmio (2026-10-05, migrações 30–31)
+Decisões do usuário em 2026-10-05:
+- **Jhonnata saiu da equipe; último dia 02/10/2026** (migração 30). Nada do
+  histórico é apagado e ele continua `ativo = 1` (relatórios internos de
+  outubro seguem com ele, como Hirlan/Douglas). Flags de painel/TV/feedback
+  em 0 e nome em `OCULTOS_TEMPORARIOS_TV`; fora de `CONSULTORES_ATUAIS`.
+  Ramal 2004: vigência dele fechada em 02/10, `pessoas.ramal` NULL — o ramal
+  fica **sem dono** (ligação de 03/10 em diante sem `pessoa_id`) até alguém
+  assumir (nova linha em `ramal_vigencias`). Carteira: vínculos removidos; o
+  log da migração lista cada regional (ÓRFÃ / sem titular / coberta) com os
+  contatos — a redistribuição é do usuário em /usuarios (definir o titular
+  atribui os sem-consultor). "Liberar tudo": contatos com ele como consultor
+  ficam sem consultor (histórico `pessoa_id`, sem `editado_em`), rotas dele
+  depois de 02/10 sem baixa são descartadas (os telefones ficariam presos 7
+  dias), usuário vendedor desativado. `scripts/carteira-consultor.js` (só
+  leitura) mostra o mesmo retrato ANTES do deploy. O painel da Rota só lista
+  como "sem carteira" quem tem `entra_painel = 1`.
+- **Fila de setores na Rota** (migração 31): a campanha é uma lista ordenada de
+  tipos montada no painel (↑ ↓ ✕, "+ adicionar", "Salvar fila" em dois
+  cliques). Geração por FASES (`gerarRotas`): cada consultor começa no
+  primeiro tipo com estoque e, se não enche a cota, completa com o próximo no
+  mesmo dia; cada um anda sozinho e **volta** a um tipo anterior quando o
+  bloqueio dele vence (decisão do usuário: regra literal "primeiro tipo com
+  estoque"). Cota da rota = a do tipo em que ela começa. **Um telefone por dia
+  em todas as rotas, mesmo entre tipos** (a baixa pelo CDR é pelo número);
+  como ~84% dos números são o geral da prefeitura, completar com o próximo
+  setor tende a usar outros municípios no mesmo dia. Bloqueio por telefone =
+  dentro do tipo DO ITEM (`rota_itens.tipo_id`). Tela: coluna "Setor da fila"
+  na Rota do dia (faixa também na troca de setor), subtítulo com os setores;
+  painel com "Setor atual (Nº de M)", "Dias no setor" e "Dias na fila" por
+  consultor (`estoqueDaFila`: elegíveis ÷ cota de cada tipo; telefone em dois
+  tipos conta nos dois — são duas ligações), cartão do estoque da fila por
+  tipo e um cartão de acumulado por tipo (`acumuladoDoTipo`: desde a
+  sequência de campanhas que contém o tipo). Tipo inativado dentro da fila é
+  pulado (log).
+- **Prêmio pelo pipeline acumulado da semana** — ver Fase 2 da meta de
+  pipeline acima (`pipeline.elegivel`, `pct`, `faltaSemanaCentavos`).
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)
