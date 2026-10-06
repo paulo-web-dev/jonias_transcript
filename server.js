@@ -32,6 +32,7 @@ const territorio = require("./territorio.js");
 const prospeccao = require("./prospeccao.js");
 const cruzamento = require("./cruzamento.js");
 const rota = require("./rota.js");
+const backup = require("./backup.js");
 const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
 const { hashSenha, gerarSenhaInicial, validarSenhaNova } = require("./auth.js");
 
@@ -1201,7 +1202,14 @@ app.post("/api/periodos/:id/feedbacks", async (req, res) => {
 });
 
 app.get("/api/saude", (req, res) => {
-  res.json(saudeDosDados());
+  res.json({ ...saudeDosDados(), backup: backup.resumo() });
+});
+
+// Backup agora (admin — /api/saude é só admin): mesmo caminho do automático
+// (checkpoint → backup online → integrity_check → retenção)
+app.post("/api/saude/backup", async (req, res) => {
+  const info = await backup.fazerBackup("manual");
+  res.status(info.ok ? 201 : 500).json({ ...info, resumo: backup.resumo() });
 });
 
 // Leads ativos com ticket zero (não somam pipeline): admin vê todos os
@@ -1481,6 +1489,8 @@ app.use((err, req, res, next) => {
   // Rota: gera a de hoje (se faltar) e, a partir das 17h, a do próximo dia útil
   rota.garantirRotas();
   setInterval(() => rota.garantirRotas(), 5 * 60 * 1000).unref();
+  // Backup diário do banco (03:00 Brasília, com recuperação após reinício)
+  backup.iniciarAgendamento();
   app.listen(PORT, () => {
     console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
   });

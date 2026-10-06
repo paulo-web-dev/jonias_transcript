@@ -28,6 +28,17 @@
     <p class="texto-suave">Se um painel mostrar número errado por dado faltando, esta tela mostra antes.
       Frescor das fontes, atribuições quebradas e furos de cruzamento.</p>
 
+    <h2 class="secao-titulo">Backup do banco</h2>
+    <div class="grade-fontes">
+      <div class="fonte-card fonte-card-larga" id="cartao-backup">
+        <h3>💾 Backup automático</h3>
+        <p class="texto-suave">Diário, de madrugada, pela API de backup online do SQLite, com <code>integrity_check</code> no
+          arquivo gerado. Ficam os 7 diários mais recentes e um semanal de cada uma das 4 semanas anteriores.
+          Restauração: <code>DEPLOY.md</code>, Parte E.</p>
+        <div id="backup-conteudo"><p class="texto-suave">Carregando…</p></div>
+        <p><button type="button" id="btn-backup" class="btn btn-secundario">Fazer backup agora</button></p>
+      </div>
+    </div>
     <h2 class="secao-titulo">Frescor das fontes</h2>
     <div class="grade-fontes" id="cartoes-fontes"></div>
 

@@ -84,7 +84,8 @@ aula-ai/
 ├── js/nav.js        # menu por papel via /api/sessao (conveniência; a proteção é nas rotas)
 ├── dados/           # referência versionada (CSV de regionais, JSONs do IBGE, mapa SVG)
 ├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
-├── scripts/banco.js # manutenção do SQLite: conferir | checkpoint | backup (deploy seguro)
+├── backup.js        # backup automático diário (03:00 Brasília, API online, integrity_check, retenção 7+4)
+├── scripts/banco.js # manutenção do SQLite: conferir | verificar | checkpoint | backup (deploy seguro)
 ├── scripts/viabilidade-rota.js # SÓ LEITURA: estoque de uma campanha da Rota por consultor/regional
 ├── scripts/simular-fila.js # SÓ LEITURA: simula a fila da Rota dia a dia numa CÓPIA temporária do banco (rota.js real)
 ├── scripts/diagnostico-pipeline.js # SÓ LEITURA: pipeline por consultor/dia, ticket zero/retroativo, conversão
@@ -170,6 +171,43 @@ igual ao do container que já roda. O `.dockerignore` barra também
 - `stop` preserva o container (e o banco dentro dele); `down`/`up` com imagem
   nova destroem. `scripts/banco.js` roda em imagem que ainda não o tem:
   `docker compose exec -T <serviço> node - conferir <db> < scripts/banco.js`.
+
+### Backup automático (2026-10-06)
+
+`backup.js`, iniciado no boot do `server.js` (decisões do usuário):
+
+- **Quando**: todo dia depois das 03:00 de Brasília, com um timer no Node.
+  A imagem slim não tem cron, e cron no host ficaria fora do repositório. O
+  timer confere no boot (+1 min) e a cada 10 min se já há backup VERIFICADO
+  feito hoje depois das 03:00; se não houver, faz um. Assim, um container
+  que reinicia a qualquer hora recupera o dia. Um `.db.tmp` deixado por um
+  reinício no meio do backup é apagado. Depois de uma falha, nova tentativa
+  de hora em hora.
+- **Como**: `wal_checkpoint(TRUNCATE)` → `db.backup()` (API online do SQLite,
+  nunca cópia de arquivo) num `.tmp` → `journal_mode = DELETE` (arquivo
+  único de verdade; o app religa o WAL ao abrir o banco restaurado) →
+  `PRAGMA integrity_check` no arquivo gerado → nome final.
+- **Registro**: `.json` ao lado de cada backup (criadoEm, bytes, contatos,
+  usuarios, user_version, integridade, checkpoint, duração, erro) e uma linha
+  em `backups.log`. Falha também deixa `.json`.
+- **Onde**: `BACKUP_DIR` ou `backups/` ao lado do banco. Em produção é
+  `/app/data/backups`, dentro do volume, e persiste a deploy.
+- **Retenção**: um por dia (o último verificado do dia); os 7 dias mais
+  recentes; e o último verificado de cada uma das 4 semanas anteriores às
+  dos diários. O resto é apagado sozinho, só arquivos com o padrão de nome
+  `aula-ai-AAAA-MM-DD-HHMM[-manual].(db|json)`. O último verificado nunca
+  sai.
+- **`/saude`**: cartão "Backup do banco" com data, tamanho, contatos,
+  verificação, alerta com mais de 48 h ou falha, a lista mantida e o botão
+  "Fazer backup agora".
+- **Restauração**: passo a passo em `DEPLOY.md`, Parte E, com ensaio num
+  segundo container. `scripts/banco.js verificar` faz o `integrity_check`
+  completo antes de restaurar.
+- **Ensaio feito em 2026-10-06** em Docker local, com a imagem desta versão:
+  backup automático no container (26.000 contatos, ok, 13 s em bind mount do
+  Windows) → banco "estragado" → passos 1–9 → dados do backup de volta, WAL
+  religado, login ok; passo 11 (desfazer) e o container de ensaio com
+  `traefik.enable=false` também conferidos.
 
 ## Banco de dados
 
@@ -654,7 +692,8 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `POST /api/sincronizacoes/mysql` | sync incremental da Unyflex + cruzamento matrícula↔oportunidade; 503 sem MYSQL_* no .env |
 | `GET /api/metricas?de=&ate=` | cálculo ao vivo do motor de métricas (preview) |
 | `GET/POST /api/periodos`, `GET/DELETE /api/periodos/:id`, `POST /:id/recongelar` | períodos congelados: criar congela na hora (snapshot v1); recongelar grava NOVA versão (as antigas ficam — trilha auditável); `?versao=` consulta versão antiga |
-| `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) |
+| `GET /api/saude` | saúde dos dados (frescor por fonte, matches quebrados, furos de cruzamento) + `backup` (`backup.resumo()`: último verificado, tamanho, contatos, integrity_check, `alerta` com mais de 48 h ou falha, backups mantidos) |
+| `POST /api/saude/backup` | admin: backup agora, pelo mesmo caminho do automático; 201 ok / 500 falha, com o `resumo` |
 | `GET /api/oportunidades/sem-ticket` | leads ATIVOS com ticket zero (`leadsSemTicket()`): por consultor, total, mais antigo, faixas de idade e a lista (número, conta, fase, criada, dias, `noUltimoArquivo`); admin = todos os consultores ativos, vendedor = só os dele (SQL) |
 | `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
 | `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: `status` e `premio` (telas STATUS e RANKING, `statusSemanaTv()` em `metricas.js` sobre `rotasDaSemanaTv()` de `rota.js`), `rota` (progresso da Rota do dia, `progressoTv()`), dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20 desde 2026-10-01; 30 de 25/09 a 30/09, antes 45), `?fixo=status\|ranking\|semana\|receita\|mes\|parados3\|parados10\|destaque` (HOJE e ROTA DO DIA saíram em 2026-10-02, com o `?dia=sempre`), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |

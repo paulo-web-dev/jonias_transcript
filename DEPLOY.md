@@ -7,6 +7,9 @@ em `/app/aula-ai.db`, dentro da camada do container: todo `docker compose build`
 
 - Parte A: migração **única** do banco vivo para o volume (fazer uma vez).
 - Parte B: deploy de rotina, depois da migração.
+- **Parte E: RESTAURAR um backup** (passo a passo) e ensaiar a restauração
+  sem tocar na produção. O backup é automático, todo dia depois das 03:00,
+  em `data/backups/` (ver o cartão "Backup do banco" em `/saude`).
 
 Convenções nos comandos: `SVC` = nome do serviço no `docker-compose.yml` (veja em
 `docker compose ps`); rodar tudo na pasta do `docker-compose.yml` no servidor;
@@ -257,12 +260,16 @@ docker compose start SVC
 
 ## Parte B — deploy de rotina (depois da migração)
 
-1. **Backup antes de cada deploy**:
+1. **Backup antes de cada deploy** (o automático é de madrugada; antes do
+   deploy faça um na hora — botão "Fazer backup agora" em `/saude`, que
+   também verifica o arquivo, ou pela linha de comando):
    ```sh
    docker compose exec -T SVC node scripts/banco.js backup /app/data/aula-ai.db /app/data/backup-AAAAMMDD-HHMM.db
    docker compose exec -T SVC node scripts/banco.js conferir /app/data/aula-ai.db | tee antes.txt
    ```
-   Copie o backup para fora do servidor de tempos em tempos.
+   Copie backups para fora do servidor de tempos em tempos (os automáticos
+   estão em `data/backups/`; o volume não protege contra perder o disco):
+   `scp servidor:/CAMINHO/data/backups/aula-ai-*.db .`
 2. `git pull`, `docker compose build SVC`, `docker compose up -d SVC`.
 3. **Conferir**: no `docker compose logs --tail 40 SVC`, a linha `🗄 Banco:`
    precisa mostrar `/app/data/aula-ai.db (DB_PATH)` e a mesma contagem (ou
@@ -363,3 +370,153 @@ Depois de subir:
    pipeline como "sem meta" (neutro).
 4. Períodos já congelados em `/relatorios` não têm pipeline: recongelar se
    quiser ver as colunas novas e a "Qualidade do pipeline".
+
+---
+
+## Parte E — restaurar um backup
+
+**Quando:** o banco corrompeu, um deploy estragou os dados, ou alguém apagou
+algo em massa. **O que se perde:** tudo o que foi gravado depois do backup
+escolhido (ver o passo 10). Avise a equipe antes de começar e peça que parem
+de usar o sistema.
+
+Os backups automáticos ficam em `data/backups/` no servidor
+(`/app/data/backups/` dentro do container): `aula-ai-AAAA-MM-DD-HHMM.db`, um
+arquivo único (sem `-wal`), e ao lado um `.json` com data, tamanho,
+contatos, `user_version` e o resultado do `integrity_check` feito na hora.
+Os comandos abaixo rodam na pasta do `docker-compose.yml`. `ARQ` = nome do
+backup escolhido, `AAAAMMDD-HHMM` = agora.
+
+### 1. Escolher o backup
+
+```sh
+ls -la data/backups/
+cat data/backups/ARQ.json        # "ok": true, "integridade": "ok", "contatos": N
+```
+
+Pegue o mais recente com `"ok": true` de ANTES do problema. A tela `/saude`
+mostra a mesma lista em "Backup do banco".
+
+### 2. Verificar o backup escolhido (com o app ainda rodando)
+
+```sh
+docker compose exec -T SVC node scripts/banco.js verificar /app/data/backups/ARQ.db | tee restaurar-backup.txt
+```
+
+Tem de dizer `integrity_check  ok`. Se disser outra coisa, **pare**: escolha
+outro backup. Guarde as contagens (`contatos_ativo`, `usuarios`…): é o que o
+banco vai ter depois.
+
+### 3. Guardar o banco atual (se ele ainda abre)
+
+```sh
+docker compose exec -T SVC node scripts/banco.js conferir /app/data/aula-ai.db | tee restaurar-atual.txt
+docker compose exec -T SVC node scripts/banco.js backup /app/data/aula-ai.db /app/data/pre-restauracao-AAAAMMDD-HHMM.db
+```
+
+Se o banco atual estiver corrompido e esses comandos falharem, siga mesmo
+assim: o passo 5 guarda os arquivos brutos.
+
+### 4. Parar o app (stop, NÃO down)
+
+```sh
+docker compose stop SVC
+docker compose ps                # SVC tem de aparecer parado (exited)
+```
+
+### 5. Afastar o banco atual JUNTO com o -wal e o -shm
+
+```sh
+mkdir data/pre-restauracao-AAAAMMDD-HHMM
+for f in data/aula-ai.db data/aula-ai.db-wal data/aula-ai.db-shm; do [ -e "$f" ] && mv "$f" data/pre-restauracao-AAAAMMDD-HHMM/; done
+ls -la data/                     # não pode sobrar aula-ai.db, -wal nem -shm
+```
+
+⚠ **Nunca** deixe o `-wal` antigo ao lado do banco restaurado. O SQLite
+aplicaria nele as páginas do banco antigo, e o resultado é um banco
+corrompido.
+
+### 6. Pôr o backup no lugar
+
+```sh
+cp data/backups/ARQ.db data/aula-ai.db       # cp, não mv: o backup continua guardado
+ls -la data/                                  # só aula-ai.db (sem -wal/-shm), com o tamanho do backup
+```
+
+### 7. Conferir antes de subir (app parado)
+
+```sh
+docker compose run --rm --no-deps -T -l traefik.enable=false SVC node scripts/banco.js verificar /app/data/aula-ai.db
+```
+
+O resultado tem de ser `integrity_check  ok`, com as mesmas contagens do
+passo 2. `run` cria um container temporário com o mesmo volume: ele roda o
+comando e some. A label impede o Traefik de mandar tráfego para ele.
+
+### 8. Subir
+
+```sh
+docker compose start SVC                      # mesma imagem: sem build
+docker compose logs --tail 40 SVC
+```
+
+A linha `🗄 Banco: /app/data/aula-ai.db (DB_PATH) · user_version N · M
+contato(s)` tem de mostrar o M do passo 2. Se o backup é de antes de um
+deploy, aparecem linhas `migração N:`: as migrações rodam sobre o backup, e
+isso é esperado. O app volta a ligar o WAL sozinho.
+
+### 9. Conferir com o app no ar
+
+```sh
+docker compose exec -T SVC node scripts/banco.js conferir /app/data/aula-ai.db
+```
+
+Faça login e abra `/saude` (o próximo backup automático já conta a partir
+dele), `/prospeccao` e `/relatorios`.
+
+### 10. Recuperar o que veio depois do backup
+
+| O quê | Como volta |
+|---|---|
+| CDR, Omie, planilhas de prospecção | reimportar os arquivos na `/central` (importação idempotente: o que já existe não duplica) |
+| Matrículas (Unyflex) | "Sincronizar" na `/central` |
+| Baixas da Rota pelo CDR | voltam com a reimportação do CDR |
+| Rota de hoje | gerada sozinha no boot se faltar |
+| Trabalho manual da equipe: edições de contato, contatos registrados, marcações, baixas manuais, usuários e senhas criados | **perdido**. Fica só no banco guardado em `data/pre-restauracao-AAAAMMDD-HHMM/`, para consulta. Peça à equipe que refaça o que lembrar |
+
+### 11. Desfazer a restauração
+
+Se o banco restaurado estiver pior que o anterior:
+
+```sh
+docker compose stop SVC
+mkdir data/restaurado-descartado-AAAAMMDD-HHMM
+for f in data/aula-ai.db data/aula-ai.db-wal data/aula-ai.db-shm; do [ -e "$f" ] && mv "$f" data/restaurado-descartado-AAAAMMDD-HHMM/; done
+mv data/pre-restauracao-AAAAMMDD-HHMM/* data/
+docker compose start SVC
+```
+
+### Ensaio (sem tocar na produção)
+
+Treine a restauração de vez em quando, e sempre que mudar o procedimento.
+Ela roda num segundo container com uma CÓPIA do backup e a produção segue
+no ar:
+
+```sh
+mkdir -p data/ensaio && cp data/backups/ARQ.db data/ensaio/aula-ai.db
+docker compose run --rm --no-deps -l traefik.enable=false -p 127.0.0.1:8001:8000 \
+  -e DB_PATH=/app/data/ensaio/aula-ai.db -e NODE_ENV=development SVC
+```
+
+- `traefik.enable=false`: sem a label, o Traefik dividiria o tráfego do
+  domínio entre a produção e o ensaio.
+- `NODE_ENV=development`: o cookie de sessão sai sem `secure`, então o login
+  funciona em `http://localhost`.
+
+Do seu computador, `ssh -L 8001:localhost:8001 servidor` e abra
+`http://localhost:8001`. Faça login e confira os números. Para encerrar:
+Ctrl+C, e depois `rm -rf data/ensaio`.
+
+O ensaio grava só na cópia: geração da Rota e o próprio backup automático,
+que vai para `data/ensaio/backups/`. Não rode "Sincronizar" nem importações
+nele. A cópia do MySQL só lê, mas é tempo de banco à toa.

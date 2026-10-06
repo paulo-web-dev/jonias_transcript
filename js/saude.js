@@ -61,6 +61,7 @@ async function carregar() {
     document.getElementById("aviso").classList.add("visivel");
     return;
   }
+  renderizarBackup(s.backup);
   document.getElementById("cartoes-fontes").innerHTML =
     cartaoFonte("CDR do PABX", "📞", s.fontes.cdr) +
     cartaoFonte("Oportunidades (Omie)", "🎯", s.fontes.omie) +
@@ -87,6 +88,52 @@ async function carregar() {
   document.getElementById("alunos-orfaos").textContent = s.alunosOrfaos;
   carregarSemTicket();
 }
+
+// Backup: último (data, tamanho, contatos, verificação), alerta com mais de
+// 48 h ou falha, e os backups mantidos pela retenção
+const tamanho = (b) => (b == null ? "—" : b >= 1048576 ? `${(b / 1048576).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB` : `${Math.round(b / 1024)} KB`);
+function renderizarBackup(bk) {
+  const alvo = document.getElementById("backup-conteudo");
+  if (!bk) { alvo.innerHTML = `<p class="texto-suave">Sem informação de backup.</p>`; return; }
+  const u = bk.ultimoOk;
+  const estado = bk.alerta
+    ? `<span class="saude-alerta">⚠ ${escapeHtml(bk.alerta)}</span>`
+    : `<span class="saude-ok">✔ backup em dia</span>`;
+  const falha = bk.ultimo && !bk.ultimo.ok
+    ? `<li><span class="saude-alerta">Última tentativa (${dataHoraBr(bk.ultimo.criadoEm)}) falhou</span><span>${escapeHtml(bk.ultimo.erro || "")}</span></li>` : "";
+  alvo.innerHTML = `<p class="fonte-status">${estado}${bk.emAndamento ? ' <span class="texto-suave">· backup em andamento…</span>' : ""}</p>
+    <ul class="lista-simples">
+      ${falha}
+      <li><span>Último backup verificado</span><span>${u ? `${dataHoraBr(u.criadoEm)} <span class="texto-suave">(há ${Math.floor(bk.idadeHoras)} h · ${escapeHtml(u.motivo)})</span>` : "nenhum"}</span></li>
+      ${u ? `<li><span>Tamanho</span><span>${tamanho(u.bytes)}</span></li>
+      <li><span>Contatos de prospecção no backup</span><span>${(u.contatos ?? 0).toLocaleString("pt-BR")}</span></li>
+      <li><span>Verificação (integrity_check)</span><span>${u.integridade === "ok" ? '<span class="saude-ok">✔ ok</span>' : `<span class="saude-alerta">${escapeHtml(u.integridade || "—")}</span>`} · user_version ${u.userVersion ?? "—"}</span></li>
+      <li><span>Arquivo</span><span><code>${escapeHtml(u.arquivo)}</code></span></li>` : ""}
+      <li><span>Diretório</span><span style="text-align:right;min-width:0"><code style="white-space:normal;word-break:break-all">${escapeHtml(bk.diretorio)}</code></span></li>
+    </ul>
+    ${bk.backups.length ? `<details><summary>${bk.backups.length} backup(s) mantido(s)</summary><ul class="lista-simples">${bk.backups.map((b) =>
+      `<li><span>${dataHoraBr(b.criadoEm)} <span class="texto-suave">${b.tipo}${b.motivo === "manual" ? " · manual" : ""}</span></span>
+       <span>${b.ok ? '<span class="saude-ok">✔</span>' : '<span class="saude-alerta">✖</span>'} ${tamanho(b.bytes)} · ${(b.contatos ?? 0).toLocaleString("pt-BR")} contatos</span></li>`).join("")}</ul></details>` : ""}`;
+}
+
+document.getElementById("btn-backup").addEventListener("click", async (ev) => {
+  const btn = ev.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "Fazendo backup…";
+  try {
+    const r = await fetch("/api/saude/backup", { method: "POST" });
+    const corpo = await r.json().catch(() => ({}));
+    if (corpo.resumo) renderizarBackup(corpo.resumo);
+    if (!r.ok) throw new Error(corpo.erro || corpo.error || `erro ${r.status}`);
+  } catch (e) {
+    const aviso = document.getElementById("aviso");
+    aviso.textContent = "⚠ Backup falhou: " + e.message;
+    aviso.classList.add("visivel");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Fazer backup agora";
+  }
+});
 
 // Leads ativos sem ticket, por consultor (clique abre a lista)
 async function carregarSemTicket() {

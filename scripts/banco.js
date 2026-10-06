@@ -4,6 +4,7 @@
 // serve também para inspecionar um banco antigo sem alterá-lo.
 //
 //   node scripts/banco.js conferir   <arquivo.db>
+//   node scripts/banco.js verificar  <arquivo.db>   (integrity_check COMPLETO + conferir; antes de restaurar)
 //   node scripts/banco.js checkpoint <arquivo.db>
 //   node scripts/banco.js backup     <arquivo.db> <destino.db>
 //
@@ -23,7 +24,7 @@ function sair(msg) {
   process.exit(1);
 }
 
-if (!cmd || !arquivo) sair("uso: banco.js conferir|checkpoint|backup <arquivo.db> [destino.db]");
+if (!cmd || !arquivo) sair("uso: banco.js conferir|verificar|checkpoint|backup <arquivo.db> [destino.db]");
 const caminho = path.resolve(arquivo);
 if (!fs.existsSync(caminho)) sair(`${caminho} não existe`);
 
@@ -81,6 +82,20 @@ function conferir() {
 
 async function main() {
   if (cmd === "conferir") return conferir();
+  if (cmd === "verificar") {
+    // integrity_check lê o arquivo inteiro (quick_check do conferir não confere
+    // índices × tabelas). Backup do jonIAs é arquivo único (journal_mode
+    // DELETE); -wal com conteúdo ao lado = alguém gravou nele — não use.
+    if (fs.existsSync(caminho + "-wal") && fs.statSync(caminho + "-wal").size > 0) console.log(`⚠  existe ${path.basename(caminho)}-wal com conteúdo ao lado do arquivo`);
+    const db = new Database(caminho, { readonly: true, fileMustExist: true });
+    const r = db.pragma("integrity_check").map((x) => x.integrity_check);
+    db.close();
+    const ok = r.length === 1 && r[0] === "ok";
+    console.log(`integrity_check  ${ok ? "ok" : r.slice(0, 20).join("\n                 ")}`);
+    conferir();
+    if (!ok) sair("arquivo com problema de integridade — NÃO restaure este");
+    return;
+  }
   if (cmd === "checkpoint") {
     const db = new Database(caminho, { fileMustExist: true });
     // TRUNCATE: passa tudo do -wal para o .db e zera o -wal. busy = 1 quer
@@ -101,6 +116,10 @@ async function main() {
     // gravando, num arquivo único (sem -wal).
     await db.backup(alvo);
     db.close();
+    // arquivo único de verdade (sem WAL); o app religa o WAL ao abrir
+    const w = new Database(alvo, { fileMustExist: true });
+    w.pragma("journal_mode = DELETE");
+    w.close();
     console.log(`backup: ${alvo} (${fs.statSync(alvo).size} B)`);
     return;
   }
