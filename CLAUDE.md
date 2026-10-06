@@ -86,6 +86,7 @@ aula-ai/
 ├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
 ├── scripts/banco.js # manutenção do SQLite: conferir | checkpoint | backup (deploy seguro)
 ├── scripts/viabilidade-rota.js # SÓ LEITURA: estoque de uma campanha da Rota por consultor/regional
+├── scripts/simular-fila.js # SÓ LEITURA: simula a fila da Rota dia a dia numa CÓPIA temporária do banco (rota.js real)
 ├── scripts/diagnostico-pipeline.js # SÓ LEITURA: pipeline por consultor/dia, ticket zero/retroativo, conversão
 ├── scripts/carteira-consultor.js # SÓ LEITURA: carteira de um consultor e as regionais que ficam órfãs se ele sair
 ├── DEPLOY.md        # procedimento de deploy em produção (Docker) e migração do banco p/ o volume
