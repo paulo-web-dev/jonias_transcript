@@ -200,7 +200,7 @@ function renderizarCabecalhoRota(d) {
     aviso.classList.remove("oculto");
     const fila = d.campanha?.nome || r.tipo;
     aviso.textContent = r.itens.length
-      ? `Rota curta: ${r.itens.length} de ${r.cota}. O estoque da fila inteira (${fila}) ${rotaUi.admin ? `da carteira de ${r.nome}` : "da sua carteira"} acabou — a campanha terminou ${rotaUi.admin ? "para ele(a)" : "para você"}.`
+      ? `Rota curta: ${r.itens.length} de ${r.cota}. O estoque da fila inteira (${fila}) ${rotaUi.admin ? `da carteira de ${r.nome}` : "da sua carteira"} acabou por hoje (bloqueios de 7 e 30 dias) — volta a ter contatos conforme os bloqueios vencem.`
       : `Rota vazia: não há mais contatos disponíveis em nenhum setor da fila (${fila}) ${rotaUi.admin ? `na carteira de ${r.nome}` : "na sua carteira"} (bloqueios de 7 e 30 dias).`;
   } else {
     aviso.classList.add("oculto");
@@ -303,12 +303,15 @@ function renderizarPainelRota(p) {
   document.getElementById("rota-painel-data").textContent = rotuloDia(p.data, p.hoje);
   const estoquePor = new Map((e?.porConsultor || []).map((x) => [x.pessoaId, x]));
   const classeDias = (d) => (d < 1 ? "pct-baixo" : d < 3 ? "pct-meio" : "");
-  // setor atual (próxima geração), dias no setor e na fila inteira
+  // ponto do ciclo (próxima geração): setor atual "Finanças, 5ª de 7", dias no
+  // setor e dias para fechar a volta (do setor atual até o último da fila)
   const colunasEstoque = (est) => !est ? `<td class="texto-suave">—</td><td>—</td><td>—</td>`
-    : `<td style="text-align:left" title="${escapeHtml(est.porTipo.map((t) => `${t.nome}: ${t.telefones} telefone(s), ${umaCasa(t.dias)} dia(s)`).join(" · "))}">` +
-      (est.setorAtual ? `${escapeHtml(est.setorAtual)} <small class="texto-suave">(${est.posicaoAtual}º de ${est.porTipo.length})</small>` : `<span class="pct-baixo">fila acabou</span>`) + `</td>
+    : `<td style="text-align:left" title="${escapeHtml(est.porTipo.map((t, k) => `${k + 1}. ${t.nome}: ${t.telefones} telefone(s), ${umaCasa(t.dias)} dia(s)`).join(" · "))}">` +
+      (est.setorAtual ? `${escapeHtml(est.setorAtual)}, <small class="texto-suave">${est.posicaoAtual}ª de ${est.porTipo.length} · volta ${est.ciclo}</small>` +
+        (est.voltaFechando ? ` <span class="chip" title="a volta anterior fecha na próxima geração">nova volta</span>` : "")
+        : `<span class="pct-baixo">fila sem estoque</span>`) + `</td>
       <td class="${classeDias(est.diasAtual)}">${est.setorAtual ? `${umaCasa(est.diasAtual)} <small class="texto-suave">(${inteiro(est.telefonesAtual)})</small>` : "0"}</td>
-      <td class="${classeDias(est.dias)}">${umaCasa(est.dias)} <small class="texto-suave">(${inteiro(est.telefones)})</small></td>`;
+      <td title="fila inteira: ${umaCasa(est.dias)} dia(s), ${inteiro(est.telefones)} telefone(s)">${umaCasa(est.diasVolta)}</td>`;
   const linhas = p.rotasDia.map((r) => {
     const g = r.progresso, est = estoquePor.get(r.pessoaId);
     const curta = g.itens < r.cota;
@@ -338,9 +341,16 @@ function renderizarPainelRota(p) {
       <td>${inteiro(r.universo)}</td><td title="${escapeHtml(r.porTipo.map((t) => `${t.nome}: ${t.telefones}`).join(" · "))}">${inteiro(r.telefones)}</td><td class="${r.dias < 1 ? "pct-baixo" : r.dias < 3 ? "pct-meio" : ""}">${umaCasa(r.dias)}</td></tr>`).join("") ||
     `<tr class="sem-clique"><td colspan="7" class="texto-suave">${e ? "Nenhuma regional com carteira." : "Sem campanha para a próxima geração."}</td></tr>`;
 
-  document.getElementById("rota-historico").innerHTML = c.historico.map((h) =>
-    `<li><span>${escapeHtml(dataBr(h.valeDesde))} — ${h.nome ? `<strong>${escapeHtml(h.nome)}</strong>` : "campanha encerrada"}</span>
-     <span class="texto-suave">${inteiro(h.rotas)} rota(s) · por ${escapeHtml(h.usuario || "—")} em ${escapeHtml(dataHoraBr(h.criadaEm))}</span></li>`).join("") ||
+  // histórico: trocas de fila e voltas completas de cada consultor, por data
+  const eventos = [
+    ...c.historico.map((h) => ({ data: h.valeDesde, html:
+      `<li><span>${escapeHtml(dataBr(h.valeDesde))} — ${h.nome ? `<strong>${escapeHtml(h.nome)}</strong>` : "campanha encerrada"}</span>
+       <span class="texto-suave">${inteiro(h.rotas)} rota(s) · por ${escapeHtml(h.usuario || "—")} em ${escapeHtml(dataHoraBr(h.criadaEm))}</span></li>` })),
+    ...(c.voltas || []).map((v) => ({ data: v.data, html:
+      `<li><span>${escapeHtml(dataBr(v.data))} — 🔁 <strong>${escapeHtml(v.nome)}</strong> completou a volta ${inteiro(v.ciclo)} da fila</span>
+       <span class="texto-suave">iniciada em ${escapeHtml(dataBr(v.inicio))} · ${inteiro(v.dias)} dia(s) de rota</span></li>` })),
+  ].sort((a, b) => b.data.localeCompare(a.data));
+  document.getElementById("rota-historico").innerHTML = eventos.map((e) => e.html).join("") ||
     `<li class="texto-suave">Nenhuma campanha ainda.</li>`;
   renderizarTiposRota();
 }

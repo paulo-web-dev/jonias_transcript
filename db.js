@@ -1305,6 +1305,99 @@ const MIGRACOES = [
     db.exec("CREATE INDEX idx_rota_itens_tipo ON rota_itens(tipo_id)");
     console.log(`migração 31: fila de setores na Rota — ${camp} campanha(s) viraram fila de um tipo; ${itens} item(ns) de rota com o tipo da rota.`);
   },
+
+  // 32 — FILA CÍCLICA e as 7 campanhas por CURSO (decisões do usuário,
+  // 2026-10-06). Com a regra da 31 (volta ao primeiro tipo com estoque) a
+  // simulação em produção mostrou as campanhas 6 e 7 nunca alcançadas em dois
+  // meses: o bloqueio de 30 dias da 1ª vence antes do fim da fila. Agora cada
+  // consultor anda de 1 a 7 e só volta ao 1 depois do fim (ver gerarRotas).
+  // Estado do ciclo gravado na própria rota (refazer a rota futura desfaz o
+  // ponteiro junto): `ciclo` = volta no início do dia, `ponteiro_tipo_id` =
+  // onde o dia seguinte começa, `ciclo_concluido` = a volta fechou nesta rota.
+  // Rotas anteriores ficam com ciclo NULL (não contam volta).
+  // Tipos: "Licitação" é RENOMEADO para "Licitação com IA" (mesmo id — o
+  // bloqueio por telefone do que foi ligado desde 01/10 continua valendo) e
+  // ganha as abas de compras/pregão/contratos; os outros 6 são criados. Aba
+  // que não existir na base é mantida no tipo (não casa com contato nenhum) e
+  // listada no log. A fila 1→7 vale no próximo dia útil; as rotas futuras que
+  // ninguém começou são descartadas (como "refazer as rotas futuras" do painel).
+  () => {
+    db.exec(`
+      ALTER TABLE rotas ADD COLUMN ciclo INTEGER;
+      ALTER TABLE rotas ADD COLUMN ponteiro_tipo_id INTEGER REFERENCES rota_tipos(id);
+      ALTER TABLE rotas ADD COLUMN ciclo_concluido INTEGER NOT NULL DEFAULT 0;
+    `);
+    const abas = (uf, lista) => lista.map((setor) => ({ uf, setor }));
+    const CAMPANHAS = [
+      ["Licitação com IA", [
+        ...abas("PR", ["LICITAÇÃO PM", "LICITAÇÃO CM", "LICITAÇÃO PM - com população", "Licitação CM com Papulação"]),
+        ...abas("SC", ["LICITAÇÃO PM", "LICITAÇÃO CM"]),
+        ...abas("PR", ["Compras PM", "Compras CM"]), ...abas("SC", ["COMPRAS"]),
+        ...abas("PR", ["PREGOEIRO"]), ...abas("SC", ["PREGOEIRO", "SAUDE LICITACAO"]),
+        ...abas("PR", ["ETP E TR", "GESTOR E FISCAL DE CONTRATOS"]), ...abas("SC", ["Agente de contrataçãoFiscais"])]],
+      ["Comunicação Pública 360º", [
+        ...abas("PR", ["COMUNICAÇÃO PM", "COMUNICAÇÃO CM", "SECOM"]), ...abas("SC", ["COMUNICAÇÃO PM", "COMUNICAÇÃO CM"]),
+        ...abas("PR", ["ASSESSOR PM", "ASSESSOR CM"]), ...abas("SC", ["ASSESSOR PM", "ASSESSOR CM"])]],
+      // "Controle interno" é ESCOLHA FRACA (ver CLAUDE.md): sem ele a campanha não existe
+      ["Portal e Ouvidoria", [
+        ...abas("PR", ["TRANSPARENCIA PM", "Controle interno", "Controle Interno - CM"]),
+        ...abas("SC", ["CONTROLE INTERNO PM", "CONTROLE INTERNO CM"])]],
+      ["Patrimônio", [
+        ...abas("PR", ["PATRIMONIO PM", "FROTAS E PATRIMONIO PM", "Patrimonio CM"]),
+        ...abas("SC", ["PATRIMONIOFROTAS PM", "PATRIMONIOFROTAS CM"])]],
+      ["Finanças", [
+        ...abas("PR", ["FINANÇAS PM", "TESOURARIA PM", "TESOURARIA CM", "CONTABILIDADE PM", "CONTABILIDADE CM"]),
+        ...abas("SC", ["TESOURARIA PM", "TESOURARIA CM", "CONTABILIDADE PM", "CONTABILIDADE CM"])]],
+      ["Tributação Municipal", [...abas("PR", ["TRIBUTAÇÃO"]), ...abas("SC", ["PM TRIBUTAÇÃO"])]],
+      // todas as abas CM; o público do curso primeiro (o contato escolhido
+      // para cada telefone segue a ordem das abas — ~5 abas por número da câmara)
+      ["IA na Câmara Municipal", [
+        ...abas("PR", ["Legislativo CM", "Chefe de Gabinete CM", "ASSESSOR CM", "Servidores CM"]),
+        ...abas("SC", ["LEGISLATIVO CM", "ASSESSOR CM"]),
+        ...abas("PR", ["COMUNICAÇÃO CM", "CONTABILIDADE CM", "Compras CM", "Controle Interno - CM", "JURIDICO CM", "LICITAÇÃO CM",
+          "Licitação CM com Papulação", "Patrimonio CM", "RH CM", "TESOURARIA CM"]),
+        ...abas("SC", ["COMUNICAÇÃO CM", "CONTABILIDADE CM", "CONTROLE INTERNO CM", "JURIDICO CM", "LICITAÇÃO CM",
+          "PATRIMONIOFROTAS CM", "RH CM", "TESOURARIA CM"])]],
+    ];
+    const existe = new Set(db.prepare("SELECT DISTINCT uf || '|' || setor k FROM contatos_ativo").all().map((r) => r.k));
+    const agora = new Date().toISOString();
+    const ids = [];
+    for (const [nome, setores] of CAMPANHAS) {
+      const faltam = setores.filter((s) => !existe.has(`${s.uf}|${s.setor}`));
+      if (existe.size && faltam.length) console.warn(`⚠ migração 32: "${nome}" — aba(s) inexistente(s) na base: ${faltam.map((s) => `${s.uf} "${s.setor}"`).join(", ")}`);
+      const atual = db.prepare("SELECT id FROM rota_tipos WHERE nome = ?").get(nome)
+        ?? (nome === "Licitação com IA" ? db.prepare("SELECT id FROM rota_tipos WHERE nome = 'Licitação'").get() : null);
+      if (atual) {
+        db.prepare("UPDATE rota_tipos SET nome = ?, setores_json = ?, ativo = 1, atualizado_em = ? WHERE id = ?")
+          .run(nome, JSON.stringify(setores), agora, atual.id);
+        ids.push(atual.id);
+      } else {
+        ids.push(Number(db.prepare("INSERT INTO rota_tipos (nome, setores_json, cota, ativo, criado_em) VALUES (?, ?, 45, 1, ?)")
+          .run(nome, JSON.stringify(setores), agora).lastInsertRowid));
+      }
+    }
+    const cmFora = db.prepare("SELECT DISTINCT uf, setor FROM contatos_ativo WHERE orgao = 'CM'").all()
+      .filter((r) => !CAMPANHAS[6][1].some((s) => s.uf === r.uf && s.setor === r.setor));
+    if (cmFora.length) console.warn(`⚠ migração 32: aba(s) CM da base fora de "IA na Câmara Municipal": ${cmFora.map((s) => `${s.uf} "${s.setor}"`).join(", ")}`);
+
+    // fila 1→7 no próximo dia útil (Brasília), descartando as rotas futuras sem baixa
+    const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const descartadas = db.prepare(
+      `DELETE FROM rotas WHERE data > ? AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`
+    ).run(hoje).changes;
+    const proximoUtil = (iso) => {
+      const d = new Date(`${iso}T12:00:00Z`);
+      do d.setUTCDate(d.getUTCDate() + 1); while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+      return d.toISOString().slice(0, 10);
+    };
+    let vale = proximoUtil(hoje);
+    while (db.prepare("SELECT 1 FROM rotas WHERE data = ? LIMIT 1").get(vale)) vale = proximoUtil(vale);
+    db.prepare("DELETE FROM rota_campanhas WHERE vale_desde >= ? AND NOT EXISTS (SELECT 1 FROM rotas r WHERE r.campanha_id = rota_campanhas.id)").run(vale);
+    db.prepare("INSERT INTO rota_campanhas (tipo_id, fila_json, vale_desde, criada_em) VALUES (?, ?, ?, ?)")
+      .run(ids[0], JSON.stringify(ids), vale, agora);
+    console.log(`migração 32: fila cíclica na Rota — tipos ${CAMPANHAS.map(([n], k) => `${k + 1}. ${n} (#${ids[k]})`).join(", ")}; ` +
+      `fila 1→7 a partir de ${vale}; ${descartadas} rota(s) futura(s) sem baixa descartada(s).`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

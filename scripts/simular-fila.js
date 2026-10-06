@@ -4,7 +4,8 @@
 // apagado ao fim), usando o próprio rota.js: mesmos bloqueios, mesma geração,
 // mesmas carteiras. Responde "a campanha N ainda tem estoque quando a N-1
 // acaba?" com as regras reais (opção B: por telefone dentro do tipo, por
-// contato entre tipos; 30 dias com baixa, 7 sem; um telefone por dia).
+// contato entre tipos; 30 dias com baixa, 7 sem; um telefone por dia) e a
+// regra da fila do código que estiver rodando (cíclica desde a migração 32).
 //
 //   node scripts/simular-fila.js <banco.db> [--dias=45] [--baixa=100] [--refazer] [--licitacao=editar|novo] [--setores]
 //   docker compose exec -T jonias node - /app/data/aula-ai.db --setores < scripts/simular-fila.js
@@ -102,9 +103,12 @@ const MAPA = [
   const cm = db.prepare("SELECT DISTINCT uf, setor FROM contatos_ativo WHERE orgao = 'CM' ORDER BY uf, setor").all()
     .sort((a, b) => !PRIMEIRO_CM.test(a.setor) - !PRIMEIRO_CM.test(b.setor));
 
-  // tipos na cópia
+  // tipos e fila na cópia: com a migração 32 já vêm do db.js (a cópia migra
+  // ao abrir); numa imagem anterior, o MAPA abaixo cria tudo
+  const daMigracao = MAPA.every((c) => db.prepare("SELECT 1 FROM rota_tipos WHERE nome = ? AND ativo = 1").get(c.nome));
   const fila = [];
-  for (const c of MAPA) {
+  if (daMigracao) for (const c of MAPA) fila.push(rota.lerTipo(db.prepare("SELECT id FROM rota_tipos WHERE nome = ?").get(c.nome).id));
+  for (const c of daMigracao ? [] : MAPA) {
     const lista = c.setores === "CM" ? cm.map((s) => [s.uf, s.setor]) : c.setores;
     const faltam = lista.filter(([u, s]) => !existe.has(`${u}|${s}`));
     if (faltam.length) log(`⚠ ${c.nome}: aba(s) inexistente(s) neste banco, ignorada(s): ${faltam.map(([u, s]) => `${u} "${s}"`).join(", ")}`);
@@ -120,8 +124,13 @@ const MAPA = [
     db.prepare(`DELETE FROM rotas WHERE data > ? AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`).run(hoje);
   }
   const inicio = rota.proximaDataSemRota(hoje);
-  db.prepare("INSERT INTO rota_campanhas (tipo_id, fila_json, vale_desde, criada_em) VALUES (?, ?, ?, ?)")
-    .run(fila[0].id, JSON.stringify(fila.map((t) => t.id)), inicio, new Date().toISOString());
+  const vigente = rota.campanhaVigente(inicio);
+  if (vigente?.fila.map((t) => t.id).join() !== fila.map((t) => t.id).join()) {
+    db.prepare("INSERT INTO rota_campanhas (tipo_id, fila_json, vale_desde, criada_em) VALUES (?, ?, ?, ?)")
+      .run(fila[0].id, JSON.stringify(fila.map((t) => t.id)), inicio, new Date().toISOString());
+  }
+  const cicloNaRota = !!db.prepare("SELECT 1 FROM pragma_table_info('rotas') WHERE name = 'ciclo'").get();
+  log(`regra da fila: ${cicloNaRota ? "CÍCLICA (migração 32 — cada um anda do 1º ao último e só então volta ao 1º)" : "volta ao primeiro tipo com estoque (migração 31)"}`);
 
   // baixa determinística: o mesmo item sempre cai do mesmo lado
   const recebeBaixa = (id) => ((id * 2654435761) % 1000) / 1000 < BAIXA;
@@ -170,6 +179,17 @@ const MAPA = [
     log(`  ${k + 1}. ${t.nome.padEnd(26)} ${String(x.itens).padStart(5)} itens · ${String(x.dias).padStart(2)} dia(s)` +
       (x.primeiro ? ` · de ${x.primeiro} a ${x.ultimo}` : " · NUNCA ALCANÇADA no período"));
   });
+  if (cicloNaRota) {
+    const voltas = db.prepare(
+      `SELECT r.data, r.ciclo, r.pessoa_id p,
+         (SELECT MIN(x.data) FROM rotas x WHERE x.pessoa_id = r.pessoa_id AND x.ciclo = r.ciclo) inicio,
+         (SELECT COUNT(*) FROM rotas x WHERE x.pessoa_id = r.pessoa_id AND x.ciclo = r.ciclo) dias
+       FROM rotas r WHERE r.ciclo_concluido = 1 AND r.data >= ? ORDER BY r.data, r.pessoa_id`).all(inicio);
+    log(`
+VOLTAS COMPLETAS (o dia em que o consultor passou do ${fila.length}º para o 1º)`);
+    for (const v of voltas) log(`  ${(pessoas.get(v.p) || v.p).padEnd(10)} volta ${v.ciclo}: ${v.inicio} → ${v.data} · ${v.dias} dias úteis de rota`);
+    if (!voltas.length) log("  nenhuma no período");
+  }
   if (diasCurtos.size) log(`\nrota curta (abaixo da cota) — dias: ${[...diasCurtos].map(([id, n]) => `${pessoas.get(id) || id} ${n}`).join(" · ")}`);
   for (const [k, n] of avisosRota) log(`aviso do rota.js (${n}×): ${k}`);
   db.close();  // no Windows o arquivo aberto não sai

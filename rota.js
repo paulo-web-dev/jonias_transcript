@@ -328,13 +328,44 @@ function fasesDaFila(campanha, data) {
 // Estoque de um consultor em cada tipo da fila (elegíveis, um por telefone)
 const elegiveisNaFila = (pessoa, fases) => fases.map((f) => elegiveisDe(pessoa, f.candidatos, f.bloqueados));
 
+// FILA CÍCLICA (migração 32): ponto do ciclo do consultor para gerar a data —
+// a rota mais recente ANTES dela que gravou o ponteiro. `inicio` = índice em
+// `fases` do tipo em que o dia começa; `ciclo` = número da volta. Sem rota
+// anterior da fila cíclica: volta 1, primeiro tipo. Tipo do ponteiro que saiu
+// da fila → primeiro da fila (decisão do usuário); inativado → o próximo
+// ativo depois dele.
+function pontoDoCiclo(pessoaId, data, campanha, fases) {
+  const r = db.prepare(
+    `SELECT ciclo, ciclo_concluido concluido, ponteiro_tipo_id ponteiro FROM rotas
+     WHERE pessoa_id = ? AND data < ? AND ciclo IS NOT NULL ORDER BY data DESC LIMIT 1`
+  ).get(pessoaId, data);
+  if (!r) return { ciclo: 1, inicio: 0 };
+  let inicio = fases.findIndex((f) => f.tipo.id === r.ponteiro);
+  if (inicio < 0) {
+    const ordem = campanha.fila.map((t) => t.id);
+    const p = ordem.indexOf(r.ponteiro);
+    inicio = p < 0 ? 0 : Math.max(0, fases.findIndex((f) => ordem.indexOf(f.tipo.id) > p));
+  }
+  return { ciclo: r.ciclo + r.concluido, inicio };
+}
+
+// Uma volta pela fila a partir do ponteiro: [k, k+1, …, último, 0, …, k−1]
+const voltaDesde = (inicio, n) => Array.from({ length: n }, (_, j) => (inicio + j) % n);
+
 // Gera as rotas que faltam na data (consultor com carteira e sem rota no dia).
 // Tudo numa transação: dois consultores da mesma regional nunca recebem o
 // mesmo telefone, e uma rota já gerada nunca é tocada.
-// FILA (migração 31): uma fase por tipo, na ordem. Na fase k entram os
-// consultores que ainda não encheram a cota — quem tem estoque no 1º tipo
-// começa nele; quem esgotou já começa no 2º; quem enche só parte da cota no
-// 1º completa com o 2º no mesmo dia. Um telefone por dia em todas as rotas.
+// FILA CÍCLICA (migração 32, decisão do usuário 2026-10-06; antes, migração
+// 31, cada um voltava ao primeiro tipo com estoque e os últimos da fila nunca
+// eram alcançados): cada consultor tem um PONTEIRO e anda pela fila a partir
+// dele, completando a cota com os tipos seguintes no mesmo dia (dando a volta
+// se preciso). No fim, o ponteiro vai para o primeiro tipo da volta que ainda
+// tem estoque — elegíveis menos os telefones postos hoje em rota NAQUELE tipo
+// e os contatos usados hoje (telefone que um colega pegou hoje em OUTRO tipo
+// só está indisponível hoje: não empurra o ponteiro). Passar do último para o
+// primeiro = volta concluída (`rotas.ciclo_concluido`). Sem estoque na volta
+// inteira, o ponteiro fica e nenhuma volta é registrada. Um telefone por dia
+// em todas as rotas; consultores em tipos diferentes intercalam no rodízio.
 function gerarRotas(data, { usuarioId = null } = {}) {
   if (!RE_DATA.test(String(data || ""))) throw erro("Data inválida — use AAAA-MM-DD.");
   const campanha = campanhaVigente(data);
@@ -349,16 +380,21 @@ function gerarRotas(data, { usuarioId = null } = {}) {
     const tomados = new Set();          // telefones (chave) já em alguma rota do dia
     const contatosTomados = new Set();  // tipos com abas em comum não repetem o contato
 
+    const tomadosNoTipo = fases.map(() => new Set());  // telefones postos hoje em rota, por tipo
+
     const estados = consultores.map((p) => {
       const porFase = elegiveisNaFila(p, fases).map((elegiveis) => {
         const pool = new Map();
         for (const c of elegiveis) (pool.get(c.codigo) ?? pool.set(c.codigo, []).get(c.codigo)).push(c);
         for (const lista of pool.values()) lista.sort(ordemNoMunicipio);
-        return { pool, n: elegiveis.length };
+        return { pool, elegiveis, n: elegiveis.length };
       });
-      const inicio = Math.max(0, porFase.findIndex((f) => f.n > 0));
-      const tipoRota = fases[inicio].tipo;
-      return { pessoa: p, porFase, tipoRota, elegiveis: porFase.reduce((t, f) => t + f.n, 0), itens: [], ultimo: null, restante: tipoRota.cota };
+      const ponto = pontoDoCiclo(p.id, data, campanha, fases);
+      const volta = voltaDesde(ponto.inicio, fases.length);
+      const primeira = volta.find((k) => porFase[k].n > 0) ?? ponto.inicio;
+      const tipoRota = fases[primeira].tipo;
+      return { pessoa: p, porFase, ponto, volta, passo: 0, tipoRota, elegiveis: porFase.reduce((t, f) => t + f.n, 0),
+        itens: [], ultimo: null, restante: tipoRota.cota, visitados: new Set(), pool: porFase[ponto.inicio].pool };
     });
     // rodízio: cada um escolhe um município por vez; a ordem gira a cada dia
     const giro = Math.round(new Date(`${data}T12:00:00Z`).getTime() / 864e5) % estados.length;
@@ -382,35 +418,43 @@ function gerarRotas(data, { usuarioId = null } = {}) {
         .map((m) => [m, pontuar(s, m)])
         .sort((a, b) => b[1][0] - a[1][0] || b[1][1] - a[1][1] || a[0] - b[0])[0][0];
     }
-    fases.forEach((fase, k) => {
-      // o último município da fase anterior continua valendo: o tipo seguinte
-      // começa perto de onde o consultor parou
-      for (const s of estados) Object.assign(s, { pool: s.porFase[k].pool, visitados: new Set(), fim: false });
-      let andou = true;
-      while (andou) {
-        andou = false;
-        for (const s of ordem) {
-          if (s.fim || s.restante <= 0) continue;
-          const m = proximoMunicipio(s);
-          if (m === null) { s.fim = true; continue; }
-          s.visitados.add(m);
-          s.ultimo = m;
-          for (const c of livres(s, m)) {
-            if (s.restante <= 0) break;
-            tomados.add(c.chave);
-            contatosTomados.add(c.id);
-            s.itens.push({ ...c, tipoId: fase.tipo.id });
-            s.restante--;
-          }
-          andou = true;
+    // cada um anda na própria volta; ao esgotar o tipo, passa ao seguinte (o
+    // último município continua valendo: o tipo seguinte começa perto de onde
+    // o consultor parou)
+    let andou = true;
+    while (andou) {
+      andou = false;
+      for (const s of ordem) {
+        if (s.restante <= 0 || s.passo >= s.volta.length) continue;
+        const k = s.volta[s.passo];
+        s.pool = s.porFase[k].pool;
+        const m = proximoMunicipio(s);
+        andou = true;
+        if (m === null) { s.passo++; s.visitados = new Set(); continue; }
+        s.visitados.add(m);
+        s.ultimo = m;
+        for (const c of livres(s, m)) {
+          if (s.restante <= 0) break;
+          tomados.add(c.chave);
+          tomadosNoTipo[k].add(c.chave);
+          contatosTomados.add(c.id);
+          s.itens.push({ ...c, tipoId: fases[k].tipo.id });
+          s.restante--;
         }
       }
-    });
+    }
+    // ponteiro para o próximo dia e volta concluída
+    for (const s of estados) {
+      const resta = (k) => s.porFase[k].elegiveis.some((c) => !tomadosNoTipo[k].has(c.chave) && !contatosTomados.has(c.id));
+      const proximo = s.volta.find(resta);
+      s.ponteiro = fases[proximo ?? s.ponto.inicio].tipo.id;
+      s.concluiu = proximo !== undefined && proximo < s.ponto.inicio ? 1 : 0;
+    }
 
     const agora = new Date().toISOString();
     const insRota = db.prepare(
-      `INSERT INTO rotas (pessoa_id, data, campanha_id, tipo_id, setores_json, cota, elegiveis, gerada_em, gerada_por)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO rotas (pessoa_id, data, campanha_id, tipo_id, setores_json, cota, elegiveis, gerada_em, gerada_por, ciclo, ponteiro_tipo_id, ciclo_concluido)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insItem = db.prepare(
       "INSERT INTO rota_itens (rota_id, contato_id, posicao, telefone, setor, codigo_ibge, tipo_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -420,12 +464,15 @@ function gerarRotas(data, { usuarioId = null } = {}) {
     let itens = 0;
     const curtas = [];
     for (const s of estados) {
-      const rotaId = insRota.run(s.pessoa.id, data, campanha.id, s.tipoRota.id, setoresFila, s.tipoRota.cota, s.elegiveis, agora, usuarioId).lastInsertRowid;
+      const rotaId = insRota.run(s.pessoa.id, data, campanha.id, s.tipoRota.id, setoresFila, s.tipoRota.cota, s.elegiveis, agora, usuarioId,
+        s.ponto.ciclo, s.ponteiro, s.concluiu).lastInsertRowid;
       s.itens.forEach((c, i) => insItem.run(rotaId, c.id, i + 1, c.telefone, c.setor, c.codigo, c.tipoId));
       itens += s.itens.length;
       if (s.itens.length < s.tipoRota.cota) curtas.push(`${s.pessoa.nome} ${s.itens.length}/${s.tipoRota.cota}`);
     }
-    return { data, campanha: campanha.nome, geradas: estados.length, itens, curtas };
+    const voltas = estados.filter((s) => s.concluiu).map((s) => `${s.pessoa.nome} (volta ${s.ponto.ciclo})`);
+    if (voltas.length) console.log(`rota ${data}: volta da fila concluída — ${voltas.join(", ")}`);
+    return { data, campanha: campanha.nome, geradas: estados.length, itens, curtas, voltas };
   })();
 }
 
@@ -691,19 +738,27 @@ function estoqueDaFila(data, campanha) {
       diasEquipe: n ? totaisFase[k] / (f.tipo.cota * n) : 0 })),
     telefones: totaisFase.reduce((a, b) => a + b, 0),
     diasEquipe: n ? fases.reduce((t, f, k) => t + totaisFase[k] / (f.tipo.cota * n), 0) : 0,
+    // setor atual = onde a próxima rota começa (ponteiro, pulando tipo sem
+    // estoque); dias para fechar a volta = do setor atual até o último da
+    // fila (estimativa: o bloqueio vence no caminho e colegas da regional
+    // dividem o estoque). Atual antes do ponteiro = a volta fecha na próxima geração.
     porConsultor: porPessoa.map((x) => {
       const porTipo = fases.map((f, k) => ({ nome: f.tipo.nome, telefones: x.porFase[k].length, dias: x.porFase[k].length / f.tipo.cota }));
-      const atual = porTipo.findIndex((t) => t.telefones > 0);
+      const ponto = pontoDoCiclo(x.pessoa.id, data, campanha, fases);
+      const atual = voltaDesde(ponto.inicio, fases.length).find((k) => porTipo[k].telefones > 0) ?? -1;
+      const fechando = atual >= 0 && atual < ponto.inicio;
       return {
-        pessoaId: x.pessoa.id, nome: x.pessoa.nome, porTipo,
+        pessoaId: x.pessoa.id, nome: x.pessoa.nome, porTipo, ciclo: ponto.ciclo + (fechando ? 1 : 0),
         setorAtual: atual >= 0 ? porTipo[atual].nome : null,
         posicaoAtual: atual >= 0 ? atual + 1 : null,
         telefonesAtual: atual >= 0 ? porTipo[atual].telefones : 0,
         diasAtual: atual >= 0 ? porTipo[atual].dias : 0,
+        diasVolta: atual >= 0 ? porTipo.slice(atual).reduce((t, p) => t + p.dias, 0) : 0,
+        voltaFechando: fechando,
         telefones: porTipo.reduce((t, p) => t + p.telefones, 0),
         dias: porTipo.reduce((t, p) => t + p.dias, 0),
       };
-    }).sort((a, b) => a.dias - b.dias),
+    }).sort((a, b) => a.diasVolta - b.diasVolta),
     porRegional: [...regionais.values()].filter((r) => comCarteira.has(r.id)).map((r) => {
       const vinculados = (r.titular ? 1 : 0) + r.apoios.length;
       const tel = r.telefones.map((t) => t.size);
@@ -766,6 +821,15 @@ function painel(dataArg) {
      FROM rota_campanhas c LEFT JOIN usuarios u ON u.id = c.usuario_id
      ORDER BY c.vale_desde DESC, c.id DESC LIMIT 12`
   ).all().map(comFila);
+  // voltas completas da fila cíclica (a rota em que o ponteiro passou do
+  // último tipo para o primeiro), com o início da volta e os dias de rota dela
+  const voltas = db.prepare(
+    `SELECT r.data, r.ciclo, p.nome,
+       (SELECT MIN(x.data) FROM rotas x WHERE x.pessoa_id = r.pessoa_id AND x.ciclo = r.ciclo) inicio,
+       (SELECT COUNT(*) FROM rotas x WHERE x.pessoa_id = r.pessoa_id AND x.ciclo = r.ciclo) dias
+     FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id WHERE r.ciclo_concluido = 1
+     ORDER BY r.data DESC, p.nome LIMIT 30`
+  ).all();
 
   // rotas do dia escolhido, com os tipos da fila que entraram em cada uma
   const rotasDia = db.prepare(
@@ -792,7 +856,7 @@ function painel(dataArg) {
   return {
     hoje, hora, data, proximaGeracao: proxima, horaGeracao: HORA_GERACAO, sobreposicao: sobre,
     bloqueio: { dias: BLOQUEIO_DIAS, semLigacaoDias: BLOQUEIO_SEM_LIGACAO_DIAS },
-    campanha: { hoje: campanhaHoje, dia: campanhaDia, proxima: campanhaProxima, historico },
+    campanha: { hoje: campanhaHoje, dia: campanhaDia, proxima: campanhaProxima, historico, voltas },
     rotasDia, estoque: estoqueInfo, acumulados, tipos: listarTipos(),
   };
 }

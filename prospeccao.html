@@ -121,7 +121,7 @@
         <h2 class="secao-titulo">Rotas do dia <span class="texto-suave" id="rota-painel-data"></span></h2>
         <div class="tabela-scroll">
           <table class="tabela-metricas" id="tabela-rotas-dia">
-            <thead><tr><th style="text-align:left">Consultor</th><th>Rota</th><th>Feitas</th><th>%</th><th>Atendidas</th><th>Baixa manual</th><th>Pendentes</th><th style="text-align:left">Progresso</th><th style="text-align:left" title="primeiro setor da fila em que o consultor tem estoque na próxima geração">Setor atual</th><th title="telefones disponíveis no setor atual ÷ cota do setor">Dias no setor</th><th title="Σ telefones de cada setor da fila ÷ cota do setor">Dias na fila</th></tr></thead>
+            <thead><tr><th style="text-align:left">Consultor</th><th>Rota</th><th>Feitas</th><th>%</th><th>Atendidas</th><th>Baixa manual</th><th>Pendentes</th><th style="text-align:left">Progresso</th><th style="text-align:left" title="ponto do ciclo na próxima geração: a fila é cíclica — cada consultor anda do 1º ao último setor e só então volta ao 1º">Setor atual</th><th title="telefones disponíveis no setor atual ÷ cota do setor">Dias no setor</th><th title="Σ telefones do setor atual até o último da fila ÷ cota de cada setor (estimativa: o bloqueio vence no caminho e colegas da regional dividem o estoque)">Dias p/ fechar a volta</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>

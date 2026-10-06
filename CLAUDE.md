@@ -175,7 +175,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **31**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **32**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -581,8 +581,9 @@ abandonado). Fase 1 = carga com fidelidade total:
   IA**). Lista diária de ligações por consultor, gerada automaticamente.
   Decisões do usuário: a rota era uma **CAMPANHA POR SETOR** (um tipo só,
   nunca misturava setores). **Desde a migração 31 (2026-10-05) a campanha é
-  uma FILA ORDENADA de tipos** — ver "Fila de setores" no roadmap; rota curta
-  só quando a fila inteira acabou para o consultor.
+  uma FILA ORDENADA de tipos**, e **desde a 32 (2026-10-06) a fila é CÍCLICA**
+  com as 7 campanhas por curso — ver "Fila de setores" e "Fila cíclica" no
+  roadmap; rota curta só quando a volta inteira está sem estoque (bloqueios).
   `rota_tipos(id, nome, setores_json [{uf, setor}] com o nome EXATO da aba,
   cota=45, ativo)` — seed "Licitação" = PR `LICITAÇÃO PM`, `LICITAÇÃO CM`,
   `LICITAÇÃO PM - com população`, `Licitação CM com Papulação` e SC
@@ -1260,9 +1261,9 @@ Decisões do usuário em 2026-10-05:
   tipos montada no painel (↑ ↓ ✕, "+ adicionar", "Salvar fila" em dois
   cliques). Geração por FASES (`gerarRotas`): cada consultor começa no
   primeiro tipo com estoque e, se não enche a cota, completa com o próximo no
-  mesmo dia; cada um anda sozinho e **volta** a um tipo anterior quando o
-  bloqueio dele vence (decisão do usuário: regra literal "primeiro tipo com
-  estoque"). Cota da rota = a do tipo em que ela começa. **Um telefone por dia
+  mesmo dia; cada um anda sozinho e **voltava** a um tipo anterior quando o
+  bloqueio dele vencia (regra literal "primeiro tipo com estoque" —
+  **substituída pela fila cíclica na migração 32**, ver abaixo). Cota da rota = a do tipo em que ela começa. **Um telefone por dia
   em todas as rotas, mesmo entre tipos** (a baixa pelo CDR é pelo número);
   como ~84% dos números são o geral da prefeitura, completar com o próximo
   setor tende a usar outros municípios no mesmo dia. Bloqueio por telefone =
@@ -1276,6 +1277,72 @@ Decisões do usuário em 2026-10-05:
   pulado (log).
 - **Prêmio pelo pipeline acumulado da semana** — ver Fase 2 da meta de
   pipeline acima (`pipeline.elegivel`, `pct`, `faltaSemanaCentavos`).
+
+### ✅ Fila cíclica e as 7 campanhas por curso (2026-10-06, migração 32)
+Motivo: `scripts/simular-fila.js` (só leitura; simula a fila dia a dia numa
+cópia temporária do banco com o `rota.js` real) rodado em produção mostrou
+que, com a regra da 31, as campanhas 6 e 7 **nunca** eram alcançadas em dois
+meses (07/10 a 08/12): o bloqueio de 30 dias da 1ª vence antes do fim da fila
+e todos voltavam a ela. As campanhas NÃO consomem o estoque umas das outras
+(entre tipos o bloqueio é por contato e as abas são outras), embora 87–97%
+dos telefones de cada uma já tenham sido ligados numa anterior (número geral
+da prefeitura) — o limite era só a volta ao 1º tipo.
+- **Campanhas = CURSOS** (decisão do usuário; um tipo de rota por curso, com
+  as abas de quem compra aquele curso — evidência: 248 matrículas casadas por
+  e-mail com contatos da prospecção), na ordem da fila:
+  1. **Licitação com IA** — o tipo "Licitação" RENOMEADO (mesmo id: o
+     bloqueio por telefone do que foi ligado desde 01/10 continua; rotas
+     antigas passam a exibir o nome novo) + Compras PM/CM, COMPRAS (SC),
+     PREGOEIRO (PR/SC), SAUDE LICITACAO, ETP E TR, GESTOR E FISCAL DE
+     CONTRATOS, Agente de contrataçãoFiscais;
+  2. **Comunicação Pública 360º** — COMUNICAÇÃO PM/CM, SECOM, ASSESSOR PM/CM
+     (assessor atende tudo, mas a campanha precisa do volume e 7 matrículas
+     casadas dão respaldo — decisão do usuário);
+  3. **Portal e Ouvidoria** — TRANSPARENCIA PM, Controle interno, Controle
+     Interno - CM, CONTROLE INTERNO PM/CM. ⚠ **"Controle interno" é ESCOLHA
+     FRACA**: entrou porque sem ele a campanha não existe (TRANSPARENCIA PM
+     sozinha tem 91 aptos). **Se a conversão da campanha 3 vier baixa, é o
+     primeiro suspeito.**
+  4. **Patrimônio** — PATRIMONIO PM, FROTAS E PATRIMONIO PM, Patrimonio CM,
+     PATRIMONIOFROTAS PM/CM;
+  5. **Finanças** — FINANÇAS PM, TESOURARIA e CONTABILIDADE PM/CM;
+  6. **Tributação Municipal** — TRIBUTAÇÃO (PR), PM TRIBUTAÇÃO (SC);
+  7. **IA na Câmara Municipal** — TODAS as 24 abas CM (confirmado nos dados:
+     ~5 abas por número da câmara, 7.204 contatos em 1.437 telefones — na
+     prática liga-se uma vez para cada câmara); Legislativo, Chefe de
+     Gabinete, Assessor e Servidores primeiro (o contato escolhido por
+     telefone segue a ordem das abas). 64% desses contatos estão também nas
+     campanhas 1–5: dentro de 30 dias delas ficam bloqueados por contato.
+  Fora de todas: RH, Servidores, Jurídico, Educação, Engenheiros, Obras, Meio
+  Ambiente, Planejamento, Gabinete PM, LEGISLATIVO PM (SC), GM, Página28, EX
+  PLANILHA PM, RPPS/Autarquia, SAÚDE PM (0 aptos).
+- **Regra cíclica** (`gerarRotas` + `pontoDoCiclo` em `rota.js`): cada
+  consultor tem um PONTEIRO e anda pela fila a partir dele, completando a
+  cota com os tipos seguintes no mesmo dia (dando a volta se preciso). No fim
+  da geração, o ponteiro vai para o primeiro tipo da volta que ainda tem
+  estoque — elegíveis menos telefones postos hoje em rota NAQUELE tipo e
+  contatos usados hoje; telefone que um colega pegou hoje em OUTRO tipo
+  (um telefone por dia) só está indisponível hoje e não empurra o ponteiro.
+  Passar do último para o primeiro = **volta concluída**. Volta inteira sem
+  estoque: ponteiro parado, nenhuma volta registrada. Nunca volta a um tipo
+  anterior no meio da volta (item sem baixa espera a próxima volta).
+- Estado **na própria rota** (`rotas.ciclo` = volta no início do dia,
+  `ponteiro_tipo_id` = onde o dia seguinte começa, `ciclo_concluido`):
+  "refazer as rotas futuras" desfaz ponteiro e volta junto. Rotas anteriores
+  à 32 têm ciclo NULL (todos começam na volta 1, tipo 1). Troca de fila: o
+  ponteiro fica no tipo se ele continua na fila; se saiu, vai ao primeiro
+  (sem registrar volta); tipo inativado → o próximo ativo.
+- Painel: "Setor atual" = "Finanças, 5ª de 7 · volta N" (chip "nova volta"
+  quando fecha na próxima geração), "Dias no setor" e **"Dias p/ fechar a
+  volta"** (do setor atual até o último ÷ cota; estimativa). O histórico de
+  campanhas intercala as voltas completas ("🔁 Frederico completou a volta 1
+  — iniciada em …, N dias de rota"; `painel().campanha.voltas`); o log da
+  geração também registra.
+- A migração descarta as rotas futuras sem baixa (a de amanhã volta a ser
+  gerada com a fila nova) e agenda a fila 1→7 no próximo dia útil.
+- Simulação local (equipe hipotética de 5 cobrindo as 40 regionais, 60 dias
+  úteis, tudo ligado): as 7 campanhas com dias > 0; uma volta leva **29 a 48
+  dias úteis** conforme o tamanho da carteira (não considera feriados).
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)
