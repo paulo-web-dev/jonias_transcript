@@ -304,7 +304,7 @@ const COLUNAS = [
     `<button type="button" class="marca-btn marca-${cor}${o.marca === cor ? " ativo" : ""}" data-acao="marca" data-cor="${cor}"${trab.verDe ? " disabled" : ""}
       title="${trab.verDe ? `marcação de ${escapeHtml(trab.verDe.nome)} (só leitura)` : `${cor} (tecla ${CORES_MARCA.indexOf(cor) + 1}) — clique de novo limpa`}"></button>`).join("") },
   { campo: "status", fixa: true, render: (o) => chipStatus(o), editavel: "status" },
-  { campo: "municipioNome", fixa: true, render: (o) => (trab.modo === "rota" && o.rotaPosicao ? `<small class="rota-pos">${o.rotaPosicao}</small>` : "") + escapeHtml(o.municipioNome) + (o.codigo_ibge ? "" : o.municipio_texto ? ' <span class="trab-sem-match" title="não casou com município oficial">?</span>' : ""), editavel: "municipio" },
+  { campo: "municipioNome", fixa: true, render: (o) => (trab.modo === "rota" && o.rotaPosicao ? `<small class="rota-pos"${o.rotaDica ? ` title="${escapeHtml(o.rotaDica)}"` : ""}>${escapeHtml(String(o.rotaRotulo ?? o.rotaPosicao))}</small>` : "") + escapeHtml(o.municipioNome) + (o.codigo_ibge ? "" : o.municipio_texto ? ' <span class="trab-sem-match" title="não casou com município oficial">?</span>' : ""), editavel: "municipio" },
   { campo: "regionalSigla", render: (o) => escapeHtml(o.regionalSigla) },
   { campo: "setor", render: (o) => escapeHtml(o.setor), editavel: "setor" },
   { campo: "responsavel", render: (o) => escapeHtml(o.responsavel || ""), editavel: "texto" },
@@ -349,7 +349,8 @@ function chipStatus(o) {
 function htmlLinha(o, idx) {
   const classes = ["trab-linha", o.marca ? `trab-marca-${o.marca}` : "", o.linha_oculta ? "trab-oculta" : "", o.id === trab.selecionado ? "trab-selecionada" : "", o.editado_em ? "trab-editada" : "",
     trab.modo === "rota" && o.rotaGrupoInicio && trab.ordem.campo === "rotaPosicao" && idx > 0 ? "rota-grupo" : "",
-    trab.modo === "rota" && o.rotaItem?.baixaMetodo ? "rota-feita" : ""].filter(Boolean).join(" ");
+    trab.modo === "rota" && o.rotaItem?.baixaMetodo ? "rota-feita" : "",
+    trab.modo === "rota" && o.rotaItem?.extra ? "rota-extra" : ""].filter(Boolean).join(" ");
   const cursor = o.id === trab.selecionado ? trab.coluna : -1;
   return `<tr class="${classes}" data-id="${o.id}" data-idx="${idx}">${COLS.map((c, i) => `<td class="c-${c.campo}${c.editavel ? " editavel" : ""}${c.fixa ? " fixa" : ""}${i === cursor ? " cursor" : ""}" data-campo="${c.campo}">${c.render(o)}</td>`).join("")}</tr>`;
 }

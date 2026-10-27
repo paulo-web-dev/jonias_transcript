@@ -43,12 +43,21 @@
 //   Bloqueio: regra T de sempre (telefone dentro do tipo, contato entre tipos).
 //   Cada tipo leva as TURMAS (curso + data) que o vendedor oferece, mostradas
 //   na tela da rota.
+// - ROTA EXTRA (migração 35): toda rota gerada leva a cota + EXTRA_POR_DIA
+//   itens; os últimos 15 são `extra = 1` (opcionais, fora do progresso, da TV
+//   e do prêmio). Extra que ainda não teve baixa quando a rota seguinte do
+//   vendedor é gerada vai para as PRIMEIRAS posições dela, dentro da cota
+//   (opção a do usuário), com `origem_item_id` — se só for do mesmo tipo de
+//   rota da fila atual e o contato continuar apto. A ligação no dia da extra
+//   (CDR importado depois das 17h) dá baixa nas duas.
 
 const fs = require("fs");
 const path = require("path");
 const db = require("./db.js");
 const { normalizarNumero, variantes } = require("./cruzamento.js");
 
+// Rota Extra (migração 35): itens opcionais além da cota, no fim da rota
+const EXTRA_POR_DIA = 15;
 const BLOQUEIO_DIAS = 30;
 const BLOQUEIO_SEM_LIGACAO_DIAS = 7;
 const HORA_GERACAO = 17;
@@ -483,9 +492,34 @@ function gerarRotas(data, { usuarioId = null } = {}) {
       const primeira = volta.find((k) => porFase[k].n > 0) ?? ponto.inicio;
       const tipoRota = fases[primeira].tipo;
       return { pessoa: p, campanha, fases, prioridade, porFase, ponto, volta, passo: 0, tipoRota, elegiveis: porFase.reduce((t, f) => t + f.n, 0),
-        itens: [], ultimo: null, restante: tipoRota.cota, visitados: new Set(), pool: porFase[ponto.inicio].pool };
+        itens: [], ultimo: null, restante: tipoRota.cota + EXTRA_POR_DIA, visitados: new Set(), pool: porFase[ponto.inicio].pool };
     }).filter(Boolean);
     if (!estados.length) return { data, geradas: 0, itens: 0, motivo: "nenhum tipo ativo na fila" };
+
+    // Rota Extra: as extras sem baixa da rota anterior de cada um entram
+    // primeiro, dentro da cota — antes de qualquer escolha nova, para nenhum
+    // colega pegar o telefone no dia
+    const herdaveis = db.prepare(
+      `SELECT i.id origem, i.contato_id id, i.tipo_id tipoId, a.telefone, a.setor, a.codigo_ibge codigo
+       FROM rota_itens i JOIN contatos_ativo a ON a.id = i.contato_id
+       WHERE i.rota_id = (SELECT id FROM rotas WHERE pessoa_id = ? AND data < ? ORDER BY data DESC LIMIT 1)
+         AND i.extra = 1 AND i.baixa_metodo IS NULL
+         AND a.telefone_valido = 1 AND a.telefone IS NOT NULL AND COALESCE(a.contato_inexistente, 0) = 0 AND COALESCE(a.linha_oculta, 0) = 0
+       ORDER BY i.posicao`
+    );
+    for (const s of estados) {
+      const tiposDaFila = new Set(s.fases.map((f) => f.tipo.id));
+      for (const c of herdaveis.all(s.pessoa.id, data)) {
+        const chave = chaveTelefone(c.telefone);
+        if (!chave || !tiposDaFila.has(c.tipoId) || tomados.has(chave) || contatosTomados.has(c.id) || s.itens.length >= s.tipoRota.cota) continue;
+        tomados.add(chave);
+        noTipo(c.tipoId).add(chave);
+        contatosTomados.add(c.id);
+        s.itens.push({ ...c, chave });
+        s.restante--;
+        s.ultimo = c.codigo;
+      }
+    }
     // rodízio: cada um escolhe um município por vez; a ordem gira a cada dia
     const giro = Math.round(new Date(`${data}T12:00:00Z`).getTime() / 864e5) % estados.length;
     const ordem = [...estados.slice(giro), ...estados.slice(0, giro)];
@@ -544,11 +578,11 @@ function gerarRotas(data, { usuarioId = null } = {}) {
 
     const agora = new Date().toISOString();
     const insRota = db.prepare(
-      `INSERT INTO rotas (pessoa_id, data, campanha_id, tipo_id, setores_json, cota, elegiveis, gerada_em, gerada_por, ciclo, ponteiro_tipo_id, ciclo_concluido)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO rotas (pessoa_id, data, campanha_id, tipo_id, setores_json, cota, elegiveis, gerada_em, gerada_por, ciclo, ponteiro_tipo_id, ciclo_concluido, extra)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insItem = db.prepare(
-      "INSERT INTO rota_itens (rota_id, contato_id, posicao, telefone, setor, codigo_ibge, tipo_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO rota_itens (rota_id, contato_id, posicao, telefone, setor, codigo_ibge, tipo_id, extra, origem_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     // setores_json = a fila NA geração (cada setor com o tipo de onde vem)
     const setoresFila = (s) => JSON.stringify(s.fases.flatMap((f) => f.tipo.setores.map((x) => ({ ...x, tipoId: f.tipo.id, tipo: f.tipo.nome }))));
@@ -556,8 +590,9 @@ function gerarRotas(data, { usuarioId = null } = {}) {
     const curtas = [];
     for (const s of estados) {
       const rotaId = insRota.run(s.pessoa.id, data, s.campanha.id, s.tipoRota.id, setoresFila(s), s.tipoRota.cota, s.elegiveis, agora, usuarioId,
-        s.ponto.ciclo, s.ponteiro, s.concluiu).lastInsertRowid;
-      s.itens.forEach((c, i) => insItem.run(rotaId, c.id, i + 1, c.telefone, c.setor, c.codigo, c.tipoId));
+        s.ponto.ciclo, s.ponteiro, s.concluiu, EXTRA_POR_DIA).lastInsertRowid;
+      // depois da cota, extra (opcional)
+      s.itens.forEach((c, i) => insItem.run(rotaId, c.id, i + 1, c.telefone, c.setor, c.codigo, c.tipoId, i >= s.tipoRota.cota ? 1 : 0, c.origem ?? null));
       itens += s.itens.length;
       if (s.itens.length < s.tipoRota.cota) curtas.push(`${s.pessoa.nome} ${s.itens.length}/${s.tipoRota.cota}`);
     }
@@ -598,13 +633,15 @@ function garantirRotas() {
 // reimportado refaz as baixas 'cdr'); baixa manual só ganha a evidência.
 function baixarPeloCdr() {
   const t0 = Date.now();
+  // item herdado de uma extra (migração 35): vale também a ligação no dia da extra
   const itens = db.prepare(
-    `SELECT i.id, i.telefone, i.baixa_metodo metodo, i.ligacao_id ligacao, r.pessoa_id pessoa, r.data
+    `SELECT i.id, i.telefone, i.baixa_metodo metodo, i.ligacao_id ligacao, r.pessoa_id pessoa, r.data, ro.data origemData
      FROM rota_itens i JOIN rotas r ON r.id = i.rota_id
+       LEFT JOIN rota_itens o ON o.id = i.origem_item_id LEFT JOIN rotas ro ON ro.id = o.rota_id
      WHERE i.baixa_metodo IS NULL OR i.baixa_metodo = 'cdr' OR (i.baixa_metodo = 'manual' AND i.ligacao_id IS NULL)`
   ).all();
   if (!itens.length) return { itens: 0, baixadas: 0, ms: Date.now() - t0 };
-  const datas = itens.map((i) => i.data).sort();
+  const datas = itens.flatMap((i) => (i.origemData ? [i.data, i.origemData] : [i.data])).sort();
   const indice = new Map();
   for (const l of db.prepare(
     `SELECT id, pessoa_id, data_hora, numero_b, atendida FROM ligacoes
@@ -620,7 +657,8 @@ function baixarPeloCdr() {
   let baixadas = 0;
   db.transaction(() => {
     for (const i of itens) {
-      const ligs = variantes(normalizarNumero(i.telefone)).flatMap((v) => indice.get(`${i.pessoa}|${i.data}|${v}`) || []);
+      const dias = i.origemData ? [i.data, i.origemData] : [i.data];
+      const ligs = variantes(normalizarNumero(i.telefone)).flatMap((v) => dias.flatMap((d) => indice.get(`${i.pessoa}|${d}|${v}`) || []));
       const l = ligs.sort((a, b) => b.atendida - a.atendida || b.data_hora.localeCompare(a.data_hora))[0];
       if (i.metodo === "manual") { if (l) evidencia.run(l.id, l.atendida, i.id); continue; }
       if (l) {
@@ -634,12 +672,14 @@ function baixarPeloCdr() {
 }
 
 // Manual: registrar contato (qualquer canal) num contato que está numa rota
-// do dia do registro dá baixa no item
+// do dia do registro dá baixa no item — e no item que herdou essa extra na
+// rota seguinte (migração 35)
 function baixarPorRegistro(contatoId, dia, usuarioId) {
   return db.prepare(
     `UPDATE rota_itens SET baixa_em = ?, baixa_metodo = 'manual', baixa_usuario_id = ?
-     WHERE contato_id = ? AND baixa_metodo IS NULL AND rota_id IN (SELECT id FROM rotas WHERE data = ?)`
-  ).run(new Date().toISOString(), usuarioId, Number(contatoId), dia).changes;
+     WHERE contato_id = ? AND baixa_metodo IS NULL AND (rota_id IN (SELECT id FROM rotas WHERE data = ?)
+       OR origem_item_id IN (SELECT o.id FROM rota_itens o JOIN rotas r ON r.id = o.rota_id WHERE o.contato_id = ? AND r.data = ?))`
+  ).run(new Date().toISOString(), usuarioId, Number(contatoId), dia, Number(contatoId), dia).changes;
 }
 
 // Desfazer baixa MANUAL (engano). O registro no histórico do contato continua.
@@ -661,12 +701,16 @@ function itemVisivel(itemId, escopo) {
 
 const SQL_ITEM = `SELECT i.id, i.contato_id contatoId, i.posicao, i.setor, i.baixa_em baixaEm, i.baixa_metodo baixaMetodo,
     i.atendida, l.data_hora ligacaoEm, l.tempo_conversa_seg conversaSeg, l.evento_falha eventoFalha,
-    COALESCE(NULLIF(u.nome, ''), u.login) baixaPor, i.tipo_id tipoId, t.nome tipoNome
+    COALESCE(NULLIF(u.nome, ''), u.login) baixaPor, i.tipo_id tipoId, t.nome tipoNome, i.extra, i.origem_item_id origemItemId
   FROM rota_itens i LEFT JOIN ligacoes l ON l.id = i.ligacao_id LEFT JOIN usuarios u ON u.id = i.baixa_usuario_id
     LEFT JOIN rota_tipos t ON t.id = i.tipo_id`;
 const itemDaTela = (id) => db.prepare(`${SQL_ITEM} WHERE i.id = ?`).get(Number(id));
 
-function progressoDe(itens, cota) {
+// Progresso = só os itens da cota; a Rota Extra (migração 35) vem à parte e
+// nunca conta contra ninguém
+function progressoDe(todos, cota) {
+  const itens = todos.filter((i) => !i.extra);
+  const extras = todos.filter((i) => i.extra);
   const feitas = itens.filter((i) => i.baixaMetodo).length;
   return {
     cota, itens: itens.length, feitas,
@@ -674,6 +718,7 @@ function progressoDe(itens, cota) {
     manuais: itens.filter((i) => i.baixaMetodo === "manual").length,
     pelaCdr: itens.filter((i) => i.baixaMetodo === "cdr").length,
     pendentes: itens.length - feitas,
+    extra: { itens: extras.length, feitas: extras.filter((i) => i.baixaMetodo).length, atendidas: extras.filter((i) => i.atendida === 1).length },
   };
 }
 
@@ -704,7 +749,7 @@ function rotaDoDia({ data, pessoaId }, usuario, escopo) {
   };
   const rota = pessoaId
     ? db.prepare(
-        `SELECT r.id, r.pessoa_id pessoaId, p.nome, r.data, r.cota, r.elegiveis, r.gerada_em geradaEm, t.nome tipo, r.setores_json, r.campanha_id campanhaId
+        `SELECT r.id, r.pessoa_id pessoaId, p.nome, r.data, r.cota, r.elegiveis, r.gerada_em geradaEm, t.nome tipo, r.setores_json, r.campanha_id campanhaId, r.extra
          FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id JOIN rota_tipos t ON t.id = r.tipo_id
          WHERE r.pessoa_id = ? AND r.data = ?`).get(Number(pessoaId), data)
     : null;
@@ -789,8 +834,9 @@ function rotasDaSemanaTv() {
   const { data: ate } = agoraBrasilia();
   const semanaDe = somarDias(ate, -((new Date(`${ate}T12:00:00Z`).getUTCDay() + 6) % 7));
   return db.prepare(
-    `SELECT p.nome, r.data, r.cota, COUNT(i.id) itens, COALESCE(SUM(i.baixa_metodo IS NOT NULL), 0) feitas,
-            COALESCE(SUM(i.atendida = 1), 0) atendidas
+    // só os itens da cota: a Rota Extra não entra no "rota 100%" nem no prêmio
+    `SELECT p.nome, r.data, r.cota, COALESCE(SUM(i.extra = 0), 0) itens, COALESCE(SUM(i.extra = 0 AND i.baixa_metodo IS NOT NULL), 0) feitas,
+            COALESCE(SUM(i.extra = 0 AND i.atendida = 1), 0) atendidas, COALESCE(SUM(i.extra = 1 AND i.baixa_metodo IS NOT NULL), 0) extrasFeitas
      FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id LEFT JOIN rota_itens i ON i.rota_id = r.id
      WHERE r.data BETWEEN ? AND ? AND p.tipo = 'consultor' AND p.ativo = 1 AND p.entra_tv = 1
      GROUP BY r.id ORDER BY r.data`
@@ -983,6 +1029,16 @@ function painel(dataArg) {
     return { ...r, tipos: [...tipos].map(([nome, n]) => ({ nome, itens: n })), progresso: progressoDe(itens, r.cota) };
   });
 
+  // Rota Extra (migração 35): extras feitas por vendedor na semana da data
+  // escolhida (segunda até a data) — só a favor, nunca contra
+  const semanaDe = somarDias(data, -((new Date(`${data}T12:00:00Z`).getUTCDay() + 6) % 7));
+  const extrasSemana = db.prepare(
+    `SELECT p.id pessoaId, p.nome, COUNT(i.id) oferecidas, COALESCE(SUM(i.baixa_metodo IS NOT NULL), 0) feitas,
+            COALESCE(SUM(i.atendida = 1), 0) atendidas
+     FROM rota_itens i JOIN rotas r ON r.id = i.rota_id JOIN pessoas p ON p.id = r.pessoa_id
+     WHERE i.extra = 1 AND r.data BETWEEN ? AND ? GROUP BY p.id ORDER BY feitas DESC, p.nome`
+  ).all(semanaDe, data);
+
   // estoque para a próxima geração, pelas filas que vão valer nela
   const estoqueInfo = estoqueDaFila(proxima);
 
@@ -1008,7 +1064,7 @@ function painel(dataArg) {
     hoje, hora, data, proximaGeracao: proxima, horaGeracao: HORA_GERACAO, sobreposicao: sobre,
     bloqueio: { dias: BLOQUEIO_DIAS, semLigacaoDias: BLOQUEIO_SEM_LIGACAO_DIAS },
     campanha: { hoje: campanhaHoje, dia: campanhaDia, proxima: campanhaProxima, agendada: campanhaAgendada(proxima), historico, voltas, vendedores },
-    rotasDia, estoque: estoqueInfo, acumulados, tipos: listarTipos(),
+    rotasDia, extras: { semanaDe, porPessoa: extrasSemana, porDia: EXTRA_POR_DIA }, estoque: estoqueInfo, acumulados, tipos: listarTipos(),
     // donos possíveis de fila própria: consultores ativos do painel (ou que já têm uma)
     consultores: db.prepare(
       `SELECT id, nome FROM pessoas p WHERE tipo = 'consultor' AND ativo = 1
@@ -1023,5 +1079,5 @@ module.exports = {
   bloqueiosPara, sobreposicao, gerarRotas, garantirRotas,
   baixarPeloCdr, baixarPorRegistro, desfazerBaixa, itemDaTela, progressoTv, rotasDaSemanaTv,
   rotaDoDia, painel,
-  BLOQUEIO_DIAS, BLOQUEIO_SEM_LIGACAO_DIAS, HORA_GERACAO,
+  BLOQUEIO_DIAS, BLOQUEIO_SEM_LIGACAO_DIAS, HORA_GERACAO, EXTRA_POR_DIA,
 };

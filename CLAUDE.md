@@ -215,7 +215,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **34**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **35**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -1386,7 +1386,7 @@ da prefeitura) — o limite era só a volta ao 1º tipo.
   úteis, tudo ligado): as 7 campanhas com dias > 0; uma volta leva **29 a 48
   dias úteis** conforme o tamanho da carteira (não considera feriados).
 
-### 🚧 Rota por setor de vendedor (2026-10-27, decisões do usuário)
+### ✅ Rota por setor de vendedor (2026-10-27, decisões do usuário)
 Reestruturação para o fim do ano, em três fases: (1) feriados; (2) setores por
 vendedor sem regionais, a partir de 03/11, com curso e turmas da campanha na
 tela; (3) Rota Extra. `scripts/simular-setores.js` (só leitura) mede o estoque
@@ -1455,6 +1455,23 @@ deixaria todo mundo curto desde 13/11.
     principal; simulando todos os itens ligados até 23/12, o complemento
     entra sozinho (Bianca 27/11: 9 + 36; Eduardo 01/12) e sai quando o
     bloqueio do principal vence; nenhuma rota curta.
+- ✅ **Fase 3 — Rota Extra** (migração 35): toda rota gerada leva a cota (45)
+  + `EXTRA_POR_DIA` (15) itens; os 15 do fim são `rota_itens.extra = 1`
+  (`rotas.extra` = quantos a rota oferece). A Extra é OPCIONAL: fica fora do
+  progresso, do "rota 100%" da TV (`rotasDaSemanaTv` conta só `extra = 0`)
+  e do prêmio — só a favor. Extra sem baixa quando a rota seguinte do
+  vendedor é gerada entra nas PRIMEIRAS posições dela, DENTRO das 45 (opção a
+  do usuário), com `origem_item_id`, se o tipo dela estiver na fila atual e
+  o contato continuar apto (antes de qualquer escolha nova do dia).
+  Como a rota de amanhã sai às 17h e o CDR costuma chegar depois, a ligação
+  no DIA DA EXTRA também dá baixa no item herdado (`baixarPeloCdr` olha as
+  duas datas; `baixarPorRegistro` marca a origem e a cópia). Tela: posições
+  E1…E15 em âmbar, linha tracejada no início da Extra, "↪" no item herdado
+  (com dica), "Extra: N de 15" no progresso. Painel: coluna Extra nas rotas
+  do dia e cartão "Rota Extra — semana" (feitas por vendedor, `painel().extras`).
+  Conferido na cópia local: 5 de 15 extras feitas em 03/11 → as 10 restantes
+  nas posições 1–10 de 04/11; ligação em 03/11 às 17h40 importada depois dá
+  baixa nas duas; progresso 45/45 com Extra 7 de 15 à parte.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

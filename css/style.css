@@ -1664,6 +1664,11 @@ body[data-papel="vendedor"] .so-admin { display: none !important; }
 .rota-pos { display: inline-block; min-width: 1.6em; margin-right: 0.35rem; color: var(--texto-suave); font-variant-numeric: tabular-nums; text-align: right; }
 .trab-tabela tbody tr.rota-grupo td { border-top: 2px solid rgba(56, 214, 224, 0.35); }
 .trab-tabela tbody tr.rota-feita td:not(.fixa):not(.c-rotaBaixa) { opacity: 0.6; }
+/* Rota Extra (migração 35): opcional, separada visualmente das obrigatórias */
+.trab-tabela tbody tr.rota-extra td:not(.fixa) { background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0 8px, transparent 8px 16px); }
+.trab-tabela tbody tr.rota-extra.rota-grupo td { border-top: 3px dashed rgba(240, 190, 80, 0.7); }
+.trab-tabela tbody tr.rota-extra .rota-pos { color: #f0be50; font-weight: 700; }
+.rota-extra-num { color: #f0be50; }
 col.c-baixa { width: 165px; }
 col.c-rota-tipo { width: 120px; }
 .rota-baixa { font-size: 0.76rem; white-space: nowrap; }

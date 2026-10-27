@@ -1532,6 +1532,23 @@ const MIGRACOES = [
       `campanhas: ${campanhas.map((c) => `${c.vendedor} (${c.ids.length} tipo(s))`).join(", ") || "nenhuma"}; ` +
       `campanha geral encerrada em ${vale}; ${descartadas} rota(s) a partir de ${vale} sem baixa descartada(s).`);
   },
+  // 35 — ROTA EXTRA (decisões do usuário, 2026-10-27): além da cota (45), mais
+  // 15 itens OPCIONAIS no fim da rota (`rota_itens.extra = 1`; `rotas.extra` =
+  // quantos a rota oferece). Não contam no progresso, na TV nem no prêmio — só
+  // a favor. Extra sem baixa na hora da geração seguinte entra nas PRIMEIRAS
+  // posições da rota do próximo dia, DENTRO das 45 (opção a), com
+  // `origem_item_id` = o item extra de onde veio: a ligação feita no dia da
+  // extra (CDR importado depois das 17h) também dá baixa nela. Sem REFERENCES no
+  // origem: descartar uma rota não pode falhar por causa da cópia.
+  () => {
+    db.exec(`
+      ALTER TABLE rota_itens ADD COLUMN extra INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE rota_itens ADD COLUMN origem_item_id INTEGER;
+      ALTER TABLE rotas ADD COLUMN extra INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX idx_rota_itens_origem ON rota_itens(origem_item_id) WHERE origem_item_id IS NOT NULL;
+    `);
+    console.log("migração 35: Rota Extra — rota_itens.extra, rota_itens.origem_item_id, rotas.extra.");
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:
