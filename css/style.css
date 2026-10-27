@@ -1669,6 +1669,8 @@ body[data-papel="vendedor"] .so-admin { display: none !important; }
 .trab-tabela tbody tr.rota-extra.rota-grupo td { border-top: 3px dashed rgba(240, 190, 80, 0.7); }
 .trab-tabela tbody tr.rota-extra .rota-pos { color: #f0be50; font-weight: 700; }
 .rota-extra-num { color: #f0be50; }
+/* aba Trabalho livre (vendedor com campanha própria): informação, não alerta */
+.conflito-aviso.aviso-livre { border-color: rgba(56, 214, 224, 0.45); background: rgba(56, 214, 224, 0.08); color: var(--texto); }
 col.c-baixa { width: 165px; }
 col.c-rota-tipo { width: 120px; }
 .rota-baixa { font-size: 0.76rem; white-space: nowrap; }

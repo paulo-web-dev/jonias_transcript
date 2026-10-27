@@ -78,7 +78,7 @@ aula-ai/
 ├── rota.js          # Rota do dia: campanha por setor, geração 17h, bloqueio por telefone, baixa CDR/manual, painel
 ├── feriados.js      # feriados (migração 33): dia útil = seg–sex fora da tabela — Rota, metas e TV
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
-├── escopo.js        # papéis (admin | vendedor) e escopo por regional ou por SETOR (campanha própria da Rota) — corte no servidor
+├── escopo.js        # papéis (admin | vendedor) e escopo por regional (campanha própria da Rota: prospecção livre) — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
 ├── trocar-senha.html # troca de senha (obrigatória no 1º acesso)
 ├── meu-painel.html  # painel do vendedor: métricas próprias × metas
@@ -1439,13 +1439,17 @@ deixaria todo mundo curto desde 13/11.
     dd/mm (próxima)" com as turmas de hoje em diante da fila da campanha da
     rota (`rota.turmas` em `GET /api/rota`).
   - **Escopo do vendedor** (`escopo.js`): com campanha própria vigente HOJE,
-    a prospecção (aba Trabalho, Rota, edição, registro, marcação, exportação)
-    é cortada pelos SETORES da fila dele em todo o PR e SC
-    (`clausulaContatos`, `contatoNoEscopo`, `municipioPermitido`,
-    `resumoProspeccao`); não pode mover contato para setor fora da campanha
-    nem criar contato em outro setor. Contato que esteve numa rota DELE
-    continua legível no payload da rota (rota antiga). Território, Meu painel
-    e o painel do CDR continuam pela carteira regional (decisão do usuário).
+    a aba Trabalho é **LIVRE — a base inteira**, todos os setores, PR e SC
+    (decisão do usuário, 2026-10-27, revendo a Fase 2, que cortava pelos
+    setores da campanha: a Agnes precisa falar com Obras e Urbanismo, por
+    exemplo). `clausulaContatos`/`contatoNoEscopo` não cortam;
+    `municipioPermitido` = qualquer município da UF do contato. Continua: o
+    consultor de terceiros sai mascarado (-1) e o vendedor só atribui
+    contato a si mesmo; registro fora da rota vai para o histórico com o nome
+    dele. A **Rota do dia não usa o escopo** — é gerada dos setores da
+    campanha e só ela conta para meta e prêmio; a tela diz isso (aviso
+    "Aba Trabalho: livre" em `#aviso-escopo`, frase na dica da Rota).
+    Território, Meu painel e o painel do CDR continuam pela carteira regional.
   - Painel da Rota: tabela "Campanhas por vendedor" (fila hoje, próxima
     geração/agendada, turmas, "editar fila"), seletor do dono da fila no
     editor (geral ou um vendedor), coluna de turmas e campo de turmas

@@ -149,8 +149,13 @@ function aplicarEscopoNaTela(d) {
   el.fUf.innerHTML = ufs.map((u) => `<option value="${u}" ${u === trab.uf ? "selected" : ""}>${u}</option>`).join("");
   el.fConsultor.classList.add("oculto");
   document.getElementById("n-consultor").closest(".campo").classList.add("oculto");
-  aviso.classList.toggle("oculto", !d.escopo.vazio);
+  // campanha própria: a aba Trabalho é livre (base inteira); só a Rota do dia conta
+  const livre = !!d.escopo.setores;
+  aviso.classList.toggle("oculto", !d.escopo.vazio && !livre);
+  aviso.classList.toggle("aviso-livre", livre);
   if (d.escopo.vazio) aviso.textContent = "Seu usuário ainda não tem regional atribuída — peça ao administrador para definir a sua carteira em /usuarios.";
+  else if (livre) aviso.innerHTML = "<strong>Aba Trabalho: livre.</strong> Aqui você vê a base inteira, todos os setores do PR e SC, para ligar quando fizer sentido — " +
+    "o contato registrado aqui fica no histórico com o seu nome. <strong>O que conta para a meta e o prêmio é a Rota do dia</strong> (as 45 do seu setor).";
 }
 
 function preencherFiltrosEstaticos() {

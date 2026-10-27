@@ -7,10 +7,15 @@
 //              SERVIDOR, na consulta SQL — o payload nunca carrega dado de outra
 //              pessoa, nem escondido (mesmo rigor da TV).
 //   vendedor com campanha PRÓPRIA da Rota vigente (Rota por setor, migração
-//              34, decisão do usuário 2026-10-27): na PROSPECÇÃO (aba
-//              Trabalho, Rota, edição, exportação) vê os SETORES (abas) da fila
-//              dele em todo o PR e SC, sem recorte de regional. Território, Meu
-//              painel e o painel do CDR continuam pela carteira regional.
+//              34): na PROSPECÇÃO (aba Trabalho, edição, registro, marcação,
+//              exportação) vê a BASE INTEIRA, todos os setores, PR e SC
+//              (decisão do usuário, 2026-10-27 — ligar para outro setor quando
+//              fizer sentido; na Fase 2 era só os setores da campanha). A Rota
+//              do dia NÃO usa este escopo: é gerada dos setores da campanha
+//              (rota.js) e só ela conta para meta e prêmio. Continua igual: o
+//              consultor de terceiros sai mascarado (-1), o vendedor só
+//              atribui contato a si mesmo, e Território, Meu painel e o painel
+//              do CDR seguem pela carteira regional.
 // Este módulo só calcula e valida; as consultas que o usam recebem `escopo`.
 
 const db = require("./db.js");
@@ -63,17 +68,13 @@ function escopoDe(usuario) {
 }
 
 // ---------- corte dos CONTATOS da prospecção ----------
-// Por setor (campanha própria) ou por município da carteira. `p` = prefixo da
-// tabela contatos_ativo na consulta ("c." etc.).
+// Campanha própria: base inteira (sem corte). Senão, município da carteira.
+// `p` = prefixo da tabela contatos_ativo na consulta ("c." etc.).
 function clausulaContatos(escopo, p = "") {
-  if (!escopo) return { sql: "1=1", valores: [] };
-  if (escopo.setores) {
-    return { sql: `(${p}uf, ${p}setor) IN (VALUES ${escopo.setores.map(() => "(?, ?)").join(", ")})`, valores: escopo.setores.flatMap((x) => [x.uf, x.setor]) };
-  }
+  if (!escopo || escopo.setores) return { sql: "1=1", valores: [] };
   return clausulaMunicipios(escopo, `${p}codigo_ibge`);
 }
-const contatoNoEscopo = (escopo, linha) =>
-  !escopo || (escopo.setores ? escopo.setorChaves.has(`${linha.uf}|${linha.setor}`) : dentroDoEscopo(escopo, linha.codigo_ibge));
+const contatoNoEscopo = (escopo, linha) => !escopo || !!escopo.setores || dentroDoEscopo(escopo, linha.codigo_ibge);
 // Município que o vendedor pode pôr num contato: por setor, qualquer um da UF do
 // contato; pela carteira, só os da regional
 function municipioPermitido(escopo, codigoIbge, uf) {
@@ -88,7 +89,9 @@ const clausulaMunicipiosLista = (escopo, coluna = "codigo_ibge") =>
 function resumoProspeccao(escopo) {
   if (!escopo) return null;
   if (!escopo.setores) return { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio, setores: null };
-  return { regionais: escopo.regionais, ufs: [...new Set(escopo.setores.map((x) => x.uf))].sort(), vazio: false, setores: escopo.setores };
+  // base inteira: todas as UFs da base; `setores` = os da campanha (a tela avisa que só a Rota conta)
+  const ufs = db.prepare("SELECT DISTINCT uf FROM contatos_ativo ORDER BY uf").all().map((r) => r.uf);
+  return { regionais: escopo.regionais, ufs, vazio: false, setores: escopo.setores };
 }
 
 // Cláusula SQL "codigo_ibge IN (...)" para um escopo (ou "1=1" para admin).

@@ -1155,10 +1155,6 @@ function atualizarContato(id, mudancas, usuarioId, escopo = null) {
     if (campos.includes("codigo_ibge") && mudancas.codigo_ibge && !municipioPermitido(escopo, mudancas.codigo_ibge, linha.uf)) {
       throw erro(escopo.setores ? "Município de outro estado." : "Município fora da sua regional.");
     }
-    // por setor: não move o contato para um setor que não é da campanha dele
-    if (escopo.setores && campos.includes("setor") && !escopo.setorChaves.has(`${linha.uf}|${String(mudancas.setor ?? "").trim()}`)) {
-      throw erro("Setor fora da sua campanha.");
-    }
   }
   const agora = new Date().toISOString();
   const colunas = {};
@@ -1294,9 +1290,8 @@ function criarContato(dados, usuarioId, escopo = null) {
   const setor = texto(dados.setor, 120);
   if (!setor) throw erro("Informe o setor (aba/carteira).");
   if (escopo) {
-    // vendedor: município obrigatório e dentro da regional dele (por setor: da
-    // UF, e o setor tem de ser da campanha dele); consultor só ele
-    if (escopo.setores && !escopo.setorChaves.has(`${uf}|${setor}`)) throw erro("Setor fora da sua campanha.");
+    // vendedor: município obrigatório e dentro da regional dele (campanha
+    // própria: qualquer um da UF, qualquer setor); consultor só ele
     if (!dados.codigo_ibge) {
       const nome = normalizarCidade(texto(dados.municipio_texto) || "").nome;
       const cand = (indiceMunicipios().porNome.get(nome) || []).find((m) => m.uf === uf && municipioPermitido(escopo, m.codigo, uf));
