@@ -162,6 +162,18 @@
             </div>
           </div>
         </details>
+        <details class="rota-detalhes" id="rota-feriados-bloco">
+          <summary class="secao-titulo">Feriados <span class="texto-suave" id="rota-feriados-resumo"></span></summary>
+          <p class="texto-suave">Feriado não tem rota e não conta como dia útil nas metas (a meta da semana vira meta diária × dias úteis da semana).
+            Só datas de hoje em diante. Cadastrar uma data descarta as rotas já geradas nela que ninguém começou.</p>
+          <ul class="lista-simples" id="rota-feriados"></ul>
+          <div class="rota-tipo-linha">
+            <label class="campo"><span>Data</span><input type="date" id="fer-data" class="campo-select" /></label>
+            <label class="campo"><span>Nome</span><input type="text" id="fer-nome" class="campo-select" maxlength="80" placeholder="ex.: Aniversário da cidade" /></label>
+            <button type="button" class="btn-mini btn-primario" id="fer-adicionar">+ cadastrar feriado</button>
+          </div>
+          <p id="fer-erro" class="login-erro oculto"></p>
+        </details>
         <details class="rota-detalhes">
           <summary class="secao-titulo">Histórico de campanhas</summary>
           <ul class="lista-simples" id="rota-historico"></ul>

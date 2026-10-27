@@ -159,9 +159,10 @@ function svgAcumulado(a, fmt = num) {
   if (!a || !a.metaSemana || !a.porPessoa.length || !a.porPessoa[0].valores.length) return "";
   const W = 780, H = 210, PL = 18, PR = 190, PT = 30, PB = 34;
   const maxY = Math.max(a.metaSemana, ...a.porPessoa.map((p) => p.valores[p.valores.length - 1] || 0)) * 1.06;
-  const x = (i) => PL + (i * (W - PL - PR)) / 4;
+  const n = a.dias.length; // 5, ou 4 numa semana com feriado
+  const x = (i) => PL + (i * (W - PL - PR)) / Math.max(1, n - 1);
   const y = (v) => H - PB - (v / maxY) * (H - PT - PB);
-  const ideal = Array.from({ length: 5 }, (_, i) => `${x(i)},${y(a.metaDia * (i + 1))}`).join(" ");
+  const ideal = Array.from({ length: n }, (_, i) => `${x(i)},${y(a.metaDia * (i + 1))}`).join(" ");
   const fins = a.porPessoa.map((p, i) => ({
     nome: p.nome,
     cor: CORES_SERIE[i % CORES_SERIE.length],
@@ -173,10 +174,10 @@ function svgAcumulado(a, fmt = num) {
   // anti-colisão vertical dos rótulos de fim de linha
   const rot = fins.map((f) => ({ ...f, ry: f.vy })).sort((m, n) => m.ry - n.ry);
   for (let i = 1; i < rot.length; i++) if (rot[i].ry - rot[i - 1].ry < 30) rot[i].ry = rot[i - 1].ry + 30;
-  const DIAS = ["seg", "ter", "qua", "qui", "sex"];
+  const DIAS = a.dias.map((d) => ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"][new Date(`${d}T12:00:00Z`).getUTCDay()]);
   return `<svg viewBox="0 0 ${W} ${H}" class="tv-chart">
     <polyline points="${ideal}" fill="none" stroke="var(--texto-suave)" stroke-width="4" stroke-dasharray="12 10" opacity="0.85"/>
-    <text x="${x(4)}" y="${y(a.metaSemana) - 12}" font-size="23" fill="var(--texto-suave)" text-anchor="end">ritmo p/ ${fmt(a.metaSemana)}</text>
+    <text x="${x(n - 1)}" y="${y(a.metaSemana) - 12}" font-size="23" fill="var(--texto-suave)" text-anchor="end">ritmo p/ ${fmt(a.metaSemana)}</text>
     ${DIAS.map((d2, i) => `<text x="${x(i)}" y="${H - 6}" font-size="22" fill="var(--texto-suave)" text-anchor="middle">${d2}</text>`).join("")}
     ${rot.map((f) => `
       <polyline points="${f.pts}" fill="none" stroke="${f.cor}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -508,7 +509,7 @@ function blocoPipelineStatus(p) {
 
 function renderizarStatus(st) {
   if (!st) return;
-  el("status-titulo").textContent = `STATUS DE HOJE ${dataBr(st.data)} — QUEM ESTÁ EM DIA · dia ${num(st.diaDaSemana)} de 5`;
+  el("status-titulo").textContent = `STATUS DE HOJE ${dataBr(st.data)} — QUEM ESTÁ EM DIA · dia ${num(st.diaDaSemana)} de ${num(st.diasNaSemana ?? 5)}`;
   const alvo = el("status-linhas");
   alvo.classList.toggle("tv-st-compacto", st.porPessoa.length > 6);
   const html = `<div class="tv-st-linha tv-st-cabecalho"><span></span><span>🗺 ROTA DE HOJE</span>` +
@@ -546,7 +547,7 @@ function linhasPremio(x) {
 
 function renderizarPremio(pr) {
   if (!pr) return;
-  el("ranking-titulo").textContent = `RANKING DE VENDAS DA SEMANA ${dataBr(pr.semanaDe)} · dia ${num(pr.diaDaSemana)} de 5`;
+  el("ranking-titulo").textContent = `RANKING DE VENDAS DA SEMANA ${dataBr(pr.semanaDe)} · dia ${num(pr.diaDaSemana)} de ${num(pr.diasNaSemana ?? 5)}`;
   // meta da semana na faixa da regra: a padrão (a mais comum entre os do painel)
   const metas = pr.ranking.map((x) => x.pipeline.metaSemana).filter((m) => m != null);
   const metaComum = metas.sort((a, b) => metas.filter((m) => m === b).length - metas.filter((m) => m === a).length)[0];
@@ -689,7 +690,7 @@ function renderizar(d, origem) {
 
   // ---- SEMANA ----
   el("semana-titulo").textContent =
-    `SEMANA ${dataBr(d.semana.de)} → ${dataBr(d.semana.ate)} · PIPELINE × META · dia ${d.semana.diasUteis} de 5`;
+    `SEMANA ${dataBr(d.semana.de)} → ${dataBr(d.semana.ate)} · PIPELINE × META · dia ${d.semana.diasUteis} de ${d.semana.diasNaSemana ?? 5}`;
   for (const p of d.semana.porPessoa) {
     const linha = document.querySelector(`#semana-linhas [data-nome="${p.nome}"]`);
     if (!linha) continue;
@@ -725,7 +726,7 @@ function renderizar(d, origem) {
     const todasIguais = metas.length && metas.every((m) => m === metas[0]);
     el("receita-titulo").textContent =
       `RECEITA DA SEMANA · ${todasIguais ? `meta ${reais(metas[0])} por vendedor` : "meta própria por vendedor"}` +
-      ` · dia ${d.semana.diasUteis} de 5`;
+      ` · dia ${d.semana.diasUteis} de ${d.semana.diasNaSemana ?? 5}`;
     for (const p of d.semana.porPessoa) {
       const linha = document.querySelector(`#receita-linhas [data-nome="${p.nome}"]`);
       if (!linha || !p.receita) continue;
@@ -806,7 +807,7 @@ function renderizar(d, origem) {
     barra.style.width = Math.min(100, eq.atingimento ?? 0) + "%";
     barra.classList.toggle("fill-ok", bateu);
     el("destaque-linha").textContent =
-      `${reais(eq.receitaCentavos)} de ${reais(eq.metaCentavos)} · ${Math.round(eq.atingimento ?? 0)}% · dia ${d.semana.diasUteis} de 5`;
+      `${reais(eq.receitaCentavos)} de ${reais(eq.metaCentavos)} · ${Math.round(eq.atingimento ?? 0)}% · dia ${d.semana.diasUteis} de ${d.semana.diasNaSemana ?? 5}`;
     el("destaque-rodape").textContent = eqMes.metaCentavos
       ? `Mês: ${reais(eqMes.receitaCentavos)} de ${reais(eqMes.metaCentavos)} · faltam ${reais(eqMes.faltaCentavos)}` +
         (eq.incluiGerencial ? " · inclui Gerencial" : "")

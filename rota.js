@@ -59,7 +59,7 @@ function somarDias(iso, n) {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
-const diaUtil = (iso) => { const w = new Date(`${iso}T12:00:00Z`).getUTCDay(); return w >= 1 && w <= 5; };
+const { diaUtil } = require("./feriados.js"); // seg–sex fora da tabela de feriados (migração 33)
 function proximoDiaUtil(iso) {
   let d = somarDias(iso, 1);
   while (!diaUtil(d)) d = somarDias(d, 1);
@@ -368,6 +368,7 @@ const voltaDesde = (inicio, n) => Array.from({ length: n }, (_, j) => (inicio + 
 // em todas as rotas; consultores em tipos diferentes intercalam no rodízio.
 function gerarRotas(data, { usuarioId = null } = {}) {
   if (!RE_DATA.test(String(data || ""))) throw erro("Data inválida — use AAAA-MM-DD.");
+  if (!diaUtil(data)) return { data, geradas: 0, itens: 0, motivo: "não é dia útil (fim de semana ou feriado)" };
   const campanha = campanhaVigente(data);
   if (!campanha || !campanha.tipoId) return { data, geradas: 0, itens: 0, motivo: "sem campanha vigente" };
   return db.transaction(() => {

@@ -103,20 +103,13 @@ function textoProjecao(semanaCentavos, mesCentavos) {
 }
 
 // Pipeline só tem meta DIÁRIA; semana e mês são derivados (× dias úteis) —
-// mostrados para comparar com a receita, sem campo próprio para editar
-function diasUteisDoMes() {
-  const h = new Date();
-  let n = 0;
-  for (let d = new Date(h.getFullYear(), h.getMonth(), 1); d.getMonth() === h.getMonth(); d.setDate(d.getDate() + 1)) {
-    if (d.getDay() >= 1 && d.getDay() <= 5) n++;
-  }
-  return n;
-}
+// mostrados para comparar com a receita, sem campo próprio para editar. Dias
+// úteis da semana e do mês atuais vêm do servidor, já sem os feriados
 function celulaPipelineDerivada(escopo, fonte, comHeranca) {
   const dia = valorEfetivo(fonte, "pipeline_dia", comHeranca);
   if (dia == null) return `<td class="texto-suave meta-celula meta-celula-vazia">—</td>`;
-  const dias = escopo === "semana" ? 5 : diasUteisDoMes();
-  const rotulo = escopo === "semana" ? "× 5 dias úteis" : `× ${dias} dias úteis deste mês`;
+  const dias = dados.diasUteisPara[escopo];
+  const rotulo = `× ${dias} dias úteis ${escopo === "semana" ? "desta semana" : "deste mês"}`;
   return `<td class="meta-celula texto-suave"><strong>${reais(dia * dias)}</strong><br><small>${rotulo} · derivada da diária</small></td>`;
 }
 

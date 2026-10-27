@@ -249,6 +249,7 @@ async function carregarPainelRota() {
   document.getElementById("rota-painel").classList.remove("oculto");
   renderizarPainelRota(p);
   if (!rotaUi.tipos) await carregarTiposRota();
+  if (!rotaUi.feriadosLidos) { rotaUi.feriadosLidos = true; await carregarFeriados(); }
 }
 
 function renderizarPainelRota(p) {
@@ -441,6 +442,53 @@ document.getElementById("rota-gerar").addEventListener("click", async () => {
     avisar(n ? `${n} rota(s) gerada(s): ${r.geradas.map((g) => `${dataBr(g.data)} (${g.itens} itens)`).join(", ")}.` : "Nenhuma rota faltando.");
     await carregarPainelRota();
     await carregarRota();
+  } catch (e) {
+    avisar("⚠ " + e.message, true);
+  }
+});
+
+// ---------- feriados (sem rota e fora dos dias úteis das metas) ----------
+
+async function carregarFeriados() {
+  renderizarFeriados((await chamarApi("/api/feriados")).feriados);
+}
+
+function renderizarFeriados(lista) {
+  const hoje = rotaUi.painel?.hoje || "";
+  const futuros = lista.filter((f) => f.data >= hoje);
+  document.getElementById("rota-feriados-resumo").textContent =
+    futuros.length ? `— próximo: ${dataBr(futuros[0].data)} (${futuros[0].nome})` : "— nenhum à frente";
+  document.getElementById("rota-feriados").innerHTML = lista.map((f) => `<li>
+      <span><strong>${escapeHtml(dataBr(f.data))}</strong> ${escapeHtml(diaSemana(f.data))} — ${escapeHtml(f.nome)}${f.fimDeSemana ? ' <small class="texto-suave">(fim de semana: não muda nada)</small>' : ""}</span>
+      <span class="texto-suave">${f.data >= hoje ? `<button type="button" class="btn-mini" data-remover-feriado="${escapeHtml(f.data)}">remover</button>` : "passado"}</span></li>`).join("") ||
+    `<li class="texto-suave">Nenhum feriado cadastrado.</li>`;
+}
+
+document.getElementById("fer-adicionar").addEventListener("click", async () => {
+  const erroEl = document.getElementById("fer-erro");
+  erroEl.classList.add("oculto");
+  try {
+    const r = await postJson("/api/feriados", { data: document.getElementById("fer-data").value, nome: document.getElementById("fer-nome").value });
+    avisar(`Feriado ${dataBr(r.data)} cadastrado` + (r.descartadas ? ` — ${r.descartadas} rota(s) dessa data descartada(s)` : "") +
+      (r.comBaixa ? `; ${r.comBaixa} rota(s) com baixa mantida(s)` : "") + ".");
+    document.getElementById("fer-data").value = "";
+    document.getElementById("fer-nome").value = "";
+    renderizarFeriados(r.feriados);
+    await carregarPainelRota();
+  } catch (e) {
+    erroEl.textContent = e.message;
+    erroEl.classList.remove("oculto");
+  }
+});
+document.getElementById("rota-feriados").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-remover-feriado]");
+  if (!b) return;
+  if (b.dataset.confirmar !== "1") { b.dataset.confirmar = "1"; b.textContent = "confirmar remoção"; return; }
+  try {
+    const r = await chamarApi(`/api/feriados/${b.dataset.removerFeriado}`, { method: "DELETE" });
+    avisar(`Feriado ${dataBr(r.data)} removido — a data volta a ser dia útil.`);
+    renderizarFeriados(r.feriados);
+    await carregarPainelRota();
   } catch (e) {
     avisar("⚠ " + e.message, true);
   }

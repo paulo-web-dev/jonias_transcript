@@ -1398,6 +1398,39 @@ const MIGRACOES = [
     console.log(`migração 32: fila cíclica na Rota — tipos ${CAMPANHAS.map(([n], k) => `${k + 1}. ${n} (#${ids[k]})`).join(", ")}; ` +
       `fila 1→7 a partir de ${vale}; ${descartadas} rota(s) futura(s) sem baixa descartada(s).`);
   },
+
+  // 33 — FERIADOS (decisão do usuário, 2026-10-27): dia útil = seg–sex fora
+  // desta tabela, na Rota (não gera rota) e no motor de métricas (denominador
+  // de meta, semana fechada da TV). Editável no painel da Rota (feriados.js).
+  // Seed só com datas futuras (feriado passado mudaria relatórios fechados);
+  // 15/11/2026 cai num domingo e não muda nada, mas fica registrado. 24/12 e
+  // 31/12 ficam como dia útil (o usuário ajusta na mão se preciso).
+  () => {
+    db.exec(`
+      CREATE TABLE feriados (
+        data       TEXT PRIMARY KEY,
+        nome       TEXT NOT NULL,
+        criado_em  TEXT NOT NULL,
+        usuario_id INTEGER REFERENCES usuarios(id)
+      );
+    `);
+    const agora = new Date().toISOString();
+    const ins = db.prepare("INSERT INTO feriados (data, nome, criado_em) VALUES (?, ?, ?)");
+    const SEED = [
+      ["2026-11-02", "Finados"],
+      ["2026-11-15", "Proclamação da República"],
+      ["2026-11-20", "Dia Nacional de Zumbi e da Consciência Negra"],
+      ["2026-12-25", "Natal"],
+      ["2027-01-01", "Confraternização Universal"],
+    ];
+    for (const [data, nome] of SEED) ins.run(data, nome, agora);
+    // rota já gerada num desses dias e que ninguém começou: descartada
+    const descartadas = db.prepare(
+      `DELETE FROM rotas WHERE data IN (${SEED.map(() => "?").join(", ")})
+         AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`
+    ).run(...SEED.map(([d]) => d)).changes;
+    console.log(`migração 33: feriados ${SEED.map(([d]) => d).join(", ")}; ${descartadas} rota(s) gerada(s) em feriado descartada(s).`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

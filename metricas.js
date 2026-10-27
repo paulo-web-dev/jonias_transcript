@@ -5,8 +5,8 @@
 // consome estas métricas prontas, nunca as produz.
 //
 // Convenções (decisões do usuário):
-// - Denominador de meta = DIAS ÚTEIS (seg–sex) do período. Sem feriados nesta
-//   etapa (limitação documentada no CLAUDE.md).
+// - Denominador de meta = DIAS ÚTEIS do período: seg–sex fora da tabela de
+//   feriados (migração 33, feriados.js).
 // - "Discadas" (esforço, meta 45/dia) ≠ "atendidas" (qualidade da lista);
 //   ligação "só Encerrada" conta como discada.
 // - TMA usa sempre tempo_conversa_seg — nunca duracao_seg (que inclui toque).
@@ -20,16 +20,16 @@
 //   ranking, metas ou feedback.
 
 const db = require("./db.js");
+const { diaUtil, ehFeriado } = require("./feriados.js");
 
-// Dias úteis (seg–sex) entre duas datas "YYYY-MM-DD", inclusivo
+// Dias úteis (seg–sex, fora os feriados) entre duas datas "YYYY-MM-DD", inclusivo
 function diasUteis(de, ate) {
   const inicio = new Date(de + "T00:00:00Z");
   const fim = new Date(ate + "T00:00:00Z");
   if (isNaN(inicio) || isNaN(fim) || fim < inicio) return 0;
   let n = 0;
   for (let d = new Date(inicio); d <= fim; d.setUTCDate(d.getUTCDate() + 1)) {
-    const dia = d.getUTCDay();
-    if (dia >= 1 && dia <= 5) n++;
+    if (diaUtil(d.toISOString().slice(0, 10))) n++;
   }
   return n;
 }
@@ -125,7 +125,7 @@ function diasBatidos(porDia, de, ate, metaDia) {
   let batidos = 0, avaliados = 0;
   for (let d = new Date(de + "T12:00:00Z"); d.toISOString().slice(0, 10) <= ate; d.setUTCDate(d.getUTCDate() + 1)) {
     const iso = d.toISOString().slice(0, 10);
-    if (d.getUTCDay() === 0 || d.getUTCDay() === 6 || iso > hoje) continue;
+    if (!diaUtil(iso) || iso > hoje) continue;
     const bateu = (porDia?.get(iso) || 0) >= metaDia;
     if (iso === hoje && !bateu) continue;
     avaliados++;
@@ -428,8 +428,21 @@ const isoDia = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate
 function diaUtilAnterior(data) {
   const d = new Date(data + "T00:00:00");
   do d.setDate(d.getDate() - 1);
-  while (d.getDay() === 0 || d.getDay() === 6);
+  while (d.getDay() === 0 || d.getDay() === 6 || ehFeriado(isoDia(d)));
   return isoDia(d);
+}
+
+// Dias da semana de trabalho (seg–sex) a partir da segunda, sem os feriados —
+// a meta FECHADA da semana é metaDia × estes dias (5 numa semana sem feriado;
+// 4 na semana de Finados, 02/11/2026)
+function diasDaSemanaUteis(semanaDe) {
+  const d = new Date(semanaDe + "T12:00:00Z");
+  const dias = [];
+  for (let i = 0; i < 5; i++, d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = d.toISOString().slice(0, 10);
+    if (!ehFeriado(iso)) dias.push(iso);
+  }
+  return dias;
 }
 
 // Fonte atrasada = sem dado desde antes do último dia útil anterior a hoje
@@ -459,7 +472,8 @@ function calcularRitmo(valor, metaDia, horaUltimoDado) {
 //   semana = todos os dias ENCERRADOS com rota fecharam 100%; hoje só conta
 //   quando fecha (dia em curso não reprova). Sem rota na semana = neutro.
 // - Pipeline (decisão do usuário, 2026-10-05): ELEGÍVEL ao prêmio = acumulado
-//   da semana ≥ meta diária × 5 (R$ 42.000) — por dia não funciona, o lead
+//   da semana ≥ meta diária × dias úteis da semana (R$ 42.000; R$ 33.600 numa
+//   semana com feriado — migração 33) — por dia não funciona, o lead
 //   grande cai num dia só. `pct` e `faltaSemanaCentavos` medem contra a meta
 //   da semana. O `estado` continua sendo o RITMO (acumulado × meta diária ×
 //   dias até hoje: ok | pendente | fora) e só decide o destaque EM DIA da
@@ -496,7 +510,7 @@ function statusSemanaTv({ hoje, semanaDe, painelSemana, painelDia, rotaSemana })
     const valor = p.pipeline.valor;
     const metaAteOntem = metaDia != null ? metaDia * encerrados : null;
     const metaAteHoje = metaDia != null ? metaDia * (encerrados + (hojeUtil ? 1 : 0)) : null;
-    const metaSemana = metaDia != null ? metaDia * 5 : null;
+    const metaSemana = metaDia != null ? metaDia * diasDaSemanaUteis(semanaDe).length : null;
     const pipeline = {
       valor,
       metaDia,
@@ -617,7 +631,7 @@ function dadosTvCompleto({ rotaSemana = [] } = {}) {
     const dias = [];
     const d = new Date(ateIso + "T00:00:00");
     while (dias.length < n) {
-      if (d.getDay() >= 1 && d.getDay() <= 5) dias.unshift(isoDia(d));
+      if (diaUtil(isoDia(d))) dias.unshift(isoDia(d));
       d.setDate(d.getDate() - 1);
     }
     return dias;
@@ -625,11 +639,7 @@ function dadosTvCompleto({ rotaSemana = [] } = {}) {
   // Sem CDR de hoje o sparkline termina no dia útil anterior — um zero de
   // "dado que ainda não chegou" leria como queda real
   const diasSpark = listaDiasUteis(ultimoDadoHoje ? hoje : diaUtilAnterior(hoje), 5);
-  const diasSemanaCheia = Array.from({ length: 5 }, (_, i) => {
-    const d = new Date(semanaDe + "T00:00:00");
-    d.setDate(d.getDate() + i);
-    return isoDia(d);
-  });
+  const diasSemanaCheia = diasDaSemanaUteis(semanaDe); // seg–sex sem os feriados
   const desdeSeries = (diasSpark[0] < semanaDe ? diasSpark[0] : semanaDe) + "T00:00:00";
   const linhasDiaSerie = db.prepare(
     `SELECT pe.nome nome, substr(l.data_hora, 1, 10) dia, COUNT(*) n
@@ -677,11 +687,13 @@ function dadosTvCompleto({ rotaSemana = [] } = {}) {
       .sort((a, b) => b.valor - a.valor),
   };
 
-  // ---- Semana corrente (meta FECHADA: metaDia × 5, seja segunda ou sexta —
-  // decisão do usuário 2026-08-19: o alvo não muda de tamanho conforme a
-  // semana avança; o contexto temporal vem do "dia N de 5" no título) ----
+  // ---- Semana corrente (meta FECHADA: metaDia × dias úteis da semana, seja
+  // segunda ou sexta — decisão do usuário 2026-08-19: o alvo não muda de
+  // tamanho conforme a semana avança; o contexto temporal vem do "dia N de M"
+  // no título; M = 5 sem feriado, 4 na semana de Finados — migração 33) ----
   const mSemana = calcularMetricas(semanaDe, hoje, null, SEM_QUALIDADE);
-  const metaSemanaDe = (m) => (m.metaDia != null ? Math.round(m.metaDia * 5 * 10) / 10 : null);
+  const nDiasSemana = diasSemanaCheia.length;
+  const metaSemanaDe = (m) => (m.metaDia != null ? Math.round(m.metaDia * nDiasSemana * 10) / 10 : null);
   const comMetaFechada = (m) => {
     const meta = metaSemanaDe(m);
     return { valor: m.valor, meta, atingimento: meta ? pct(m.valor, meta) : null };
@@ -719,7 +731,8 @@ function dadosTvCompleto({ rotaSemana = [] } = {}) {
   const semana = {
     de: semanaDe,
     ate: hoje,
-    diasUteis: mSemana.diasUteis, // decorridos — vira o "dia N de 5"
+    diasUteis: mSemana.diasUteis, // decorridos — vira o "dia N de M"
+    diasNaSemana: nDiasSemana, // M: dias úteis da semana inteira (feriado sai)
     porPessoa: doPainel(mSemana.porPessoa).map((p) => ({
       nome: p.nome,
       discadas: comMetaFechada(p.ligacoes.discadas),
@@ -776,7 +789,7 @@ function dadosTvCompleto({ rotaSemana = [] } = {}) {
       return {
         dias: diasSemanaCheia,
         metaDia,
-        metaSemana: metaDia != null ? metaDia * 5 : null,
+        metaSemana: metaDia != null ? metaDia * nDiasSemana : null,
         porPessoa: painelSemana.map((p) => {
           let soma = 0;
           return { nome: p.nome, valores: decorridos.map((di) => (soma += pipelinePorDia.get(p.nome)?.get(di) ?? 0)) };
@@ -848,6 +861,7 @@ function dadosTvCompleto({ rotaSemana = [] } = {}) {
     data: hoje,
     semanaDe,
     diaDaSemana: mSemana.diasUteis,
+    diasNaSemana: nDiasSemana,
     porPessoa: status,
     // Sai da rotação sem rota hoje E sem meta de pipeline para ninguém
     ativo: status.some((x) => x.rota.hoje) || status.some((x) => x.pipeline.metaDia != null),
@@ -855,6 +869,7 @@ function dadosTvCompleto({ rotaSemana = [] } = {}) {
   const premio = {
     semanaDe,
     diaDaSemana: mSemana.diasUteis,
+    diasNaSemana: nDiasSemana,
     ranking,
     vencedor: vencedor ? { nome: vencedor.nome, posicao: vencedor.posicao, receitaCentavos: vencedor.receitaCentavos } : null,
     // Sai da rotação enquanto ninguém do painel vendeu na semana
@@ -1036,7 +1051,12 @@ function resumoMetas() {
     incluiGerencial: configBool("meta_equipe_inclui_gerencial"),
   };
 
-  return { hoje, indicadores: INDICADORES, receitaIndicadores: [...INDICADORES_RECEITA], pessoas, padrao, porPessoa, equipe, receitaMes, historico };
+  // pipeline semana/mês derivados da diária: dias úteis já sem os feriados
+  const segunda = new Date(hoje + "T12:00:00Z");
+  segunda.setUTCDate(segunda.getUTCDate() - ((segunda.getUTCDay() + 6) % 7));
+  const fimMes = new Date(Date.UTC(Number(hoje.slice(0, 4)), Number(hoje.slice(5, 7)), 0)).toISOString().slice(0, 10);
+  const diasUteisPara = { semana: diasDaSemanaUteis(segunda.toISOString().slice(0, 10)).length, mes: diasUteis(mesDe, fimMes) };
+  return { hoje, indicadores: INDICADORES, receitaIndicadores: [...INDICADORES_RECEITA], pessoas, padrao, porPessoa, equipe, receitaMes, historico, diasUteisPara };
 }
 
 // Grava uma alteração de metas preservando o histórico: a linha aberta

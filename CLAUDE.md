@@ -76,6 +76,7 @@ aula-ai/
 ├── prospeccao.js    # prospecção ativa: importação, tela de trabalho, carteiras, gerencial
 ├── cruzamento.js    # Fase 4: CDR × prospecção/Omie/matrículas (classe por ligação, painéis)
 ├── rota.js          # Rota do dia: campanha por setor, geração 17h, bloqueio por telefone, baixa CDR/manual, painel
+├── feriados.js      # feriados (migração 33): dia útil = seg–sex fora da tabela — Rota, metas e TV
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
 ├── escopo.js        # papéis (admin | vendedor) e escopo por regional — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
@@ -88,6 +89,7 @@ aula-ai/
 ├── scripts/banco.js # manutenção do SQLite: conferir | verificar | checkpoint | backup (deploy seguro)
 ├── scripts/viabilidade-rota.js # SÓ LEITURA: estoque de uma campanha da Rota por consultor/regional
 ├── scripts/simular-fila.js # SÓ LEITURA: simula a fila da Rota dia a dia numa CÓPIA temporária do banco (rota.js real)
+├── scripts/simular-setores.js # SÓ LEITURA: Rota por setor de vendedor — estoque, bloqueados pelo histórico, regras T/V/E, complementos
 ├── scripts/diagnostico-pipeline.js # SÓ LEITURA: pipeline por consultor/dia, ticket zero/retroativo, conversão
 ├── scripts/carteira-consultor.js # SÓ LEITURA: carteira de um consultor e as regionais que ficam órfãs se ele sair
 ├── DEPLOY.md        # procedimento de deploy em produção (Docker) e migração do banco p/ o volume
@@ -213,7 +215,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **32**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **33**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -736,6 +738,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/rota/painel?data=` | admin: campanha (hoje / data / próxima geração / histórico), `rotasDia` com progresso, `estoque` da próxima geração (telefones, dias da equipe, por consultor e regional, `orfaos`, `semCarteira`), `acumulado` da campanha, `tipos` |
 | `POST /api/rota/campanha` | admin: `{fila: [ids na ordem] (vazia = encerrar), refazerFuturas}` (`{tipoId}` sozinho = fila de um) → vale na próxima data útil sem rota; gera o que já for devido; tipo repetido/inativo → 400, inexistente → 404 |
 | `POST /api/rota/gerar` | admin: gera as rotas faltantes (hoje e, após 17h, o próximo dia útil) |
+| `GET/POST /api/feriados`, `DELETE /api/feriados/:data` | admin: feriados (migração 33). POST `{data, nome}` só hoje em diante (passado → 400: mudaria relatórios fechados), descarta as rotas dessa data sem baixa (`descartadas`, `comBaixa`); DELETE de feriado futuro devolve a data a dia útil e roda `garantirRotas`. Ambos emitem SSE `config` (a TV refaz o fetch) |
 | `GET/POST /api/rota/tipos`, `PUT /api/rota/tipos/:id` | admin: tipos de rota + setores disponíveis (uf, aba, linhas, aptas); setor inexistente/cota fora de 1–500/nome repetido → 400 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
@@ -911,7 +914,7 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
 
 ### ✅ Etapa 2 (central de dados) — Motor de métricas (concluída)
 - `metricas.js`: motor **em SQL puro — nenhum número sai de modelo de linguagem**;
-  denominador = **dias úteis** (seg–sex, sem feriados — limitação conhecida);
+  denominador = **dias úteis** (seg–sex; feriados descontados desde a migração 33);
   discadas (meta 45/dia, inclui "só Encerrada") ≠ atendidas (qualidade);
   **TMA = tempo_conversa_seg, nunca duração bruta**; leads (meta 14/dia) por
   `fase_01_em`; perdidas por `COALESCE(fase_06_em, atualizado_em)` (flag de
@@ -1382,6 +1385,31 @@ da prefeitura) — o limite era só a volta ao 1º tipo.
 - Simulação local (equipe hipotética de 5 cobrindo as 40 regionais, 60 dias
   úteis, tudo ligado): as 7 campanhas com dias > 0; uma volta leva **29 a 48
   dias úteis** conforme o tamanho da carteira (não considera feriados).
+
+### 🚧 Rota por setor de vendedor (2026-10-27, decisões do usuário)
+Reestruturação para o fim do ano, em três fases: (1) feriados; (2) setores por
+vendedor sem regionais, a partir de 03/11, com curso e turmas da campanha na
+tela; (3) Rota Extra. `scripts/simular-setores.js` (só leitura) mede o estoque
+de cada vendedor, os telefones bloqueados pelo histórico, as regras de
+bloqueio e os complementos. Medido no banco local: com a regra T (a atual, por
+tipo — decisão do usuário) Bianca (774 telefones, 17 dias) e Eduardo (859, 19)
+ficam curtos em dezembro; a regra estrita (telefone bloqueado para todos)
+deixaria todo mundo curto desde 13/11.
+- ✅ **Fase 1 — feriados** (migração 33): tabela `feriados(data PK, nome,
+  criado_em, usuario_id)`, `feriados.js` (cache em memória, invalidado na
+  escrita). Dia útil = seg–sex fora da tabela, em `rota.js` (`diaUtil`: sem
+  geração em feriado, inclusive em `gerarRotas` chamado direto; a rota de sexta
+  17h vai para o próximo dia útil) e em `metricas.js` (`diasUteis`,
+  `diaUtilAnterior`, `diasBatidos`, sparkline). A meta FECHADA da semana da TV
+  passou de metaDia × 5 para metaDia × dias úteis da semana
+  (`diasDaSemanaUteis`): na semana de Finados o pipeline do prêmio é R$ 33.600
+  e o título diz "dia N de 4" (`diasNaSemana` no payload); a curva acumulada
+  tem 4 pontos. `/metas` recebe `diasUteisPara {semana, mes}` do servidor.
+  Seed: 02/11, 15/11 (domingo, sem efeito), 20/11 (Consciência Negra), 25/12,
+  01/01/2027; 24/12 e 31/12 são dias úteis (o usuário ajusta na mão). Feriado
+  passado não é cadastrado nem removido. Painel da Rota: seção "Feriados".
+  ⚠ Quinta quebra de comparabilidade, pequena: período congelado antes que
+  contenha um destes feriados tem 1 dia útil a mais que um recálculo.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

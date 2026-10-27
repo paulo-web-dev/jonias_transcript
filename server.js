@@ -32,6 +32,7 @@ const territorio = require("./territorio.js");
 const prospeccao = require("./prospeccao.js");
 const cruzamento = require("./cruzamento.js");
 const rota = require("./rota.js");
+const feriados = require("./feriados.js");
 const backup = require("./backup.js");
 const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
 const { hashSenha, gerarSenhaInicial, validarSenhaNova } = require("./auth.js");
@@ -244,7 +245,7 @@ const PREFIXOS_SO_ADMIN = [
   "/api/usuarios", "/api/carteiras", "/api/prospeccao/cobertura", "/api/prospeccao/gerencial", "/api/prospeccao/marcacoes",
   "/api/prospeccao/status", "/api/territorio/cobertura", "/api/territorio/pendencias",
   "/api/territorio/apelidos", "/api/resumo",
-  "/api/rota/painel", "/api/rota/campanha", "/api/rota/gerar", "/api/rota/tipos",
+  "/api/rota/painel", "/api/rota/campanha", "/api/rota/gerar", "/api/rota/tipos", "/api/feriados",
 ];
 app.use("/api", (req, res, next) => {
   const caminho = req.originalUrl.split("?")[0];
@@ -917,6 +918,31 @@ app.put("/api/rota/tipos/:id", (req, res) => {
     res.json(rota.gravarTipo({ ...(req.body || {}), id: Number(req.params.id) }, req.usuario.id));
   } catch (err) {
     responderErroRota("rota/tipos/:id", err, res);
+  }
+});
+
+// Feriados (migração 33): sem rota e fora dos dias úteis das metas. Admin.
+app.get("/api/feriados", (req, res) => {
+  res.json({ feriados: feriados.listar() });
+});
+
+app.post("/api/feriados", (req, res) => {
+  try {
+    const r = feriados.adicionar(req.body || {}, req.usuario.id);
+    emitirEventoTv("feriados", "config"); // a TV refaz o fetch: meta da semana e "dia N de M" mudam
+    res.status(201).json({ ...r, feriados: feriados.listar() });
+  } catch (err) {
+    responderErroRota("feriados", err, res);
+  }
+});
+
+app.delete("/api/feriados/:data", (req, res) => {
+  try {
+    const r = feriados.remover(req.params.data);
+    emitirEventoTv("feriados", "config");
+    res.json({ ...r, geradas: rota.garantirRotas(), feriados: feriados.listar() });
+  } catch (err) {
+    responderErroRota("feriados/:data", err, res);
   }
 });
 
