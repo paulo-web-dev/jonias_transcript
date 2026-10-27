@@ -32,6 +32,17 @@
 // - Baixa: pelo CDR (ligação DAQUELE consultor para o número, no dia da rota;
 //   atendida ou não) ou manual (registrar contato no dia). Só leitura sobre o
 //   contato: a baixa pelo CDR não mexe em último contato nem no histórico.
+// - ROTA POR SETOR DE VENDEDOR (migração 34, decisões do usuário 2026-10-27):
+//   campanha PRÓPRIA por vendedor (rota_campanhas.pessoa_id), sem regionais —
+//   ele recebe os setores da fila dele em todo o PR e SC, e o consultor
+//   gravado no contato é ignorado (o setor manda). Modo 'prioridade': todo dia
+//   começa no 1º tipo da fila (o setor principal) e só completa a cota com o
+//   seguinte (o complemento) quando falta estoque — sem ponteiro, sem volta.
+//   Quem tem campanha própria (mesmo encerrada) sai da campanha geral; a geral
+//   (pessoa_id NULL, carteiras regionais, fila cíclica) continua para os outros.
+//   Bloqueio: regra T de sempre (telefone dentro do tipo, contato entre tipos).
+//   Cada tipo leva as TURMAS (curso + data) que o vendedor oferece, mostradas
+//   na tela da rota.
 
 const fs = require("fs");
 const path = require("path");
@@ -65,11 +76,13 @@ function proximoDiaUtil(iso) {
   while (!diaUtil(d)) d = somarDias(d, 1);
   return d;
 }
-const temRotas = (data) => !!db.prepare("SELECT 1 FROM rotas WHERE data = ? LIMIT 1").get(data);
-// Primeira data útil ≥ hoje que ainda não tem rota: é onde uma troca de campanha passa a valer
-function proximaDataSemRota(hoje = agoraBrasilia().data) {
+const temRotas = (data, pessoaId = null) =>
+  !!db.prepare("SELECT 1 FROM rotas WHERE data = ? AND (? IS NULL OR pessoa_id = ?) LIMIT 1").get(data, pessoaId, pessoaId);
+// Primeira data útil ≥ hoje que ainda não tem rota (de ninguém, ou do vendedor):
+// é onde uma troca de campanha passa a valer
+function proximaDataSemRota(hoje = agoraBrasilia().data, pessoaId = null) {
   let d = diaUtil(hoje) ? hoje : proximoDiaUtil(hoje);
-  while (temRotas(d)) d = proximoDiaUtil(d);
+  while (temRotas(d, pessoaId)) d = proximoDiaUtil(d);
   return d;
 }
 
@@ -103,7 +116,23 @@ function vizinhos() {
 // ---------- tipos de rota (setores da campanha) ----------
 
 function tipoDe(r) {
-  return r && { id: r.id, nome: r.nome, setores: JSON.parse(r.setores_json), cota: r.cota, ativo: !!r.ativo, criadoEm: r.criado_em, atualizadoEm: r.atualizado_em };
+  return r && {
+    id: r.id, nome: r.nome, setores: JSON.parse(r.setores_json), cota: r.cota, ativo: !!r.ativo,
+    turmas: r.turmas_json ? JSON.parse(r.turmas_json) : [], criadoEm: r.criado_em, atualizadoEm: r.atualizado_em,
+  };
+}
+
+// Turmas oferecidas pelo tipo (migração 34): [{curso, data}] em ordem de data
+function normalizarTurmas(lista) {
+  if (!Array.isArray(lista)) throw erro("Turmas inválidas.");
+  if (lista.length > 12) throw erro("No máximo 12 turmas por tipo.");
+  return lista.map((t) => {
+    const curso = String(t?.curso || "").trim().slice(0, 120);
+    const data = String(t?.data || "");
+    if (!curso) throw erro("Cada turma precisa do nome do curso.");
+    if (!RE_DATA.test(data)) throw erro(`Data da turma "${curso}" inválida — use AAAA-MM-DD.`);
+    return { curso, data };
+  }).sort((a, b) => a.data.localeCompare(b.data));
 }
 const lerTipo = (id) => tipoDe(db.prepare("SELECT * FROM rota_tipos WHERE id = ?").get(Number(id)));
 const listarTipos = () => db.prepare("SELECT * FROM rota_tipos ORDER BY ativo DESC, nome").all().map(tipoDe);
@@ -139,12 +168,14 @@ function gravarTipo(dados, usuarioId) {
   if (dados.id) {
     const atual = lerTipo(dados.id);
     if (!atual) throw erro("Tipo de rota não encontrado.", 404);
-    db.prepare("UPDATE rota_tipos SET nome = ?, setores_json = ?, cota = ?, ativo = ?, atualizado_em = ?, usuario_id = ? WHERE id = ?")
-      .run(nome, JSON.stringify(setores), cota, ativo, agora, usuarioId, atual.id);
+    const turmas = dados.turmas === undefined ? atual.turmas : normalizarTurmas(dados.turmas);
+    db.prepare("UPDATE rota_tipos SET nome = ?, setores_json = ?, cota = ?, ativo = ?, turmas_json = ?, atualizado_em = ?, usuario_id = ? WHERE id = ?")
+      .run(nome, JSON.stringify(setores), cota, ativo, JSON.stringify(turmas), agora, usuarioId, atual.id);
     return lerTipo(atual.id);
   }
-  const id = db.prepare("INSERT INTO rota_tipos (nome, setores_json, cota, ativo, criado_em, usuario_id) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(nome, JSON.stringify(setores), cota, ativo, agora, usuarioId).lastInsertRowid;
+  const turmas = normalizarTurmas(dados.turmas ?? []);
+  const id = db.prepare("INSERT INTO rota_tipos (nome, setores_json, cota, ativo, turmas_json, criado_em, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(nome, JSON.stringify(setores), cota, ativo, JSON.stringify(turmas), agora, usuarioId).lastInsertRowid;
   return lerTipo(id);
 }
 
@@ -157,24 +188,50 @@ function comFila(c) {
   if (!c) return null;
   const ids = c.fila_json ? JSON.parse(c.fila_json) : c.tipoId ? [c.tipoId] : [];
   delete c.fila_json;
-  const nomes = new Map(db.prepare("SELECT id, nome FROM rota_tipos").all().map((t) => [t.id, t.nome]));
-  c.fila = ids.map((id) => ({ id, nome: nomes.get(id) ?? `tipo ${id}` }));
+  const tipos = new Map(db.prepare("SELECT id, nome, turmas_json FROM rota_tipos").all().map((t) => [t.id, t]));
+  c.fila = ids.map((id) => ({ id, nome: tipos.get(id)?.nome ?? `tipo ${id}`, turmas: JSON.parse(tipos.get(id)?.turmas_json || "[]") }));
   c.nome = c.fila.length ? c.fila.map((t) => t.nome).join(" → ") : null;
+  c.pessoaId = c.pessoaId ?? null;
+  c.modo = c.modo || "ciclica";
   return c;
 }
-function campanhaVigente(data) {
+const SQL_CAMPANHA = `SELECT c.id, c.tipo_id tipoId, c.fila_json, c.vale_desde valeDesde, c.criada_em criadaEm, c.pessoa_id pessoaId, c.modo
+  FROM rota_campanhas c`;
+// Campanha GERAL (pessoaId null) ou a PRÓPRIA de um vendedor vigente na data
+function campanhaVigente(data, pessoaId = null) {
   return comFila(db.prepare(
-    `SELECT c.id, c.tipo_id tipoId, c.fila_json, c.vale_desde valeDesde, c.criada_em criadaEm
-     FROM rota_campanhas c WHERE c.vale_desde <= ? ORDER BY c.vale_desde DESC, c.id DESC LIMIT 1`
-  ).get(data));
+    `${SQL_CAMPANHA} WHERE c.vale_desde <= ? AND c.pessoa_id IS ? ORDER BY c.vale_desde DESC, c.id DESC LIMIT 1`
+  ).get(data, pessoaId === null ? null : Number(pessoaId)));
 }
+// Campanhas próprias vigentes na data: pessoaId → campanha (encerrada inclusive:
+// quem já tem campanha própria não volta para a geral)
+function campanhasProprias(data) {
+  return new Map(db.prepare("SELECT DISTINCT pessoa_id p FROM rota_campanhas WHERE pessoa_id IS NOT NULL AND vale_desde <= ?")
+    .all(data).map((r) => [r.p, campanhaVigente(data, r.p)]));
+}
+// A campanha que vale para um vendedor na data: a própria, senão a geral
+const campanhaDaPessoa = (data, pessoaId) =>
+  (pessoaId && db.prepare("SELECT 1 FROM rota_campanhas WHERE pessoa_id = ? AND vale_desde <= ? LIMIT 1").get(Number(pessoaId), data)
+    ? campanhaVigente(data, pessoaId) : campanhaVigente(data));
+// Próxima campanha AGENDADA (vale depois de `data`) — geral ou de um vendedor
+const campanhaAgendada = (data, pessoaId = null) => comFila(db.prepare(
+  `${SQL_CAMPANHA} WHERE c.vale_desde > ? AND c.pessoa_id IS ? ORDER BY c.vale_desde, c.id DESC LIMIT 1`
+).get(data, pessoaId === null ? null : Number(pessoaId)));
 
 // Troca a FILA da campanha (lista ordenada de tipos; vazia = encerrar). Passa
 // a valer na próxima data útil que ainda não tem rota (rota gerada não muda).
 // Com refazerFuturas, o admin descarta antes as rotas de datas FUTURAS que
 // ninguém começou (nenhuma baixa) — a de amanhã, gerada às 17h, volta a ser
 // gerada já com a fila nova. `tipoId` sozinho (cliente antigo) = fila de um.
-function trocarCampanha({ fila, tipoId, refazerFuturas = false }, usuarioId) {
+// Com `pessoaId` (migração 34): a campanha PRÓPRIA do vendedor (modo
+// prioridade, sem regional); a troca e o "refazer" valem só para as rotas dele.
+function trocarCampanha({ fila, tipoId, refazerFuturas = false, pessoaId = null }, usuarioId) {
+  if (pessoaId !== null && pessoaId !== undefined && pessoaId !== "") {
+    pessoaId = Number(pessoaId);
+    if (!db.prepare("SELECT 1 FROM pessoas WHERE id = ? AND tipo = 'consultor' AND ativo = 1").get(pessoaId)) throw erro("Consultor não encontrado.", 404);
+  } else {
+    pessoaId = null;
+  }
   if (fila === undefined) fila = tipoId === null || tipoId === undefined || tipoId === "" ? [] : [tipoId];
   if (!Array.isArray(fila)) throw erro("Fila inválida.");
   if (fila.length > 20) throw erro("Fila longa demais — no máximo 20 tipos.");
@@ -192,23 +249,26 @@ function trocarCampanha({ fila, tipoId, refazerFuturas = false }, usuarioId) {
     let descartadas = 0;
     if (refazerFuturas) {
       descartadas = db.prepare(
-        `DELETE FROM rotas WHERE data > ? AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`
-      ).run(hoje).changes;
+        `DELETE FROM rotas WHERE data > ? AND (? IS NULL OR pessoa_id = ?)
+           AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`
+      ).run(hoje, pessoaId, pessoaId).changes;
     }
-    const valeDesde = proximaDataSemRota(hoje);
-    // agendamentos anteriores que ainda não geraram rota são substituídos por este
+    const valeDesde = proximaDataSemRota(hoje, pessoaId);
+    // agendamentos anteriores (do mesmo dono) que ainda não geraram rota são substituídos por este
     db.prepare(
-      `DELETE FROM rota_campanhas WHERE vale_desde >= ? AND NOT EXISTS (SELECT 1 FROM rotas r WHERE r.campanha_id = rota_campanhas.id)`
-    ).run(valeDesde);
-    const id = db.prepare("INSERT INTO rota_campanhas (tipo_id, fila_json, vale_desde, criada_em, usuario_id) VALUES (?, ?, ?, ?, ?)")
-      .run(tipo ? tipo.id : null, JSON.stringify(tipos.map((t) => t.id)), valeDesde, new Date().toISOString(), usuarioId).lastInsertRowid;
+      `DELETE FROM rota_campanhas WHERE vale_desde >= ? AND pessoa_id IS ? AND NOT EXISTS (SELECT 1 FROM rotas r WHERE r.campanha_id = rota_campanhas.id)`
+    ).run(valeDesde, pessoaId);
+    const id = db.prepare("INSERT INTO rota_campanhas (tipo_id, fila_json, vale_desde, criada_em, usuario_id, pessoa_id, modo) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(tipo ? tipo.id : null, JSON.stringify(tipos.map((t) => t.id)), valeDesde, new Date().toISOString(), usuarioId,
+        pessoaId, pessoaId ? "prioridade" : "ciclica").lastInsertRowid;
     return { id, valeDesde, descartadas };
   })();
   const nome = tipos.map((t) => t.nome).join(" → ");
-  console.log(`rota: campanha ${tipo ? `"${nome}"` : "encerrada"} a partir de ${resultado.valeDesde}` +
+  const dono = pessoaId ? ` de ${db.prepare("SELECT nome FROM pessoas WHERE id = ?").get(pessoaId).nome}` : "";
+  console.log(`rota: campanha${dono} ${tipo ? `"${nome}"` : "encerrada"} a partir de ${resultado.valeDesde}` +
     (resultado.descartadas ? ` — ${resultado.descartadas} rota(s) futura(s) descartada(s)` : ""));
   const geracao = garantirRotas();
-  return { ...resultado, tipo, fila: tipos, nome, geracao };
+  return { ...resultado, tipo, fila: tipos, nome, pessoaId, geracao };
 }
 
 // ---------- elegibilidade ----------
@@ -224,6 +284,22 @@ function consultoresComCarteira() {
     p.regionais.add(l.regional);
   }
   return [...porId.values()];
+}
+
+// Quem recebe rota na data, cada um com a campanha que vale para ele: quem tem
+// campanha PRÓPRIA vigente com fila (sem regional: `regionais` null) e, se a
+// campanha geral tem fila, os consultores com carteira SEM campanha própria
+function participantes(data) {
+  const ativos = new Map(db.prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1").all().map((p) => [p.id, p]));
+  const proprias = campanhasProprias(data);
+  const lista = [];
+  for (const [pid, c] of proprias) {
+    const p = ativos.get(pid);
+    if (p && c?.tipoId) lista.push({ pessoa: { id: p.id, nome: p.nome, regionais: null }, campanha: c });
+  }
+  const geral = campanhaVigente(data);
+  if (geral?.tipoId) for (const p of consultoresComCarteira()) if (!proprias.has(p.id)) lista.push({ pessoa: p, campanha: geral });
+  return lista;
 }
 
 // Bloqueios para o tipo `tipoId` na data D (decisão do usuário, 2026-09-30,
@@ -292,12 +368,16 @@ function carregarCandidatos(setores) {
 }
 
 // Elegíveis de um consultor: um contato por telefone (o do próprio consultor,
-// depois a ordem dos setores, depois o que tem responsável, depois o id)
+// depois a ordem dos setores, depois o que tem responsável, depois o id).
+// Campanha própria (pessoa.regionais null): todo o PR e SC, e o consultor
+// gravado no contato não conta — o setor manda.
 function elegiveisDe(pessoa, candidatos, bloqueados) {
   const porChave = new Map();
   for (const c of candidatos) {
-    if (!pessoa.regionais.has(c.regional)) continue;
-    if (c.pessoaId !== null && c.pessoaId !== pessoa.id) continue;
+    if (pessoa.regionais) {
+      if (!pessoa.regionais.has(c.regional)) continue;
+      if (c.pessoaId !== null && c.pessoaId !== pessoa.id) continue;
+    }
     if (bloqueado(bloqueados, c)) continue;
     const atual = porChave.get(c.chave);
     if (!atual || preferir(c, atual, pessoa.id) < 0) porChave.set(c.chave, c);
@@ -314,13 +394,17 @@ const ordemNoMunicipio = (a, b) =>
 // ---------- geração ----------
 
 // Tipos ativos da fila de uma campanha, cada um com bloqueios e candidatos
-// (tipo inativado depois de entrar na fila é pulado, com aviso no log)
-function fasesDaFila(campanha, data) {
+// (tipo inativado depois de entrar na fila é pulado, com aviso no log). `cache`
+// (tipo id → fase) evita recalcular o mesmo tipo para vários vendedores.
+function fasesDaFila(campanha, data, cache = new Map()) {
   const fases = [];
   for (const { id } of campanha.fila) {
-    const tipo = lerTipo(id);
-    if (!tipo || !tipo.ativo) { console.warn(`rota: tipo ${tipo ? `"${tipo.nome}"` : id} da fila está inativo/inexistente — pulado`); continue; }
-    fases.push({ tipo, bloqueados: bloqueiosPara(data, tipo.id), candidatos: carregarCandidatos(tipo.setores) });
+    if (!cache.has(id)) {
+      const tipo = lerTipo(id);
+      if (!tipo || !tipo.ativo) console.warn(`rota: tipo ${tipo ? `"${tipo.nome}"` : id} da fila está inativo/inexistente — pulado`);
+      cache.set(id, tipo && tipo.ativo ? { tipo, bloqueados: bloqueiosPara(data, tipo.id), candidatos: carregarCandidatos(tipo.setores) } : null);
+    }
+    if (cache.get(id)) fases.push(cache.get(id));
   }
   return fases;
 }
@@ -366,37 +450,42 @@ const voltaDesde = (inicio, n) => Array.from({ length: n }, (_, j) => (inicio + 
 // primeiro = volta concluída (`rotas.ciclo_concluido`). Sem estoque na volta
 // inteira, o ponteiro fica e nenhuma volta é registrada. Um telefone por dia
 // em todas as rotas; consultores em tipos diferentes intercalam no rodízio.
+// Campanha PRÓPRIA (modo prioridade, migração 34): sem ponteiro — todo dia
+// começa no 1º tipo da fila e completa com os seguintes só se faltar estoque.
 function gerarRotas(data, { usuarioId = null } = {}) {
   if (!RE_DATA.test(String(data || ""))) throw erro("Data inválida — use AAAA-MM-DD.");
   if (!diaUtil(data)) return { data, geradas: 0, itens: 0, motivo: "não é dia útil (fim de semana ou feriado)" };
-  const campanha = campanhaVigente(data);
-  if (!campanha || !campanha.tipoId) return { data, geradas: 0, itens: 0, motivo: "sem campanha vigente" };
   return db.transaction(() => {
+    const todos = participantes(data);
+    if (!todos.length) return { data, geradas: 0, itens: 0, motivo: "sem campanha vigente" };
     const comRota = new Set(db.prepare("SELECT pessoa_id FROM rotas WHERE data = ?").all(data).map((r) => r.pessoa_id));
-    const consultores = consultoresComCarteira().filter((p) => !comRota.has(p.id));
-    if (!consultores.length) return { data, geradas: 0, itens: 0, motivo: "nenhuma rota faltando" };
-    const fases = fasesDaFila(campanha, data);
-    if (!fases.length) return { data, geradas: 0, itens: 0, motivo: "nenhum tipo ativo na fila" };
+    const faltam = todos.filter((x) => !comRota.has(x.pessoa.id));
+    if (!faltam.length) return { data, geradas: 0, itens: 0, motivo: "nenhuma rota faltando" };
     const viz = vizinhos();
+    const cache = new Map();            // tipo id → fase (bloqueios e candidatos calculados uma vez)
     const tomados = new Set();          // telefones (chave) já em alguma rota do dia
     const contatosTomados = new Set();  // tipos com abas em comum não repetem o contato
+    const tomadosNoTipo = new Map();    // tipo id → telefones postos hoje em rota naquele tipo
+    const noTipo = (id) => tomadosNoTipo.get(id) ?? tomadosNoTipo.set(id, new Set()).get(id);
 
-    const tomadosNoTipo = fases.map(() => new Set());  // telefones postos hoje em rota, por tipo
-
-    const estados = consultores.map((p) => {
+    const estados = faltam.map(({ pessoa: p, campanha }) => {
+      const fases = fasesDaFila(campanha, data, cache);
+      if (!fases.length) { console.warn(`rota ${data}: ${p.nome} — nenhum tipo ativo na fila "${campanha.nome}"`); return null; }
       const porFase = elegiveisNaFila(p, fases).map((elegiveis) => {
         const pool = new Map();
         for (const c of elegiveis) (pool.get(c.codigo) ?? pool.set(c.codigo, []).get(c.codigo)).push(c);
         for (const lista of pool.values()) lista.sort(ordemNoMunicipio);
         return { pool, elegiveis, n: elegiveis.length };
       });
-      const ponto = pontoDoCiclo(p.id, data, campanha, fases);
+      const prioridade = campanha.modo === "prioridade";
+      const ponto = prioridade ? { ciclo: null, inicio: 0 } : pontoDoCiclo(p.id, data, campanha, fases);
       const volta = voltaDesde(ponto.inicio, fases.length);
       const primeira = volta.find((k) => porFase[k].n > 0) ?? ponto.inicio;
       const tipoRota = fases[primeira].tipo;
-      return { pessoa: p, porFase, ponto, volta, passo: 0, tipoRota, elegiveis: porFase.reduce((t, f) => t + f.n, 0),
+      return { pessoa: p, campanha, fases, prioridade, porFase, ponto, volta, passo: 0, tipoRota, elegiveis: porFase.reduce((t, f) => t + f.n, 0),
         itens: [], ultimo: null, restante: tipoRota.cota, visitados: new Set(), pool: porFase[ponto.inicio].pool };
-    });
+    }).filter(Boolean);
+    if (!estados.length) return { data, geradas: 0, itens: 0, motivo: "nenhum tipo ativo na fila" };
     // rodízio: cada um escolhe um município por vez; a ordem gira a cada dia
     const giro = Math.round(new Date(`${data}T12:00:00Z`).getTime() / 864e5) % estados.length;
     const ordem = [...estados.slice(giro), ...estados.slice(0, giro)];
@@ -437,18 +526,19 @@ function gerarRotas(data, { usuarioId = null } = {}) {
         for (const c of livres(s, m)) {
           if (s.restante <= 0) break;
           tomados.add(c.chave);
-          tomadosNoTipo[k].add(c.chave);
+          noTipo(s.fases[k].tipo.id).add(c.chave);
           contatosTomados.add(c.id);
-          s.itens.push({ ...c, tipoId: fases[k].tipo.id });
+          s.itens.push({ ...c, tipoId: s.fases[k].tipo.id });
           s.restante--;
         }
       }
     }
-    // ponteiro para o próximo dia e volta concluída
+    // ponteiro para o próximo dia e volta concluída (só fila cíclica)
     for (const s of estados) {
-      const resta = (k) => s.porFase[k].elegiveis.some((c) => !tomadosNoTipo[k].has(c.chave) && !contatosTomados.has(c.id));
+      if (s.prioridade) { s.ponteiro = null; s.concluiu = 0; continue; }
+      const resta = (k) => s.porFase[k].elegiveis.some((c) => !noTipo(s.fases[k].tipo.id).has(c.chave) && !contatosTomados.has(c.id));
       const proximo = s.volta.find(resta);
-      s.ponteiro = fases[proximo ?? s.ponto.inicio].tipo.id;
+      s.ponteiro = s.fases[proximo ?? s.ponto.inicio].tipo.id;
       s.concluiu = proximo !== undefined && proximo < s.ponto.inicio ? 1 : 0;
     }
 
@@ -461,11 +551,11 @@ function gerarRotas(data, { usuarioId = null } = {}) {
       "INSERT INTO rota_itens (rota_id, contato_id, posicao, telefone, setor, codigo_ibge, tipo_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
     );
     // setores_json = a fila NA geração (cada setor com o tipo de onde vem)
-    const setoresFila = JSON.stringify(fases.flatMap((f) => f.tipo.setores.map((x) => ({ ...x, tipoId: f.tipo.id, tipo: f.tipo.nome }))));
+    const setoresFila = (s) => JSON.stringify(s.fases.flatMap((f) => f.tipo.setores.map((x) => ({ ...x, tipoId: f.tipo.id, tipo: f.tipo.nome }))));
     let itens = 0;
     const curtas = [];
     for (const s of estados) {
-      const rotaId = insRota.run(s.pessoa.id, data, campanha.id, s.tipoRota.id, setoresFila, s.tipoRota.cota, s.elegiveis, agora, usuarioId,
+      const rotaId = insRota.run(s.pessoa.id, data, s.campanha.id, s.tipoRota.id, setoresFila(s), s.tipoRota.cota, s.elegiveis, agora, usuarioId,
         s.ponto.ciclo, s.ponteiro, s.concluiu).lastInsertRowid;
       s.itens.forEach((c, i) => insItem.run(rotaId, c.id, i + 1, c.telefone, c.setor, c.codigo, c.tipoId));
       itens += s.itens.length;
@@ -473,7 +563,8 @@ function gerarRotas(data, { usuarioId = null } = {}) {
     }
     const voltas = estados.filter((s) => s.concluiu).map((s) => `${s.pessoa.nome} (volta ${s.ponto.ciclo})`);
     if (voltas.length) console.log(`rota ${data}: volta da fila concluída — ${voltas.join(", ")}`);
-    return { data, campanha: campanha.nome, geradas: estados.length, itens, curtas, voltas };
+    const campanhas = [...new Set(estados.map((s) => (s.prioridade ? `${s.pessoa.nome}: ${s.campanha.nome}` : s.campanha.nome)))];
+    return { data, campanha: campanhas.join(" | "), geradas: estados.length, itens, curtas, voltas };
   })();
 }
 
@@ -609,11 +700,11 @@ function rotaDoDia({ data, pessoaId }, usuario, escopo) {
   const base = {
     data, hoje, proximaGeracao: proximoDiaUtil(hoje), datas,
     pessoas: escopo ? null : pessoas,
-    campanha: campanhaVigente(data),
+    campanha: pessoaId ? campanhaDaPessoa(data, pessoaId) : (participantes(data)[0]?.campanha ?? campanhaVigente(data)),
   };
   const rota = pessoaId
     ? db.prepare(
-        `SELECT r.id, r.pessoa_id pessoaId, p.nome, r.data, r.cota, r.elegiveis, r.gerada_em geradaEm, t.nome tipo, r.setores_json
+        `SELECT r.id, r.pessoa_id pessoaId, p.nome, r.data, r.cota, r.elegiveis, r.gerada_em geradaEm, t.nome tipo, r.setores_json, r.campanha_id campanhaId
          FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id JOIN rota_tipos t ON t.id = r.tipo_id
          WHERE r.pessoa_id = ? AND r.data = ?`).get(Number(pessoaId), data)
     : null;
@@ -622,6 +713,13 @@ function rotaDoDia({ data, pessoaId }, usuario, escopo) {
   const contatos = require("./prospeccao.js").payloadContatos(itens.map((i) => i.contatoId), usuario, escopo);
   rota.setores = JSON.parse(rota.setores_json);
   delete rota.setores_json;
+  // turmas que o vendedor oferece nesta rota (as dos tipos da fila da campanha
+  // da rota), em ordem de data — a tela destaca a próxima a partir da data da rota
+  const camp = comFila(db.prepare(`${SQL_CAMPANHA} WHERE c.id = ?`).get(rota.campanhaId));
+  const turmas = new Map();
+  for (const t of camp?.fila || []) for (const x of t.turmas) turmas.set(`${x.data}|${x.curso}`, x);
+  rota.turmas = [...turmas.values()].sort((a, b) => a.data.localeCompare(b.data));
+  rota.campanha = camp?.nome ?? null;
   // tipos da fila que entraram nesta rota, na ordem dos itens
   rota.tipos = [...new Map(itens.filter((i) => i.tipoId).map((i) => [i.tipoId, i.tipoNome])).values()];
   return { ...base, rota: { ...rota, itens, progresso: progressoDe(itens, rota.cota) }, contatos };
@@ -679,7 +777,8 @@ function progressoTv() {
       pct: pr.itens ? Math.floor((pr.feitas / pr.itens) * 100) : null, curta: pr.itens < pr.cota,
     };
   });
-  const ativa = !!campanha?.tipoId && porPessoa.some((p) => p.itens > 0);
+  // campanhas próprias (migração 34): a geral pode estar encerrada e haver rota
+  const ativa = porPessoa.some((p) => p.itens > 0) && (!!campanha?.tipoId || participantes(data).length > 0);
   return { data, campanha: campanha?.tipoId ? campanha.nome : null, ativa, porPessoa };
 }
 
@@ -698,58 +797,90 @@ function rotasDaSemanaTv() {
   ).all(semanaDe, ate);
 }
 
-// Estoque da FILA para a data da próxima geração: por consultor, o setor em
-// que ele está (primeiro tipo da fila com estoque), dias no setor atual e na
-// fila inteira (Σ telefones do tipo ÷ cota do tipo); por regional, o total da
-// fila. Telefone que aparece em dois tipos conta nos dois: entre tipos o
-// bloqueio é por contato, então são duas ligações (opção B).
-function estoqueDaFila(data, campanha) {
-  const fases = fasesDaFila(campanha, data);
-  if (!fases.length) return null;
-  const consultores = consultoresComCarteira();
-  const porPessoa = consultores.map((p) => ({ pessoa: p, porFase: elegiveisNaFila(p, fases) }));
-  const carteiras = db.prepare(
-    `SELECT c.regional_id regional, c.pessoa_id pessoa, c.papel, p.nome FROM carteiras c JOIN pessoas p ON p.id = c.pessoa_id
-     WHERE p.tipo = 'consultor' AND p.ativo = 1`).all();
-  const regionais = new Map();
-  for (const r of db.prepare("SELECT id, uf, sigla, nome FROM regionais").all()) {
-    regionais.set(r.id, { ...r, titular: null, apoios: [], telefones: fases.map(() => new Set()), universo: fases.map(() => new Set()) });
+// Estoque das filas para a data da próxima geração: por consultor, o setor em
+// que ele está (fila cíclica: o ponteiro; campanha própria: o 1º tipo com
+// estoque — o principal antes do complemento), dias no setor atual e na fila
+// inteira (Σ telefones do tipo ÷ cota do tipo); por regional, o total da fila
+// GERAL (só quem está nela tem regional). Telefone que aparece em dois tipos
+// conta nos dois: entre tipos o bloqueio é por contato, então são duas ligações.
+function estoqueDaFila(data) {
+  const cache = new Map();
+  const porPessoa = participantes(data).map((x) => {
+    const fases = fasesDaFila(x.campanha, data, cache);
+    return { ...x, fases, porFase: elegiveisNaFila(x.pessoa, fases) };
+  }).filter((x) => x.fases.length);
+  if (!porPessoa.length) return null;
+
+  // por tipo (todas as filas): telefones distintos entre os vendedores do tipo
+  const tipos = new Map();
+  for (const x of porPessoa) {
+    x.fases.forEach((f, k) => {
+      const t = tipos.get(f.tipo.id) ?? tipos.set(f.tipo.id, { tipo: f.tipo, chaves: new Set(), consultores: 0 }).get(f.tipo.id);
+      t.consultores++;
+      for (const c of x.porFase[k]) t.chaves.add(c.chave);
+    });
   }
-  for (const c of carteiras) {
-    const r = regionais.get(c.regional);
-    if (c.papel === "titular") r.titular = c.nome; else r.apoios.push(c.nome);
-  }
-  const comCarteira = new Set(carteiras.map((c) => c.regional));
-  const donos = new Map();
-  for (const c of carteiras) (donos.get(c.regional) ?? donos.set(c.regional, new Set()).get(c.regional)).add(c.pessoa);
+  const fila = [...tipos.values()].map((t) => ({ id: t.tipo.id, nome: t.tipo.nome, cota: t.tipo.cota, telefones: t.chaves.size,
+    diasEquipe: t.chaves.size / (t.tipo.cota * t.consultores) }));
+
+  // regionais: só a fila GERAL (carteiras)
+  const globais = porPessoa.filter((x) => x.pessoa.regionais);
+  let porRegional = [];
   const orfaos = new Set();
-  fases.forEach((f, k) => {
-    for (const x of porPessoa) for (const c of x.porFase[k]) regionais.get(c.regional)?.telefones[k].add(c.chave);
-    for (const c of f.candidatos) {
-      if (!comCarteira.has(c.regional)) continue;
-      regionais.get(c.regional).universo[k].add(c.chave);
-      if (c.pessoaId !== null && !donos.get(c.regional).has(c.pessoaId)) orfaos.add(c.id);
+  if (globais.length) {
+    const fases = globais[0].fases;
+    const carteiras = db.prepare(
+      `SELECT c.regional_id regional, c.pessoa_id pessoa, c.papel, p.nome FROM carteiras c JOIN pessoas p ON p.id = c.pessoa_id
+       WHERE p.tipo = 'consultor' AND p.ativo = 1`).all().filter((c) => globais.some((x) => x.pessoa.id === c.pessoa));
+    const regionais = new Map();
+    for (const r of db.prepare("SELECT id, uf, sigla, nome FROM regionais").all()) {
+      regionais.set(r.id, { ...r, titular: null, apoios: [], telefones: fases.map(() => new Set()), universo: fases.map(() => new Set()) });
     }
-  });
-  const totaisFase = fases.map((f, k) => new Set(porPessoa.flatMap((x) => x.porFase[k].map((c) => c.chave))).size);
-  const n = consultores.length;
+    for (const c of carteiras) {
+      const r = regionais.get(c.regional);
+      if (c.papel === "titular") r.titular = c.nome; else r.apoios.push(c.nome);
+    }
+    const comCarteira = new Set(carteiras.map((c) => c.regional));
+    const donos = new Map();
+    for (const c of carteiras) (donos.get(c.regional) ?? donos.set(c.regional, new Set()).get(c.regional)).add(c.pessoa);
+    fases.forEach((f, k) => {
+      for (const x of globais) for (const c of x.porFase[k]) regionais.get(c.regional)?.telefones[k].add(c.chave);
+      for (const c of f.candidatos) {
+        if (!comCarteira.has(c.regional)) continue;
+        regionais.get(c.regional).universo[k].add(c.chave);
+        if (c.pessoaId !== null && !donos.get(c.regional).has(c.pessoaId)) orfaos.add(c.id);
+      }
+    });
+    porRegional = [...regionais.values()].filter((r) => comCarteira.has(r.id)).map((r) => {
+      const vinculados = (r.titular ? 1 : 0) + r.apoios.length;
+      const tel = r.telefones.map((t) => t.size);
+      return { id: r.id, uf: r.uf, sigla: r.sigla, titular: r.titular, apoios: r.apoios,
+        universo: r.universo.reduce((t, u) => t + u.size, 0), telefones: tel.reduce((a, b) => a + b, 0),
+        porTipo: fases.map((f, k) => ({ nome: f.tipo.nome, telefones: tel[k] })),
+        dias: vinculados ? fases.reduce((t, f, k) => t + tel[k] / (f.tipo.cota * vinculados), 0) : 0 };
+    }).sort((a, b) => a.uf.localeCompare(b.uf) || a.dias - b.dias);
+  }
+
+  const nomesCampanhas = [...new Set(porPessoa.map((x) => x.campanha.nome))];
+  const primeira = porPessoa[0].fases[0];
   return {
-    data, tipo: campanha.nome, cota: fases[0].tipo.cota,
-    fila: fases.map((f, k) => ({ id: f.tipo.id, nome: f.tipo.nome, cota: f.tipo.cota, telefones: totaisFase[k],
-      diasEquipe: n ? totaisFase[k] / (f.tipo.cota * n) : 0 })),
-    telefones: totaisFase.reduce((a, b) => a + b, 0),
-    diasEquipe: n ? fases.reduce((t, f, k) => t + totaisFase[k] / (f.tipo.cota * n), 0) : 0,
-    // setor atual = onde a próxima rota começa (ponteiro, pulando tipo sem
-    // estoque); dias para fechar a volta = do setor atual até o último da
-    // fila (estimativa: o bloqueio vence no caminho e colegas da regional
-    // dividem o estoque). Atual antes do ponteiro = a volta fecha na próxima geração.
+    data, tipo: nomesCampanhas.join(" | "), cota: primeira.tipo.cota,
+    fila,
+    telefones: fila.reduce((t, f) => t + f.telefones, 0),
+    diasEquipe: fila.reduce((t, f) => t + f.diasEquipe, 0),
+    // setor atual = onde a próxima rota começa; fila cíclica: o ponteiro,
+    // pulando tipo sem estoque, e dias para fechar a volta = do setor atual até
+    // o último (estimativa). Campanha própria: o 1º tipo com estoque, e os dias
+    // contam a fila dele a partir daí.
     porConsultor: porPessoa.map((x) => {
-      const porTipo = fases.map((f, k) => ({ nome: f.tipo.nome, telefones: x.porFase[k].length, dias: x.porFase[k].length / f.tipo.cota }));
-      const ponto = pontoDoCiclo(x.pessoa.id, data, campanha, fases);
-      const atual = voltaDesde(ponto.inicio, fases.length).find((k) => porTipo[k].telefones > 0) ?? -1;
-      const fechando = atual >= 0 && atual < ponto.inicio;
+      const porTipo = x.fases.map((f, k) => ({ nome: f.tipo.nome, telefones: x.porFase[k].length, dias: x.porFase[k].length / f.tipo.cota }));
+      const prioridade = x.campanha.modo === "prioridade";
+      const ponto = prioridade ? { ciclo: null, inicio: 0 } : pontoDoCiclo(x.pessoa.id, data, x.campanha, x.fases);
+      const atual = voltaDesde(ponto.inicio, x.fases.length).find((k) => porTipo[k].telefones > 0) ?? -1;
+      const fechando = !prioridade && atual >= 0 && atual < ponto.inicio;
       return {
-        pessoaId: x.pessoa.id, nome: x.pessoa.nome, porTipo, ciclo: ponto.ciclo + (fechando ? 1 : 0),
+        pessoaId: x.pessoa.id, nome: x.pessoa.nome, porTipo, prioridade, campanha: x.campanha.nome,
+        ciclo: prioridade ? null : ponto.ciclo + (fechando ? 1 : 0),
         setorAtual: atual >= 0 ? porTipo[atual].nome : null,
         posicaoAtual: atual >= 0 ? atual + 1 : null,
         telefonesAtual: atual >= 0 ? porTipo[atual].telefones : 0,
@@ -760,28 +891,25 @@ function estoqueDaFila(data, campanha) {
         dias: porTipo.reduce((t, p) => t + p.dias, 0),
       };
     }).sort((a, b) => a.diasVolta - b.diasVolta),
-    porRegional: [...regionais.values()].filter((r) => comCarteira.has(r.id)).map((r) => {
-      const vinculados = (r.titular ? 1 : 0) + r.apoios.length;
-      const tel = r.telefones.map((t) => t.size);
-      return { id: r.id, uf: r.uf, sigla: r.sigla, titular: r.titular, apoios: r.apoios,
-        universo: r.universo.reduce((t, u) => t + u.size, 0), telefones: tel.reduce((a, b) => a + b, 0),
-        porTipo: fases.map((f, k) => ({ nome: f.tipo.nome, telefones: tel[k] })),
-        dias: vinculados ? fases.reduce((t, f, k) => t + tel[k] / (f.tipo.cota * vinculados), 0) : 0 };
-    }).sort((a, b) => a.uf.localeCompare(b.uf) || a.dias - b.dias),
+    porRegional,
+    // consultor do painel que não recebe rota: sem carteira E sem campanha própria
     semCarteira: db.prepare(
-      `SELECT nome FROM pessoas p WHERE tipo = 'consultor' AND ativo = 1 AND entra_painel = 1 AND NOT EXISTS (SELECT 1 FROM carteiras c WHERE c.pessoa_id = p.id) ORDER BY nome`).all().map((p) => p.nome),
+      `SELECT id, nome FROM pessoas p WHERE tipo = 'consultor' AND ativo = 1 AND entra_painel = 1 ORDER BY nome`).all()
+      .filter((p) => !porPessoa.some((x) => x.pessoa.id === p.id)).map((p) => p.nome),
     orfaos: orfaos.size,
-    bloqueados: { tipo: fases[0].tipo.nome, telefones: fases[0].bloqueados.telefones.size, contatos: fases[0].bloqueados.contatos.size },
+    bloqueados: { tipo: primeira.tipo.nome, telefones: primeira.bloqueados.telefones.size, contatos: primeira.bloqueados.contatos.size },
   };
 }
 
 // Acumulado de um tipo até a data: desde o início da sequência mais recente de
-// campanhas cuja fila contém o tipo (trocar a ordem da fila não zera; tirar o
-// tipo da fila e pôr de novo começa outro acumulado)
-function acumuladoDoTipo(tipo, data) {
+// campanhas (do mesmo dono: a geral ou a de um vendedor) cuja fila contém o
+// tipo (trocar a ordem da fila não zera; tirar o tipo da fila e pôr de novo
+// começa outro acumulado). Universo: geral = regionais com carteira; campanha
+// própria = o tipo inteiro no PR e SC.
+function acumuladoDoTipo(tipo, data, pessoaId = null) {
   const campanhas = db.prepare(
-    "SELECT tipo_id tipoId, fila_json, vale_desde valeDesde FROM rota_campanhas WHERE vale_desde <= ? ORDER BY vale_desde DESC, id DESC"
-  ).all(data).map(comFila);
+    "SELECT tipo_id tipoId, fila_json, vale_desde valeDesde FROM rota_campanhas WHERE vale_desde <= ? AND pessoa_id IS ? ORDER BY vale_desde DESC, id DESC"
+  ).all(data, pessoaId).map(comFila);
   let inicio = null;
   for (const c of campanhas) {
     if (!c.fila.some((t) => t.id === tipo.id)) break;
@@ -790,10 +918,10 @@ function acumuladoDoTipo(tipo, data) {
   if (!inicio) return null;
   const itens = db.prepare(
     `SELECT i.telefone, i.baixa_metodo, i.atendida, r.data FROM rota_itens i JOIN rotas r ON r.id = i.rota_id
-     WHERE i.tipo_id = ? AND r.data >= ? AND r.data <= ?`).all(tipo.id, inicio, data);
+     WHERE i.tipo_id = ? AND r.data >= ? AND r.data <= ? AND (? IS NULL OR r.pessoa_id = ?)`).all(tipo.id, inicio, data, pessoaId, pessoaId);
   const universo = new Set();
   const carteiras = new Set(db.prepare("SELECT regional_id r FROM carteiras").all().map((c) => c.r));
-  for (const c of carregarCandidatos(tipo.setores)) if (carteiras.has(c.regional)) universo.add(c.chave);
+  for (const c of carregarCandidatos(tipo.setores)) if (pessoaId || carteiras.has(c.regional)) universo.add(c.chave);
   const tocados = new Set(), emRota = new Set(), atendidos = new Set();
   for (const i of itens) {
     const k = chaveTelefone(i.telefone);
@@ -801,8 +929,9 @@ function acumuladoDoTipo(tipo, data) {
     if (i.baixa_metodo) tocados.add(k);
     if (i.atendida === 1) atendidos.add(k);
   }
+  const dono = pessoaId ? db.prepare("SELECT nome FROM pessoas WHERE id = ?").get(pessoaId)?.nome : null;
   return {
-    tipo: tipo.nome, desde: inicio, dias: new Set(itens.map((i) => i.data)).size,
+    tipo: tipo.nome, dono, desde: inicio, dias: new Set(itens.map((i) => i.data)).size,
     universo: universo.size, emRota: emRota.size, tocados: tocados.size, atendidos: atendidos.size,
     semBaixa: emRota.size - tocados.size, nuncaEmRota: [...universo].filter((k) => !emRota.has(k)).length,
   };
@@ -817,10 +946,10 @@ function painel(dataArg) {
   const campanhaProxima = campanhaVigente(proxima);
   const campanhaHoje = campanhaVigente(hoje);
   const historico = db.prepare(
-    `SELECT c.id, c.tipo_id tipoId, c.fila_json, c.vale_desde valeDesde, c.criada_em criadaEm, COALESCE(NULLIF(u.nome, ''), u.login) usuario,
-       (SELECT COUNT(*) FROM rotas r WHERE r.campanha_id = c.id) rotas
-     FROM rota_campanhas c LEFT JOIN usuarios u ON u.id = c.usuario_id
-     ORDER BY c.vale_desde DESC, c.id DESC LIMIT 12`
+    `SELECT c.id, c.tipo_id tipoId, c.fila_json, c.vale_desde valeDesde, c.criada_em criadaEm, c.pessoa_id pessoaId, c.modo, p.nome pessoa,
+       COALESCE(NULLIF(u.nome, ''), u.login) usuario, (SELECT COUNT(*) FROM rotas r WHERE r.campanha_id = c.id) rotas
+     FROM rota_campanhas c LEFT JOIN usuarios u ON u.id = c.usuario_id LEFT JOIN pessoas p ON p.id = c.pessoa_id
+     ORDER BY c.vale_desde DESC, c.id DESC LIMIT 20`
   ).all().map(comFila);
   // voltas completas da fila cíclica (a rota em que o ponteiro passou do
   // último tipo para o primeiro), com o início da volta e os dias de rota dela
@@ -831,6 +960,17 @@ function painel(dataArg) {
      FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id WHERE r.ciclo_concluido = 1
      ORDER BY r.data DESC, p.nome LIMIT 30`
   ).all();
+  // campanhas por VENDEDOR (migração 34): a vigente hoje, a da próxima geração e
+  // a próxima agendada, de cada consultor ativo (quem não tem própria segue a geral)
+  const vendedores = db.prepare("SELECT id, nome FROM pessoas WHERE tipo = 'consultor' AND ativo = 1 ORDER BY nome").all().map((p) => {
+    const temPropria = (d) => !!db.prepare("SELECT 1 FROM rota_campanhas WHERE pessoa_id = ? AND vale_desde <= ? LIMIT 1").get(p.id, d);
+    return {
+      pessoaId: p.id, nome: p.nome,
+      hoje: temPropria(hoje) ? campanhaVigente(hoje, p.id) : null,
+      proxima: temPropria(proxima) ? campanhaVigente(proxima, p.id) : null,
+      agendada: campanhaAgendada(proxima, p.id),
+    };
+  }).filter((v) => v.hoje || v.proxima || v.agendada);
 
   // rotas do dia escolhido, com os tipos da fila que entraram em cada uma
   const rotasDia = db.prepare(
@@ -843,29 +983,43 @@ function painel(dataArg) {
     return { ...r, tipos: [...tipos].map(([nome, n]) => ({ nome, itens: n })), progresso: progressoDe(itens, r.cota) };
   });
 
-  // estoque para a próxima geração, pela fila que vai valer nela
-  const estoqueInfo = campanhaProxima?.tipoId ? estoqueDaFila(proxima, campanhaProxima) : null;
+  // estoque para a próxima geração, pelas filas que vão valer nela
+  const estoqueInfo = estoqueDaFila(proxima);
 
-  // acumulado de cada tipo da fila do dia escolhido
-  const acumulados = (campanhaDia?.fila || []).map((t) => lerTipo(t.id)).filter(Boolean)
-    .map((t) => acumuladoDoTipo(t, data)).filter(Boolean);
+  // acumulado de cada tipo das filas do dia escolhido (geral e próprias)
+  const vistos = new Set();
+  const acumulados = [];
+  for (const x of participantes(data)) {
+    for (const t of x.campanha.fila) {
+      const chave = `${x.campanha.pessoaId}|${t.id}`;
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+      const tipo = lerTipo(t.id);
+      const a = tipo && acumuladoDoTipo(tipo, data, x.campanha.pessoaId);
+      if (a) acumulados.push(a);
+    }
+  }
 
-  // sobreposição de telefones do 1º tipo da fila vigente hoje com os outros setores
+  // sobreposição de telefones do 1º tipo da fila GERAL vigente hoje com os outros setores
   const tipoHoje = campanhaHoje?.tipoId ? lerTipo(campanhaHoje.tipoId) : null;
   const sobre = tipoHoje ? sobreposicao(tipoHoje) : null;
 
   return {
     hoje, hora, data, proximaGeracao: proxima, horaGeracao: HORA_GERACAO, sobreposicao: sobre,
     bloqueio: { dias: BLOQUEIO_DIAS, semLigacaoDias: BLOQUEIO_SEM_LIGACAO_DIAS },
-    campanha: { hoje: campanhaHoje, dia: campanhaDia, proxima: campanhaProxima, historico, voltas },
+    campanha: { hoje: campanhaHoje, dia: campanhaDia, proxima: campanhaProxima, agendada: campanhaAgendada(proxima), historico, voltas, vendedores },
     rotasDia, estoque: estoqueInfo, acumulados, tipos: listarTipos(),
+    // donos possíveis de fila própria: consultores ativos do painel (ou que já têm uma)
+    consultores: db.prepare(
+      `SELECT id, nome FROM pessoas p WHERE tipo = 'consultor' AND ativo = 1
+         AND (entra_painel = 1 OR EXISTS (SELECT 1 FROM rota_campanhas c WHERE c.pessoa_id = p.id)) ORDER BY nome`).all(),
   };
 }
 
 module.exports = {
   agoraBrasilia, proximoDiaUtil, proximaDataSemRota, chaveTelefone,
   listarTipos, lerTipo, setoresDisponiveis, gravarTipo,
-  campanhaVigente, trocarCampanha,
+  campanhaVigente, campanhaDaPessoa, trocarCampanha, participantes,
   bloqueiosPara, sobreposicao, gerarRotas, garantirRotas,
   baixarPeloCdr, baixarPorRegistro, desfazerBaixa, itemDaTela, progressoTv, rotasDaSemanaTv,
   rotaDoDia, painel,

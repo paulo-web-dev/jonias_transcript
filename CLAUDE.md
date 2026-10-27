@@ -78,7 +78,7 @@ aula-ai/
 ├── rota.js          # Rota do dia: campanha por setor, geração 17h, bloqueio por telefone, baixa CDR/manual, painel
 ├── feriados.js      # feriados (migração 33): dia útil = seg–sex fora da tabela — Rota, metas e TV
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
-├── escopo.js        # papéis (admin | vendedor) e escopo por regional — corte no servidor
+├── escopo.js        # papéis (admin | vendedor) e escopo por regional ou por SETOR (campanha própria da Rota) — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
 ├── trocar-senha.html # troca de senha (obrigatória no 1º acesso)
 ├── meu-painel.html  # painel do vendedor: métricas próprias × metas
@@ -215,7 +215,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **33**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **34**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -736,10 +736,10 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/rota?data=&pessoa=` | rota do dia (`data` padrão = hoje em Brasília): `rota` (itens com baixa, `progresso`) + `contatos` no formato do payload da aba Trabalho (corte do vendedor igual); vendedor: só a própria (`pessoa` de outro = 404); admin sem `pessoa` = a primeira do dia, `pessoas` = quem tem rota |
 | `DELETE /api/rota/itens/:id/baixa` | desfaz baixa MANUAL (a do CDR → 400); item de outro consultor (vendedor) = 404 |
 | `GET /api/rota/painel?data=` | admin: campanha (hoje / data / próxima geração / histórico), `rotasDia` com progresso, `estoque` da próxima geração (telefones, dias da equipe, por consultor e regional, `orfaos`, `semCarteira`), `acumulado` da campanha, `tipos` |
-| `POST /api/rota/campanha` | admin: `{fila: [ids na ordem] (vazia = encerrar), refazerFuturas}` (`{tipoId}` sozinho = fila de um) → vale na próxima data útil sem rota; gera o que já for devido; tipo repetido/inativo → 400, inexistente → 404 |
+| `POST /api/rota/campanha` | admin: `{fila: [ids na ordem] (vazia = encerrar), refazerFuturas, pessoaId?}` (`{tipoId}` sozinho = fila de um) → vale na próxima data útil sem rota; gera o que já for devido; tipo repetido/inativo → 400, inexistente → 404. Com `pessoaId` (migração 34): a campanha PRÓPRIA do vendedor (modo prioridade, sem regional); o "refazer" e a data valem só para as rotas dele; consultor inativo/inexistente → 404 |
 | `POST /api/rota/gerar` | admin: gera as rotas faltantes (hoje e, após 17h, o próximo dia útil) |
 | `GET/POST /api/feriados`, `DELETE /api/feriados/:data` | admin: feriados (migração 33). POST `{data, nome}` só hoje em diante (passado → 400: mudaria relatórios fechados), descarta as rotas dessa data sem baixa (`descartadas`, `comBaixa`); DELETE de feriado futuro devolve a data a dia útil e roda `garantirRotas`. Ambos emitem SSE `config` (a TV refaz o fetch) |
-| `GET/POST /api/rota/tipos`, `PUT /api/rota/tipos/:id` | admin: tipos de rota + setores disponíveis (uf, aba, linhas, aptas); setor inexistente/cota fora de 1–500/nome repetido → 400 |
+| `GET/POST /api/rota/tipos`, `PUT /api/rota/tipos/:id` | admin: tipos de rota + setores disponíveis (uf, aba, linhas, aptas); `turmas: [{curso, data}]` (migração 34; até 12; ausente no PUT = mantém); setor inexistente/cota fora de 1–500/nome repetido/turma sem curso ou data → 400 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
 Erros que escapam das rotas passam por um tratador final em `server.js`: corpo
@@ -1410,6 +1410,51 @@ deixaria todo mundo curto desde 13/11.
   passado não é cadastrado nem removido. Painel da Rota: seção "Feriados".
   ⚠ Quinta quebra de comparabilidade, pequena: período congelado antes que
   contenha um destes feriados tem 1 dia útil a mais que um recálculo.
+- ✅ **Fase 2 — setores por vendedor** (migração 34, vale a partir de
+  **03/11/2026**). Medido em produção em 27/10 (`simular-setores.js`): estoque
+  Frederico 1.405 telefones, Bianca 733, Renato 998, Eduardo 844, Agnes 1.533;
+  as rotas de outubro bloqueiam POR CONTATO 26% dos telefones da Bianca e 19%
+  da Agnes em 03/11 (por telefone seria ~72% de todos — por isso os tipos são
+  NOVOS e não reaproveitam os de outubro). Decisões do usuário:
+  - `rota_campanhas.pessoa_id` (NULL = a geral, por carteira) e `modo`
+    (`ciclica` | `prioridade`). Campanha PRÓPRIA = modo prioridade: todo dia
+    começa no 1º tipo da fila (o setor principal) e completa a cota com o
+    seguinte (o COMPLEMENTO) só quando falta estoque, no mesmo dia, sem
+    intervenção — sem ponteiro, sem volta (`ciclo` NULL nas rotas). Quem
+    tem campanha própria vigente (mesmo encerrada) sai da geral; a geral foi
+    ENCERRADA em 03/11 pela migração. `participantes(data)` em `rota.js`
+    junta as duas; `campanhaDaPessoa`, `campanhaAgendada`.
+  - Sem regional: `elegiveisDe` com `pessoa.regionais` null pula o filtro de
+    regional e o do consultor gravado no contato (o setor manda).
+  - Tipos criados (nomes novos; abas por nome exato, senão normalizado, senão
+    aviso no log): **Legislativo** (Frederico, 21 abas CM, sem LEGISLATIVO PM
+    de SC e sem LICITAÇÃO CM), **Patrimônio e Frotas** → **Engenharia e Obras**
+    (Bianca), **Comunicação PM** (com Gabinete PM/GABINETE PM) → **Educação**
+    (Renato), **Finanças PM** → **Controle Interno PM** (Eduardo; "FINANÇAS PM"
+    não existe em produção e fica de fora com aviso), **Licitação PM e CM**
+    (Agnes, 14 abas, com LICITAÇÃO CM só dela). Agnes vai direto para
+    Licitação, sem passar por Comunicação; não há divisão Renato × Agnes.
+  - `rota_tipos.turmas_json` = `[{curso, data}]`; o complemento leva as
+    turmas do principal. A tela da Rota mostra "Oferecendo: curso — turma
+    dd/mm (próxima)" com as turmas de hoje em diante da fila da campanha da
+    rota (`rota.turmas` em `GET /api/rota`).
+  - **Escopo do vendedor** (`escopo.js`): com campanha própria vigente HOJE,
+    a prospecção (aba Trabalho, Rota, edição, registro, marcação, exportação)
+    é cortada pelos SETORES da fila dele em todo o PR e SC
+    (`clausulaContatos`, `contatoNoEscopo`, `municipioPermitido`,
+    `resumoProspeccao`); não pode mover contato para setor fora da campanha
+    nem criar contato em outro setor. Contato que esteve numa rota DELE
+    continua legível no payload da rota (rota antiga). Território, Meu painel
+    e o painel do CDR continuam pela carteira regional (decisão do usuário).
+  - Painel da Rota: tabela "Campanhas por vendedor" (fila hoje, próxima
+    geração/agendada, turmas, "editar fila"), seletor do dono da fila no
+    editor (geral ou um vendedor), coluna de turmas e campo de turmas
+    (`curso; AAAA-MM-DD` por linha) nos tipos, acumulado por dono. Estoque
+    (`estoqueDaFila(data)`) cobre as duas; "Estoque por regional" só a geral.
+  - Verificado na cópia local: 03/11 com 45 itens por vendedor do setor
+    principal; simulando todos os itens ligados até 23/12, o complemento
+    entra sozinho (Bianca 27/11: 9 + 36; Eduardo 01/12) e sai quando o
+    bloqueio do principal vence; nenhuma rota curta.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

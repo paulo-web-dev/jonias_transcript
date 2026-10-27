@@ -176,7 +176,7 @@ function motivoSemRota(d) {
   }
   if (!d.campanha?.tipoId) return "Não há campanha de rota vigente nesta data.";
   if (d.data > d.hoje) return `A rota de ${dataBr(d.data)} fica pronta às 17h do dia útil anterior.`;
-  return "Você não tem rota nesta data — sem carteira atribuída ou sem rota gerada. Fale com o administrador.";
+  return "Você não tem rota nesta data — sem setores/carteira atribuídos ou sem rota gerada. Fale com o administrador.";
 }
 
 function renderizarCabecalhoRota(d) {
@@ -194,14 +194,22 @@ function renderizarCabecalhoRota(d) {
     sel.innerHTML = (d.pessoas || []).map((p) => `<option value="${p.id}" ${String(p.id) === rotaUi.pessoa ? "selected" : ""}>${escapeHtml(p.nome)}</option>`).join("") ||
       `<option value="">nenhuma rota nesta data</option>`;
   }
+  // curso e turmas que o vendedor oferece (tipos da fila da campanha da rota):
+  // só as de hoje em diante, a próxima em destaque
+  const oferta = document.getElementById("rota-oferta");
+  const turmas = (r?.turmas || []).filter((t) => t.data >= r.data);
+  oferta.classList.toggle("oculto", !turmas.length);
+  oferta.innerHTML = turmas.length
+    ? "Oferecendo: " + turmas.map((t, i) => `<span class="${i ? "" : "rota-turma-proxima"}"><strong>${escapeHtml(t.curso)}</strong> — turma ${dataBr(t.data)}${i ? "" : " (próxima)"}</span>`).join(" · ")
+    : "";
   const curta = r && r.itens.length < r.cota;
   const aviso = document.getElementById("rota-aviso");
   if (curta) {
     aviso.classList.remove("oculto");
-    const fila = d.campanha?.nome || r.tipo;
+    const fila = r.campanha || d.campanha?.nome || r.tipo;
     aviso.textContent = r.itens.length
-      ? `Rota curta: ${r.itens.length} de ${r.cota}. O estoque da fila inteira (${fila}) ${rotaUi.admin ? `da carteira de ${r.nome}` : "da sua carteira"} acabou por hoje (bloqueios de 7 e 30 dias) — volta a ter contatos conforme os bloqueios vencem.`
-      : `Rota vazia: não há mais contatos disponíveis em nenhum setor da fila (${fila}) ${rotaUi.admin ? `na carteira de ${r.nome}` : "na sua carteira"} (bloqueios de 7 e 30 dias).`;
+      ? `Rota curta: ${r.itens.length} de ${r.cota}. O estoque da fila inteira (${fila}) ${rotaUi.admin ? `de ${r.nome}` : "dos seus setores"} acabou por hoje (bloqueios de 7 e 30 dias) — volta a ter contatos conforme os bloqueios vencem.`
+      : `Rota vazia: não há mais contatos disponíveis em nenhum setor da fila (${fila}) ${rotaUi.admin ? `de ${r.nome}` : "dos seus setores"} (bloqueios de 7 e 30 dias).`;
   } else {
     aviso.classList.add("oculto");
   }
@@ -255,15 +263,21 @@ async function carregarPainelRota() {
 function renderizarPainelRota(p) {
   const c = p.campanha;
   const nomeCamp = (x) => (x?.tipoId ? `<strong>${escapeHtml(x.nome)}</strong>` : `<span class="pct-meio">sem campanha</span>`);
-  document.getElementById("rota-campanha-texto").innerHTML = c.hoje?.tipoId
-    ? `Em campanha: ${nomeCamp(c.hoje)} <span class="texto-suave">desde ${dataBr(c.hoje.valeDesde)}</span>`
-    : `Nenhuma campanha vigente hoje.`;
+  const proprias = (c.vendedores || []).filter((v) => v.hoje?.tipoId).length;
+  const agendadas = (c.vendedores || []).filter((v) => !v.hoje?.tipoId && v.agendada?.tipoId);
+  document.getElementById("rota-campanha-texto").innerHTML = [
+    c.hoje?.tipoId ? `Geral (carteiras): ${nomeCamp(c.hoje)} <span class="texto-suave">desde ${dataBr(c.hoje.valeDesde)}</span>` : "",
+    proprias ? `${proprias} vendedor(es) com campanha própria por setor — tabela abaixo` : "",
+    agendadas.length ? `<span class="texto-suave">campanha própria agendada: ${agendadas.map((v) => `${escapeHtml(v.nome)} a partir de ${dataBr(v.agendada.valeDesde)}`).join(", ")}</span>` : "",
+  ].filter(Boolean).join("<br>") || `Nenhuma campanha vigente hoje.`;
   const proxima = c.proxima;
   document.getElementById("rota-campanha-agenda").innerHTML =
     `Próxima geração: <strong>${escapeHtml(rotuloDia(p.proximaGeracao, p.hoje))}</strong>, às ${p.horaGeracao}h do dia útil anterior — fila ${nomeCamp(proxima)}` +
     ` · bloqueio: ${p.bloqueio.dias} dias (ligado/baixa) e ${p.bloqueio.semLigacaoDias} dias (entrou na rota e não foi ligado) — por telefone dentro do mesmo setor, por contato entre setores`;
-  if (!rotaUi.filaAlterada) rotaUi.fila = (proxima?.fila || []).map((t) => t.id);
+  renderizarDonosFila(p);
+  if (!rotaUi.filaAlterada) rotaUi.fila = filaDoDono(p).map((t) => t.id);
   renderizarFila();
+  renderizarVendedores(p);
   rotaUi.confirmarTroca = false;
   document.getElementById("rota-trocar").textContent = rotaUi.filaAlterada ? "Salvar fila *" : "Salvar fila";
 
@@ -281,7 +295,7 @@ function renderizarPainelRota(p) {
     cards.push(card("Estoque", "—", "sem campanha para a próxima geração"));
   }
   for (const a of p.acumulados || []) {
-    cards.push(card(`${escapeHtml(a.tipo)} — acumulado`, `${inteiro(a.tocados)} <small>de ${inteiro(a.universo)}</small>`,
+    cards.push(card(`${a.dono ? `${escapeHtml(a.dono)} · ` : ""}${escapeHtml(a.tipo)} — acumulado`, `${inteiro(a.tocados)} <small>de ${inteiro(a.universo)}</small>`,
       `telefones tocados (${pctDe(a.tocados, a.universo)}) desde ${dataBr(a.desde)} · ${inteiro(a.dias)} dia(s) de rota · ${inteiro(a.atendidos)} atendidos · ${inteiro(a.semBaixa)} entraram e não foram ligados · ${inteiro(a.nuncaEmRota)} ainda não entraram em rota`));
   }
   const totDia = p.rotasDia.reduce((s, r) => ({ itens: s.itens + r.progresso.itens, feitas: s.feitas + r.progresso.feitas, atendidas: s.atendidas + r.progresso.atendidas, cota: s.cota + r.cota }), { itens: 0, feitas: 0, atendidas: 0, cota: 0 });
@@ -296,7 +310,7 @@ function renderizarPainelRota(p) {
   if (e && (e.orfaos || e.semCarteira.length)) {
     cards.push(card("⚠ Fora de todas as rotas", `${inteiro(e.orfaos)} <small>contatos</small>`,
       `${e.orfaos ? "aptos, mas atribuídos a um consultor que não está vinculado à regional do município (só o dono recebe). " : ""}` +
-      `${e.semCarteira.length ? `Sem carteira (não recebem rota): ${e.semCarteira.map(escapeHtml).join(", ")}.` : ""}`, "rota-card-alerta"));
+      `${e.semCarteira.length ? `Sem carteira nem campanha própria (não recebem rota): ${e.semCarteira.map(escapeHtml).join(", ")}.` : ""}`, "rota-card-alerta"));
   }
   document.getElementById("rota-cards").innerHTML = cards.join("");
 
@@ -308,7 +322,7 @@ function renderizarPainelRota(p) {
   // setor e dias para fechar a volta (do setor atual até o último da fila)
   const colunasEstoque = (est) => !est ? `<td class="texto-suave">—</td><td>—</td><td>—</td>`
     : `<td style="text-align:left" title="${escapeHtml(est.porTipo.map((t, k) => `${k + 1}. ${t.nome}: ${t.telefones} telefone(s), ${umaCasa(t.dias)} dia(s)`).join(" · "))}">` +
-      (est.setorAtual ? `${escapeHtml(est.setorAtual)}, <small class="texto-suave">${est.posicaoAtual}ª de ${est.porTipo.length} · volta ${est.ciclo}</small>` +
+      (est.setorAtual ? `${escapeHtml(est.setorAtual)}, <small class="texto-suave">${est.posicaoAtual}ª de ${est.porTipo.length}${est.prioridade ? " · fila própria" : ` · volta ${est.ciclo}`}</small>` +
         (est.voltaFechando ? ` <span class="chip" title="a volta anterior fecha na próxima geração">nova volta</span>` : "")
         : `<span class="pct-baixo">fila sem estoque</span>`) + `</td>
       <td class="${classeDias(est.diasAtual)}">${est.setorAtual ? `${umaCasa(est.diasAtual)} <small class="texto-suave">(${inteiro(est.telefonesAtual)})</small>` : "0"}</td>
@@ -345,7 +359,7 @@ function renderizarPainelRota(p) {
   // histórico: trocas de fila e voltas completas de cada consultor, por data
   const eventos = [
     ...c.historico.map((h) => ({ data: h.valeDesde, html:
-      `<li><span>${escapeHtml(dataBr(h.valeDesde))} — ${h.nome ? `<strong>${escapeHtml(h.nome)}</strong>` : "campanha encerrada"}</span>
+      `<li><span>${escapeHtml(dataBr(h.valeDesde))} — ${h.pessoa ? `${escapeHtml(h.pessoa)}: ` : "geral: "}${h.nome ? `<strong>${escapeHtml(h.nome)}</strong>` : "campanha encerrada"}</span>
        <span class="texto-suave">${inteiro(h.rotas)} rota(s) · por ${escapeHtml(h.usuario || "—")} em ${escapeHtml(dataHoraBr(h.criadaEm))}</span></li>` })),
     ...(c.voltas || []).map((v) => ({ data: v.data, html:
       `<li><span>${escapeHtml(dataBr(v.data))} — 🔁 <strong>${escapeHtml(v.nome)}</strong> completou a volta ${inteiro(v.ciclo)} da fila</span>
@@ -362,6 +376,66 @@ document.querySelector("#tabela-rotas-dia tbody").addEventListener("click", (ev)
   rotaUi.pessoa = tr.dataset.pessoa;
   for (const x of document.querySelectorAll("#tabela-rotas-dia tr")) x.classList.toggle("rota-linha-atual", x === tr);
   carregarRota().then(() => document.querySelector(".rota-topo").scrollIntoView({ behavior: "smooth", block: "start" })).catch((e) => avisar("⚠ " + e.message, true));
+});
+
+// ---------- campanhas por vendedor (migração 34) ----------
+
+const turmasDaFila = (fila, desde) => {
+  const m = new Map();
+  for (const t of fila || []) for (const x of t.turmas || []) if (x.data >= desde) m.set(`${x.data}|${x.curso}`, x);
+  return [...m.values()].sort((a, b) => a.data.localeCompare(b.data));
+};
+const nomeFila = (fila) => (fila || []).map((t, i) => (i ? escapeHtml(t.nome) : `<strong>${escapeHtml(t.nome)}</strong>`)).join(" → ");
+
+function renderizarVendedores(p) {
+  const linhas = (p.campanha.vendedores || []).map((v) => {
+    const hoje = v.hoje?.tipoId ? nomeFila(v.hoje.fila) : `<span class="texto-suave">${v.hoje ? "encerrada" : "—"}</span>`;
+    const prox = v.proxima && v.proxima.id !== v.hoje?.id
+      ? (v.proxima.tipoId ? nomeFila(v.proxima.fila) : "encerrada")
+      : v.agendada ? `a partir de ${dataBr(v.agendada.valeDesde)}: ${v.agendada.tipoId ? nomeFila(v.agendada.fila) : "encerrada"}`
+      : `<span class="texto-suave">igual</span>`;
+    const ref = v.agendada || v.proxima || v.hoje;
+    const turmas = turmasDaFila(ref?.fila, p.hoje).map((t) => `${escapeHtml(t.curso)} ${dataBr(t.data).slice(0, 5)}`).join(" · ") || "—";
+    return `<tr class="sem-clique"><td style="text-align:left"><strong>${escapeHtml(v.nome)}</strong></td><td style="text-align:left">${hoje}</td>
+      <td style="text-align:left">${prox}</td><td style="text-align:left" class="texto-suave">${turmas}</td>
+      <td><button type="button" class="btn-mini" data-editar-fila="${v.pessoaId}">editar fila</button></td></tr>`;
+  });
+  document.querySelector("#tabela-rota-vendedores tbody").innerHTML = linhas.join("") ||
+    `<tr class="sem-clique"><td colspan="5" class="texto-suave">Nenhum vendedor com campanha própria — todos seguem a fila geral (carteiras).</td></tr>`;
+}
+
+// Fila que o editor mostra: a do dono escolhido para a próxima geração (ou a
+// agendada para depois dela, ou a de hoje)
+function filaDoDono(p) {
+  const dono = rotaUi.filaDono || "";
+  if (!dono) return (p.campanha.agendada || p.campanha.proxima)?.fila || [];
+  const v = (p.campanha.vendedores || []).find((x) => String(x.pessoaId) === dono);
+  return (v?.agendada || v?.proxima || v?.hoje)?.fila || [];
+}
+
+function renderizarDonosFila(p) {
+  const sel = document.getElementById("rota-fila-dono");
+  const proprios = new Set((p.campanha.vendedores || []).map((v) => String(v.pessoaId)));
+  sel.innerHTML = `<option value="">geral (carteiras regionais)</option>` + (p.consultores || []).map((c) =>
+    `<option value="${c.id}">${escapeHtml(c.nome)}${proprios.has(String(c.id)) ? " — própria" : ""}</option>`).join("");
+  sel.value = rotaUi.filaDono || "";
+}
+
+document.getElementById("rota-fila-dono").addEventListener("change", (ev) => {
+  rotaUi.filaDono = ev.target.value;
+  rotaUi.filaAlterada = false;
+  rotaUi.fila = filaDoDono(rotaUi.painel).map((t) => t.id);
+  rotaUi.confirmarTroca = false;
+  document.getElementById("rota-trocar").textContent = "Salvar fila";
+  renderizarFila();
+});
+document.getElementById("tabela-rota-vendedores").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-editar-fila]");
+  if (!b) return;
+  const sel = document.getElementById("rota-fila-dono");
+  sel.value = b.dataset.editarFila;
+  sel.dispatchEvent(new Event("change"));
+  sel.scrollIntoView({ behavior: "smooth", block: "center" });
 });
 
 // ---------- fila de setores (vale na próxima geração) ----------
@@ -412,7 +486,9 @@ document.getElementById("rota-trocar").addEventListener("click", async () => {
   const refazer = document.getElementById("rota-refazer").checked;
   const btn = document.getElementById("rota-trocar");
   const porId = new Map((rotaUi.painel?.tipos || []).map((t) => [t.id, t.nome]));
-  const nome = rotaUi.fila.length ? rotaUi.fila.map((id) => porId.get(id)).join(" → ") : "encerrar a campanha";
+  const donoSel = document.getElementById("rota-fila-dono");
+  const dono = rotaUi.filaDono ? `${donoSel.selectedOptions[0]?.textContent.replace(" — própria", "")}: ` : "geral: ";
+  const nome = dono + (rotaUi.fila.length ? rotaUi.fila.map((id) => porId.get(id)).join(" → ") : "encerrar a campanha");
   if (!rotaUi.confirmarTroca) {
     rotaUi.confirmarTroca = true;
     btn.textContent = `Confirmar: ${nome}${refazer ? " (refazendo rotas futuras não começadas)" : ""}`;
@@ -421,11 +497,11 @@ document.getElementById("rota-trocar").addEventListener("click", async () => {
   }
   rotaUi.confirmarTroca = false;
   try {
-    const r = await postJson("/api/rota/campanha", { fila: rotaUi.fila, refazerFuturas: refazer });
+    const r = await postJson("/api/rota/campanha", { fila: rotaUi.fila, refazerFuturas: refazer, pessoaId: rotaUi.filaDono ? Number(rotaUi.filaDono) : null });
     document.getElementById("rota-refazer").checked = false;
     rotaUi.filaAlterada = false;
     const geradas = (r.geracao || []).reduce((s, g) => s + g.geradas, 0);
-    avisar(`${r.tipo ? `Fila ${r.nome}` : "Campanha encerrada"} a partir de ${dataBr(r.valeDesde)}` +
+    avisar(`${dono}${r.tipo ? `fila ${r.nome}` : "campanha encerrada"} a partir de ${dataBr(r.valeDesde)}` +
       `${r.descartadas ? ` — ${r.descartadas} rota(s) futura(s) refeita(s)` : ""}${geradas ? ` — ${geradas} rota(s) gerada(s) agora` : ""}.`);
     await carregarPainelRota();
     await carregarRota();
@@ -511,9 +587,10 @@ function renderizarTiposRota() {
       <td style="text-align:left"><strong>${escapeHtml(t.nome)}</strong>${naFila.has(t.id) ? ' <span class="chip">na fila</span>' : ""}</td>
       <td>${inteiro(t.cota)}</td>
       <td style="text-align:left" class="texto-suave">${t.setores.map((s) => `${escapeHtml(s.uf)} ${escapeHtml(s.setor)}`).join(" · ")}</td>
+      <td style="text-align:left" class="texto-suave">${(t.turmas || []).map((x) => `${escapeHtml(x.curso)} ${dataBr(x.data)}`).join("<br>") || "—"}</td>
       <td>${t.ativo ? "sim" : '<span class="texto-suave">não</span>'}</td>
       <td><button type="button" class="btn-mini" data-editar-tipo="${t.id}">editar</button></td></tr>`).join("") ||
-    `<tr class="sem-clique"><td colspan="5" class="texto-suave">Nenhum tipo de rota.</td></tr>`;
+    `<tr class="sem-clique"><td colspan="6" class="texto-suave">Nenhum tipo de rota.</td></tr>`;
 }
 
 function limparFormTipo() {
@@ -522,6 +599,7 @@ function limparFormTipo() {
   document.getElementById("rt-nome").value = "";
   document.getElementById("rt-cota").value = 45;
   document.getElementById("rt-ativo").checked = true;
+  document.getElementById("rt-turmas").value = "";
   document.getElementById("rt-erro").classList.add("oculto");
   renderizarSetoresForm(new Set());
 }
@@ -558,6 +636,7 @@ document.getElementById("tabela-rota-tipos").addEventListener("click", (ev) => {
   document.getElementById("rt-nome").value = t.nome;
   document.getElementById("rt-cota").value = t.cota;
   document.getElementById("rt-ativo").checked = t.ativo;
+  document.getElementById("rt-turmas").value = (t.turmas || []).map((x) => `${x.curso}; ${x.data}`).join("\n");
   document.getElementById("rt-busca").value = "";
   document.getElementById("rt-erro").classList.add("oculto");
   renderizarSetoresForm(new Set(t.setores.map((s) => `${s.uf}|${s.setor}`)));
@@ -568,7 +647,15 @@ document.getElementById("rt-setores").addEventListener("change", resumoFormTipo)
 document.getElementById("rt-cancelar").addEventListener("click", limparFormTipo);
 document.getElementById("rt-salvar").addEventListener("click", async () => {
   const setores = [...setoresMarcados()].map((k) => { const i = k.indexOf("|"); return { uf: k.slice(0, i), setor: k.slice(i + 1) }; });
-  const corpo = { nome: document.getElementById("rt-nome").value, cota: Number(document.getElementById("rt-cota").value), ativo: document.getElementById("rt-ativo").checked, setores };
+  // turmas: "curso; AAAA-MM-DD" por linha (aceita também DD/MM/AAAA)
+  const turmas = document.getElementById("rt-turmas").value.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const i = l.lastIndexOf(";");
+    let data = (i < 0 ? "" : l.slice(i + 1)).trim();
+    const br = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(data);
+    if (br) data = `${br[3]}-${br[2]}-${br[1]}`;
+    return { curso: (i < 0 ? l : l.slice(0, i)).trim(), data };
+  });
+  const corpo = { nome: document.getElementById("rt-nome").value, cota: Number(document.getElementById("rt-cota").value), ativo: document.getElementById("rt-ativo").checked, setores, turmas };
   const erroEl = document.getElementById("rt-erro");
   try {
     const t = rotaUi.editandoTipo

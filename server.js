@@ -885,9 +885,10 @@ app.get("/api/rota/painel", (req, res) => {
 
 app.post("/api/rota/campanha", (req, res) => {
   try {
-    // { fila: [ids na ordem] } (vazia = encerrar); { tipoId } sozinho = fila de um
-    const { fila, tipoId = null, refazerFuturas = false } = req.body || {};
-    res.json(rota.trocarCampanha({ fila, tipoId, refazerFuturas: refazerFuturas === true }, req.usuario.id));
+    // { fila: [ids na ordem] } (vazia = encerrar); { tipoId } sozinho = fila de um;
+    // pessoaId = campanha PRÓPRIA do vendedor (migração 34; ausente = a geral)
+    const { fila, tipoId = null, refazerFuturas = false, pessoaId = null } = req.body || {};
+    res.json(rota.trocarCampanha({ fila, tipoId, refazerFuturas: refazerFuturas === true, pessoaId }, req.usuario.id));
   } catch (err) {
     responderErroRota("rota/campanha", err, res);
   }

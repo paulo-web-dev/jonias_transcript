@@ -1431,6 +1431,107 @@ const MIGRACOES = [
     ).run(...SEED.map(([d]) => d)).changes;
     console.log(`migração 33: feriados ${SEED.map(([d]) => d).join(", ")}; ${descartadas} rota(s) gerada(s) em feriado descartada(s).`);
   },
+  // 34 — ROTA POR SETOR DE VENDEDOR (decisões do usuário, 2026-10-27): sem
+  // regionais a partir de 03/11/2026. Cada vendedor ganha uma campanha PRÓPRIA
+  // (rota_campanhas.pessoa_id, modo 'prioridade': o setor principal todo dia,
+  // o complemento só quando falta estoque) e a geral é encerrada na mesma data.
+  // Tipos novos (não herdam o bloqueio por telefone das campanhas de outubro —
+  // só o por contato, regra T) com as TURMAS que cada um oferece. Abas casadas
+  // por nome exato e, se não houver, por nome normalizado (acento/caixa/espaço);
+  // aba inexistente vira aviso no log (ex.: "FINANÇAS PM" não existe em produção).
+  () => {
+    db.exec(`
+      ALTER TABLE rota_tipos ADD COLUMN turmas_json TEXT;
+      ALTER TABLE rota_campanhas ADD COLUMN pessoa_id INTEGER REFERENCES pessoas(id);
+      ALTER TABLE rota_campanhas ADD COLUMN modo TEXT NOT NULL DEFAULT 'ciclica';
+      CREATE INDEX idx_rota_campanhas_pessoa ON rota_campanhas(pessoa_id, vale_desde);
+    `);
+    const norm = (t) => String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+    const existentes = db.prepare("SELECT DISTINCT uf, setor FROM contatos_ativo").all();
+    const resolver = (uf, setor, tipo) => {
+      const exato = existentes.find((x) => x.uf === uf && x.setor === setor);
+      if (exato) return exato;
+      const parecido = existentes.find((x) => x.uf === uf && norm(x.setor) === norm(setor));
+      if (parecido) { console.warn(`⚠ migração 34: "${tipo}" — ${uf} "${setor}" casada com a aba "${parecido.setor}"`); return parecido; }
+      if (existentes.length) console.warn(`⚠ migração 34: "${tipo}" — aba inexistente na base: ${uf} "${setor}" (fica de fora)`);
+      return null;
+    };
+    const T = (curso, ...datas) => datas.map((data) => ({ curso, data }));
+    const TURMAS = {
+      Frederico: T("IA na Câmara Municipal", "2026-11-10", "2026-12-15"),
+      Bianca: [...T("Patrimônio & Frotas", "2026-11-16"), ...T("Patrimônio Público com IA", "2026-12-08")],
+      Renato: T("Comunicação Pública 360º", "2026-11-24", "2027-02-02"),
+      Eduardo: [...T("Nova Era da Tesouraria", "2026-11-10"), ...T("Seminário Encerramento do Exercício Municipal", "2026-12-08")],
+      Agnes: T("LICITAEXPO Blindagem nas Licitações", "2026-11-24"),
+    };
+    const PR = "PR", SC = "SC";
+    // por vendedor: [tipo principal, complemento?], abas na ordem de preferência
+    const PLANO = [
+      ["Frederico", [["Legislativo", [
+        [PR, "Legislativo CM"], [SC, "LEGISLATIVO CM"], [PR, "ASSESSOR CM"], [SC, "ASSESSOR CM"], [PR, "Servidores CM"],
+        [PR, "Chefe de Gabinete CM"], [PR, "JURIDICO CM"], [SC, "JURIDICO CM"], [PR, "CONTABILIDADE CM"], [SC, "CONTABILIDADE CM"],
+        [PR, "Patrimonio CM"], [SC, "PATRIMONIOFROTAS CM"], [PR, "Compras CM"], [PR, "COMUNICAÇÃO CM"], [SC, "COMUNICAÇÃO CM"],
+        [PR, "Controle Interno - CM"], [SC, "CONTROLE INTERNO CM"], [PR, "TESOURARIA CM"], [SC, "TESOURARIA CM"], [PR, "RH CM"], [SC, "RH CM"]]]]],
+      ["Bianca", [
+        ["Patrimônio e Frotas", [[PR, "PATRIMONIO PM"], [PR, "FROTAS E PATRIMONIO PM"], [SC, "PATRIMONIOFROTAS PM"]]],
+        ["Engenharia e Obras", [[PR, "Engenheiros"], [SC, "ENGENHEIROS"], [PR, "Obras e Urbanismo"], [SC, "OBRAS PM "]]]]],
+      ["Renato", [
+        ["Comunicação PM", [[PR, "COMUNICAÇÃO PM"], [SC, "COMUNICAÇÃO PM"], [PR, "SECOM"], [PR, "ASSESSOR PM"], [SC, "ASSESSOR PM"],
+          [PR, "Gabinete PM"], [SC, "GABINETE PM"]]],
+        ["Educação", [[PR, "Educação"]]]]],
+      ["Eduardo", [
+        ["Finanças PM", [[PR, "TESOURARIA PM"], [SC, "TESOURARIA PM"], [PR, "CONTABILIDADE PM"], [SC, "CONTABILIDADE PM"], [PR, "FINANÇAS PM"],
+          [PR, "Planejamento"], [SC, "PLANEJAMENTO"]]],
+        ["Controle Interno PM", [[PR, "Controle interno"], [SC, "CONTROLE INTERNO PM"]]]]],
+      ["Agnes", [["Licitação PM e CM", [
+        [PR, "LICITAÇÃO PM"], [SC, "LICITAÇÃO PM"], [PR, "LICITAÇÃO CM"], [SC, "LICITAÇÃO CM"], [PR, "PREGOEIRO"], [SC, "PREGOEIRO"],
+        [PR, "Compras PM"], [PR, "ETP E TR"], [PR, "GESTOR E FISCAL DE CONTRATOS"], [PR, "LICITAÇÃO PM - com população"],
+        [PR, "Licitação CM com Papulação"], [SC, "COMPRAS"], [SC, "SAUDE LICITACAO"], [SC, "Agente de contrataçãoFiscais"]]]]],
+    ];
+
+    // data em que passa a valer: 03/11/2026 ou, se a migração rodar depois, o
+    // próximo dia útil (seg–sex fora dos feriados) — rotas futuras sem baixa
+    // dessa data em diante são descartadas e geradas de novo
+    const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const feriados = new Set(db.prepare("SELECT data FROM feriados").all().map((r) => r.data));
+    const util = (iso) => { const w = new Date(`${iso}T12:00:00Z`).getUTCDay(); return w >= 1 && w <= 5 && !feriados.has(iso); };
+    const somar = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    let vale = "2026-11-03";
+    if (vale <= hoje) { vale = somar(hoje, 1); while (!util(vale)) vale = somar(vale, 1); }
+
+    const agora = new Date().toISOString();
+    const nomesUsados = new Set(db.prepare("SELECT nome FROM rota_tipos").all().map((r) => r.nome));
+    const criados = [];
+    const campanhas = [];
+    for (const [vendedor, tipos] of PLANO) {
+      const pessoa = db.prepare("SELECT id FROM pessoas WHERE nome = ? AND tipo = 'consultor' AND ativo = 1").get(vendedor);
+      if (!pessoa) { console.warn(`⚠ migração 34: consultor ativo "${vendedor}" não encontrado — sem campanha própria`); continue; }
+      const ids = [];
+      for (const [nomeBase, abas] of tipos) {
+        const setores = abas.map(([uf, setor]) => resolver(uf, setor, nomeBase)).filter(Boolean).map((x) => ({ uf: x.uf, setor: x.setor }));
+        if (!setores.length && existentes.length) { console.warn(`⚠ migração 34: "${nomeBase}" sem nenhuma aba — tipo não criado`); continue; }
+        let nome = nomeBase;
+        if (nomesUsados.has(nome)) nome = `${nomeBase} (${vendedor})`;
+        nomesUsados.add(nome);
+        const id = Number(db.prepare("INSERT INTO rota_tipos (nome, setores_json, cota, ativo, turmas_json, criado_em) VALUES (?, ?, 45, 1, ?, ?)")
+          .run(nome, JSON.stringify(setores), JSON.stringify(TURMAS[vendedor]), agora).lastInsertRowid);
+        ids.push(id);
+        criados.push(`${nome} (#${id}, ${setores.length} aba(s))`);
+      }
+      if (!ids.length) continue;
+      campanhas.push({ pessoaId: pessoa.id, vendedor, ids });
+    }
+    const descartadas = db.prepare(
+      `DELETE FROM rotas WHERE data >= ? AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`
+    ).run(vale).changes;
+    db.prepare("DELETE FROM rota_campanhas WHERE vale_desde >= ? AND NOT EXISTS (SELECT 1 FROM rotas r WHERE r.campanha_id = rota_campanhas.id)").run(vale);
+    const ins = db.prepare("INSERT INTO rota_campanhas (tipo_id, fila_json, vale_desde, criada_em, pessoa_id, modo) VALUES (?, ?, ?, ?, ?, ?)");
+    for (const c of campanhas) ins.run(c.ids[0], JSON.stringify(c.ids), vale, agora, c.pessoaId, "prioridade");
+    if (campanhas.length) ins.run(null, "[]", vale, agora, null, "ciclica"); // a geral (carteiras) encerra na mesma data
+    console.log(`migração 34: rota por setor de vendedor a partir de ${vale} — tipos: ${criados.join(", ") || "nenhum"}; ` +
+      `campanhas: ${campanhas.map((c) => `${c.vendedor} (${c.ids.length} tipo(s))`).join(", ") || "nenhuma"}; ` +
+      `campanha geral encerrada em ${vale}; ${descartadas} rota(s) a partir de ${vale} sem baixa descartada(s).`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

@@ -23,7 +23,7 @@ const {
   registrarOcorrencia, registrarImportacaoErro, avisarSeReimportacao,
 } = require("./importacao.js");
 const { cruzarMunicipios, normalizarCidade, indiceMunicipios } = require("./territorio.js");
-const { clausulaMunicipios, dentroDoEscopo } = require("./escopo.js");
+const { clausulaContatos, contatoNoEscopo, municipioPermitido, clausulaMunicipiosLista, resumoProspeccao } = require("./escopo.js");
 const cdr = require("./cruzamento.js");
 
 const UFS_ACEITAS = ["PR", "SC", "SP", "RS", "MS", "MG", "RJ", "ES", "GO", "MT", "DF", "BA"];
@@ -978,23 +978,25 @@ function statusDisponiveis() {
 }
 
 // escopo (escopo.js): null = admin (UF inteira); vendedor = só municípios das
-// regionais dele — o filtro entra no SQL, e as listas auxiliares (regionais,
+// regionais dele, ou só os SETORES da campanha própria da Rota (em todo o
+// estado) — o filtro entra no SQL, e as listas auxiliares (regionais,
 // municípios, setores, consultores) também são cortadas.
 function payloadTrabalho(uf, usuario, escopo = null) {
   uf = String(uf || "").toUpperCase();
   if (!UFS_ACEITAS.includes(uf)) throw erro("UF inválida.");
-  const cm = clausulaMunicipios(escopo);
+  const cc = clausulaContatos(escopo);
+  const cm = clausulaMunicipiosLista(escopo);
   const sl = sqlLinhaTrabalho(escopo);
-  const linhas = db.prepare(`${sl.sql} WHERE uf = ? AND ${cm.sql} ORDER BY setor, linha_origem, id`)
-    .all(...sl.valores, uf, ...cm.valores).map(linhaCompacta);
-  const regionais = escopo
+  const linhas = db.prepare(`${sl.sql} WHERE uf = ? AND ${cc.sql} ORDER BY setor, linha_origem, id`)
+    .all(...sl.valores, uf, ...cc.valores).map(linhaCompacta);
+  const regionais = escopo && !escopo.setores
     ? db.prepare(`SELECT id, sigla, nome FROM regionais WHERE uf = ? AND id IN (${escopo.regionais.map(() => "?").join(",") || "NULL"}) ORDER BY sigla`).all(uf, ...escopo.regionais)
     : db.prepare("SELECT id, sigla, nome FROM regionais WHERE uf = ? ORDER BY sigla").all(uf);
   const municipios = Object.fromEntries(
     db.prepare(`SELECT codigo_ibge codigo, nome, regional_principal_id regional FROM municipios WHERE uf = ? AND ${cm.sql} ORDER BY nome`)
       .all(uf, ...cm.valores).map((m) => [m.codigo, [m.nome, m.regional]])
   );
-  const setores = db.prepare(`SELECT DISTINCT setor FROM contatos_ativo WHERE uf = ? AND ${cm.sql} ORDER BY setor`).all(uf, ...cm.valores).map((s) => s.setor);
+  const setores = db.prepare(`SELECT DISTINCT setor FROM contatos_ativo WHERE uf = ? AND ${cc.sql} ORDER BY setor`).all(uf, ...cc.valores).map((s) => s.setor);
   const consultores = escopo
     ? (escopo.pessoaId ? db.prepare("SELECT id, nome FROM pessoas WHERE id = ?").all(escopo.pessoaId) : [])
     : consultoresAtuais();
@@ -1007,7 +1009,7 @@ function payloadTrabalho(uf, usuario, escopo = null) {
     // admin: quem mais marcou nesta UF (para ver as marcações de outro usuário, só leitura)
     marcacoesDe: escopo ? null : usuariosComMarcacoes(uf, usuario.id),
     usuario: { id: usuario.id, nome: usuario.nome || usuario.login, papel: usuario.papel, pessoaId: usuario.pessoa_id ?? null },
-    escopo: escopo ? { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio } : null,
+    escopo: resumoProspeccao(escopo),
     geradoEm: new Date().toISOString(),
   };
 }
@@ -1019,26 +1021,31 @@ const telefonesDe = (linhas) => {
 
 // Rota (rota.js): mesmo formato do payloadTrabalho, mas só para os contatos
 // pedidos (podem ser de PR e SC na mesma rota), na ordem dos ids. O corte do
-// vendedor vale igual: contato fora do escopo não sai do banco.
+// vendedor vale igual: contato fora do escopo não sai do banco — exceto o que
+// esteve numa rota DELE (rota antiga, de antes da troca para setores, continua
+// legível).
 function payloadContatos(ids, usuario, escopo = null) {
-  const cm = clausulaMunicipios(escopo);
+  const cc = clausulaContatos(escopo);
+  const cm = clausulaMunicipiosLista(escopo);
   const sl = sqlLinhaTrabalho(escopo);
+  const daRota = escopo ? " OR id IN (SELECT i.contato_id FROM rota_itens i JOIN rotas r ON r.id = i.rota_id WHERE r.pessoa_id = ?)" : "";
   const porId = new Map();
   for (let i = 0; i < ids.length; i += 500) {
     const lote = ids.slice(i, i + 500);
-    for (const r of db.prepare(`${sl.sql} WHERE id IN (${lote.map(() => "?").join(",")}) AND ${cm.sql}`).all(...sl.valores, ...lote, ...cm.valores)) porId.set(r.id, r);
+    for (const r of db.prepare(`${sl.sql} WHERE id IN (${lote.map(() => "?").join(",")}) AND (${cc.sql}${daRota})`)
+      .all(...sl.valores, ...lote, ...cc.valores, ...(escopo ? [escopo.pessoaId ?? -2] : []))) porId.set(r.id, r);
   }
   const linhas = ids.filter((id) => porId.has(id)).map((id) => linhaCompacta(porId.get(id)));
   const ufs = [...new Set(db.prepare(`SELECT DISTINCT uf FROM contatos_ativo WHERE id IN (${ids.map(() => "?").join(",") || "NULL"})`).all(...ids).map((r) => r.uf))];
   const marcUf = ufs.map(() => "?").join(",") || "NULL";
-  const regionais = escopo
+  const regionais = escopo && !escopo.setores
     ? db.prepare(`SELECT id, sigla, nome FROM regionais WHERE id IN (${escopo.regionais.map(() => "?").join(",") || "NULL"}) ORDER BY sigla`).all(...escopo.regionais)
     : db.prepare(`SELECT id, sigla, nome FROM regionais WHERE uf IN (${marcUf}) ORDER BY sigla`).all(...ufs);
   const municipios = Object.fromEntries(
     db.prepare(`SELECT codigo_ibge codigo, nome, regional_principal_id regional FROM municipios WHERE uf IN (${marcUf}) AND ${cm.sql} ORDER BY nome`)
       .all(...ufs, ...cm.valores).map((m) => [m.codigo, [m.nome, m.regional]])
   );
-  const setores = db.prepare(`SELECT DISTINCT setor FROM contatos_ativo WHERE uf IN (${marcUf}) AND ${cm.sql} ORDER BY setor`).all(...ufs, ...cm.valores).map((s) => s.setor);
+  const setores = db.prepare(`SELECT DISTINCT setor FROM contatos_ativo WHERE uf IN (${marcUf}) AND ${cc.sql} ORDER BY setor`).all(...ufs, ...cc.valores).map((s) => s.setor);
   const consultores = escopo
     ? (escopo.pessoaId ? db.prepare("SELECT id, nome FROM pessoas WHERE id = ?").all(escopo.pessoaId) : [])
     : consultoresAtuais();
@@ -1048,7 +1055,7 @@ function payloadContatos(ids, usuario, escopo = null) {
     ufs, campos: CAMPOS_TRABALHO, linhas, status: statusDisponiveis(), setores, regionais, municipios, consultores,
     cdr: cdr.ligacoesPorTelefone(telefonesDe(linhas), escopo), marcacoes, marcacoesDe: null,
     usuario: { id: usuario.id, nome: usuario.nome || usuario.login, papel: usuario.papel, pessoaId: usuario.pessoa_id ?? null },
-    escopo: escopo ? { regionais: escopo.regionais, ufs: escopo.ufs, vazio: escopo.vazio } : null,
+    escopo: resumoProspeccao(escopo),
     geradoEm: new Date().toISOString(),
   };
 }
@@ -1124,7 +1131,7 @@ const inserirHistorico = db.prepare(
 // revela que o id existe
 function buscarLinha(id, escopo = null) {
   const linha = db.prepare("SELECT * FROM contatos_ativo WHERE id = ?").get(Number(id));
-  if (!linha || !dentroDoEscopo(escopo, linha.codigo_ibge)) throw Object.assign(new Error("Contato não encontrado."), { naoEncontrado: true });
+  if (!linha || !contatoNoEscopo(escopo, linha)) throw Object.assign(new Error("Contato não encontrado."), { naoEncontrado: true });
   return linha;
 }
 
@@ -1145,8 +1152,12 @@ function atualizarContato(id, mudancas, usuarioId, escopo = null) {
     if (campos.includes("pessoa_id") && mudancas.pessoa_id !== null && mudancas.pessoa_id !== "" && Number(mudancas.pessoa_id) !== escopo.pessoaId) {
       throw erro("Você só pode atribuir o contato a você mesmo.");
     }
-    if (campos.includes("codigo_ibge") && mudancas.codigo_ibge && !dentroDoEscopo(escopo, mudancas.codigo_ibge)) {
-      throw erro("Município fora da sua regional.");
+    if (campos.includes("codigo_ibge") && mudancas.codigo_ibge && !municipioPermitido(escopo, mudancas.codigo_ibge, linha.uf)) {
+      throw erro(escopo.setores ? "Município de outro estado." : "Município fora da sua regional.");
+    }
+    // por setor: não move o contato para um setor que não é da campanha dele
+    if (escopo.setores && campos.includes("setor") && !escopo.setorChaves.has(`${linha.uf}|${String(mudancas.setor ?? "").trim()}`)) {
+      throw erro("Setor fora da sua campanha.");
     }
   }
   const agora = new Date().toISOString();
@@ -1188,11 +1199,11 @@ function atualizarContato(id, mudancas, usuarioId, escopo = null) {
 const CORES_MARCACAO = ["verde", "vermelho", "amarelo"]; // amarelo: migração 27
 
 function marcacoesDoUsuario(uf, usuarioId, escopo = null) {
-  const cm = clausulaMunicipios(escopo, "c.codigo_ibge");
+  const cc = clausulaContatos(escopo, "c.");
   const linhas = db.prepare(
     `SELECT m.contato_id id, m.cor FROM marcacoes_prospeccao m JOIN contatos_ativo c ON c.id = m.contato_id
-     WHERE m.usuario_id = ? AND c.uf = ? AND ${cm.sql}`
-  ).all(Number(usuarioId), uf, ...cm.valores);
+     WHERE m.usuario_id = ? AND c.uf = ? AND ${cc.sql}`
+  ).all(Number(usuarioId), uf, ...cc.valores);
   return Object.fromEntries(linhas.map((r) => [r.id, r.cor]));
 }
 
@@ -1283,13 +1294,15 @@ function criarContato(dados, usuarioId, escopo = null) {
   const setor = texto(dados.setor, 120);
   if (!setor) throw erro("Informe o setor (aba/carteira).");
   if (escopo) {
-    // vendedor: município obrigatório e dentro da regional dele; consultor só ele
+    // vendedor: município obrigatório e dentro da regional dele (por setor: da
+    // UF, e o setor tem de ser da campanha dele); consultor só ele
+    if (escopo.setores && !escopo.setorChaves.has(`${uf}|${setor}`)) throw erro("Setor fora da sua campanha.");
     if (!dados.codigo_ibge) {
       const nome = normalizarCidade(texto(dados.municipio_texto) || "").nome;
-      const cand = (indiceMunicipios().porNome.get(nome) || []).find((m) => m.uf === uf && escopo.municipios.has(m.codigo));
-      if (!cand) throw erro("Informe um município da sua regional.");
+      const cand = (indiceMunicipios().porNome.get(nome) || []).find((m) => m.uf === uf && municipioPermitido(escopo, m.codigo, uf));
+      if (!cand) throw erro(escopo.setores ? "Informe um município do estado." : "Informe um município da sua regional.");
       dados = { ...dados, codigo_ibge: cand.codigo };
-    } else if (!dentroDoEscopo(escopo, dados.codigo_ibge)) throw erro("Município fora da sua regional.");
+    } else if (!municipioPermitido(escopo, dados.codigo_ibge, uf)) throw erro(escopo.setores ? "Município de outro estado." : "Município fora da sua regional.");
     if (dados.pessoa_id !== undefined && dados.pessoa_id !== null && dados.pessoa_id !== "" && Number(dados.pessoa_id) !== escopo.pessoaId) {
       throw erro("Você só pode atribuir o contato a você mesmo.");
     }
@@ -1344,7 +1357,7 @@ function criarStatus({ nome, corHex, significado }, usuarioId) {
 async function exportarXlsx(uf, ids, escopo = null) {
   uf = String(uf || "").toUpperCase();
   if (!UFS_ACEITAS.includes(uf)) throw erro("UF inválida.");
-  const cm = clausulaMunicipios(escopo); // vendedor: ids ∩ escopo, ou a carteira dele
+  const cm = clausulaContatos(escopo); // vendedor: ids ∩ escopo, ou a carteira/os setores dele
   let linhas;
   if (Array.isArray(ids) && ids.length) {
     const numeros = ids.map(Number).filter(Number.isInteger);

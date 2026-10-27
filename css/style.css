@@ -1686,6 +1686,14 @@ col.c-rota-tipo { width: 120px; }
 .rota-fila-add .campo-select { flex: 1; min-width: 0; }
 .rota-tipo-chip { display: inline-block; font-size: 0.72rem; padding: 0.05rem 0.45rem; border-radius: 999px; border: 1px solid rgba(56, 214, 224, 0.4); color: var(--acento-2); white-space: nowrap; }
 .rota-tipos-mini { display: block; font-size: 0.72rem; color: var(--texto-suave); }
+/* curso e turmas que o vendedor oferece na rota (migração 34) */
+.rota-oferta { margin-top: 0.35rem; padding: 0.35rem 0.6rem; border: 1px solid var(--borda-painel); border-radius: 8px; font-size: 0.9rem; }
+.rota-oferta strong { color: var(--texto); }
+.rota-oferta span { display: inline; font-size: inherit; margin-top: 0; }
+.rota-oferta .rota-turma-proxima { color: var(--acento-2); font-weight: 700; }
+.rota-turmas-campo { min-width: 18rem; flex: 1; }
+.rota-turmas-campo textarea { width: 100%; resize: vertical; font-family: inherit; }
+#rota-fila-dono { display: inline-block; width: auto; margin-left: 0.3rem; text-transform: none; }
 .metrica-card.rota-card-alerta { border-color: rgba(255, 200, 87, 0.45); }
 #tabela-rotas-dia tbody tr[data-pessoa] { cursor: pointer; }
 #tabela-rotas-dia tbody tr.rota-linha-atual td { background: rgba(108, 123, 255, 0.12); }
