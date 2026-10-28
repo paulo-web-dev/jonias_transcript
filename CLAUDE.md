@@ -657,7 +657,9 @@ abandonado). Fase 1 = carga com fidelidade total:
   (ordem gira por dia), numa transação — nunca o mesmo telefone em duas rotas.
   Geração: tique a cada 5 min + boot (`garantirRotas`): a de hoje se faltar e,
   **a partir das 17h (Brasília, `Intl` com America/Sao_Paulo — o container roda
-  em UTC)**, a do próximo dia útil; rota gerada **não muda**. Baixa: pelo CDR
+  em UTC)**, os próximos N dias úteis — **antecedência N configurável desde
+  2026-10-28, padrão 2** (ver "Antecedência de dois dias úteis" no roadmap);
+  rota gerada **não muda** (exceto o encaixe das extras). Baixa: pelo CDR
   (`baixarPeloCdr`, ao fim de cada importação do CDR e no "recalcular
   cruzamento"): ligação de SAÍDA do dono da rota para o número, no dia da rota;
   vale a atendida, senão a última; reprocessável; só leitura sobre o contato.
@@ -737,7 +739,8 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `DELETE /api/rota/itens/:id/baixa` | desfaz baixa MANUAL (a do CDR → 400); item de outro consultor (vendedor) = 404 |
 | `GET /api/rota/painel?data=` | admin: campanha (hoje / data / próxima geração / histórico), `rotasDia` com progresso, `estoque` da próxima geração (telefones, dias da equipe, por consultor e regional, `orfaos`, `semCarteira`), `acumulado` da campanha, `tipos` |
 | `POST /api/rota/campanha` | admin: `{fila: [ids na ordem] (vazia = encerrar), refazerFuturas, pessoaId?}` (`{tipoId}` sozinho = fila de um) → vale na próxima data útil sem rota; gera o que já for devido; tipo repetido/inativo → 400, inexistente → 404. Com `pessoaId` (migração 34): a campanha PRÓPRIA do vendedor (modo prioridade, sem regional); o "refazer" e a data valem só para as rotas dele; consultor inativo/inexistente → 404 |
-| `POST /api/rota/gerar` | admin: gera as rotas faltantes (hoje e, após 17h, o próximo dia útil) |
+| `POST /api/rota/gerar` | admin: gera as rotas faltantes (hoje e os dias úteis da antecedência — `datasDevidas()`) e faz o encaixe das extras pendente |
+| `PUT /api/rota/config` | admin: `{antecedencia: 1–5}` → `configuracoes.rota_antecedencia_dias`; gera na hora o que passou a ser devido; fora da faixa → 400 |
 | `GET/POST /api/feriados`, `DELETE /api/feriados/:data` | admin: feriados (migração 33). POST `{data, nome}` só hoje em diante (passado → 400: mudaria relatórios fechados), descarta as rotas dessa data sem baixa (`descartadas`, `comBaixa`); DELETE de feriado futuro devolve a data a dia útil e roda `garantirRotas`. Ambos emitem SSE `config` (a TV refaz o fetch) |
 | `GET/POST /api/rota/tipos`, `PUT /api/rota/tipos/:id` | admin: tipos de rota + setores disponíveis (uf, aba, linhas, aptas); `turmas: [{curso, data}]` (migração 34; até 12; ausente no PUT = mantém); setor inexistente/cota fora de 1–500/nome repetido/turma sem curso ou data → 400 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
@@ -1476,6 +1479,36 @@ deixaria todo mundo curto desde 13/11.
   Conferido na cópia local: 5 de 15 extras feitas em 03/11 → as 10 restantes
   nas posições 1–10 de 04/11; ligação em 03/11 às 17h40 importada depois dá
   baixa nas duas; progresso 45/45 com Extra 7 de 15 à parte.
+
+### ✅ Antecedência de dois dias úteis na Rota (2026-10-28, sem migração)
+Decisões do usuário (2026-10-28):
+- **Antecedência N em dias úteis** (`configuracoes.rota_antecedencia_dias`,
+  padrão 2 sem a linha, 1–5, seletor "antecedência" no painel da Rota): às 17h
+  gera os próximos N dias úteis; antes das 17h, os N−1 próximos
+  (`datasDevidas()` em `rota.js`; feriado e fim de semana pulados — na quinta
+  29/10 às 17h saem 30/10 e 03/11, Finados no meio). Datas geradas em ordem: o
+  bloqueio de cada dia já vê os itens dos anteriores (por telefone no mesmo
+  tipo, por contato entre tipos — regra T, igual a gerar um dia por vez).
+  "Gerar faltantes agora" e o seletor de data da Rota do dia cobrem os N dias
+  (`devidas` no payload). Consequências: a troca de fila sem "refazer" passa a
+  valer N dias úteis depois; um registro manual feito no dia 1 (fora da rota)
+  não tira o contato da rota do dia 2, que já está gerada.
+- **Extra não feita: ENCAIXE por cima** (opção recomendada e escolhida;
+  a alternativa era refazer o 2º dia à noite). `encaixarExtras()`, no fim de
+  cada tique depois das 17h, uma vez por dia encerrado
+  (`configuracoes.rota_extras_encaixadas_ate`): as extras sem baixa do dia
+  entram nas primeiras posições da rota seguinte do vendedor, dentro da cota,
+  com `origem_item_id`; os itens dela descem (o que passa da cota vira extra) e
+  as extras sem baixa que passam de cota + 15 saem (nunca trabalhadas — o
+  telefone fica livre). Mesmas condições da herança na geração: tipo na fila,
+  contato apto, telefone em nenhuma rota daquela data. A geração só herda de
+  rota cujo dia já acabou (data < hoje, ou hoje depois das 17h) e nunca de
+  extra já herdada. Com N = 1 a geração herda como antes e o encaixe não acha
+  nada. **Custo medido na cópia local** (03/11 → 04/11, 5 extras feitas por
+  rota): entraram 34 das 50 pendentes; as 16 restantes tinham o MESMO número
+  (geral da prefeitura) na rota de um colega em 04/11 — um telefone por dia
+  em todas as rotas — e voltam pelo estoque depois do bloqueio de 7 dias. Na
+  virada 30/10 → 03/11 nada é encaixado: os tipos de 03/11 são outros.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

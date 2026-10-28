@@ -245,7 +245,7 @@ const PREFIXOS_SO_ADMIN = [
   "/api/usuarios", "/api/carteiras", "/api/prospeccao/cobertura", "/api/prospeccao/gerencial", "/api/prospeccao/marcacoes",
   "/api/prospeccao/status", "/api/territorio/cobertura", "/api/territorio/pendencias",
   "/api/territorio/apelidos", "/api/resumo",
-  "/api/rota/painel", "/api/rota/campanha", "/api/rota/gerar", "/api/rota/tipos", "/api/feriados",
+  "/api/rota/painel", "/api/rota/campanha", "/api/rota/gerar", "/api/rota/config", "/api/rota/tipos", "/api/feriados",
 ];
 app.use("/api", (req, res, next) => {
   const caminho = req.originalUrl.split("?")[0];
@@ -899,6 +899,16 @@ app.post("/api/rota/gerar", (req, res) => {
     res.json({ geradas: rota.garantirRotas() });
   } catch (err) {
     responderErroRota("rota/gerar", err, res);
+  }
+});
+
+// Antecedência da geração em dias úteis (configuracoes.rota_antecedencia_dias);
+// gravar já gera o que passou a ser devido
+app.put("/api/rota/config", (req, res) => {
+  try {
+    res.json(rota.gravarAntecedencia((req.body || {}).antecedencia));
+  } catch (err) {
+    responderErroRota("rota/config", err, res);
   }
 });
 

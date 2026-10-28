@@ -27,8 +27,12 @@
 // - Ordem: municípios inteiros, andando pelos vizinhos (dados/vizinhos_PR_SC
 //   .json) para o consultor ligar para cidades próximas em sequência; dentro
 //   do município, PM → CM → Autarquia, depois a ordem dos setores do tipo.
-// - Gerada às 17h (Brasília) para o próximo dia útil; a de hoje, se faltar,
-//   no primeiro tique. Uma vez gerada, NÃO muda.
+// - ANTECEDÊNCIA (decisão do usuário, 2026-10-28; antes era 1): às 17h
+//   (Brasília) gera os N próximos dias úteis (`configuracoes.
+//   rota_antecedencia_dias`, padrão 2, ajustável no painel); antes das 17h, os
+//   N−1 próximos. A de hoje, se faltar, no primeiro tique. Datas geradas em
+//   ordem: o bloqueio de cada dia já vê os itens dos dias anteriores. Uma vez
+//   gerada, a rota NÃO muda — exceto o ENCAIXE das extras (abaixo).
 // - Baixa: pelo CDR (ligação DAQUELE consultor para o número, no dia da rota;
 //   atendida ou não) ou manual (registrar contato no dia). Só leitura sobre o
 //   contato: a baixa pelo CDR não mexe em último contato nem no histórico.
@@ -50,6 +54,12 @@
 //   (opção a do usuário), com `origem_item_id` — se só for do mesmo tipo de
 //   rota da fila atual e o contato continuar apto. A ligação no dia da extra
 //   (CDR importado depois das 17h) dá baixa nas duas.
+//   Com antecedência > 1 a rota seguinte já existe quando o dia da extra
+//   acaba: às 17h as extras sem baixa do dia são ENCAIXADAS por cima nela
+//   (decisão do usuário, 2026-10-28) — entram nas primeiras posições, os itens
+//   dela descem (o que passa da cota vira extra) e as últimas extras sem baixa
+//   saem. Ver encaixarExtras. A geração só herda de uma rota cujo dia já
+//   acabou (data < hoje, ou hoje depois das 17h).
 
 const fs = require("fs");
 const path = require("path");
@@ -61,6 +71,8 @@ const EXTRA_POR_DIA = 15;
 const BLOQUEIO_DIAS = 30;
 const BLOQUEIO_SEM_LIGACAO_DIAS = 7;
 const HORA_GERACAO = 17;
+const ANTECEDENCIA_PADRAO = 2;
+const ANTECEDENCIA_MAX = 5;
 const FUSO = "America/Sao_Paulo";
 const ORDEM_ORGAO = { PM: 0, CM: 1, Autarquia: 2 };
 
@@ -97,6 +109,34 @@ function proximaDataSemRota(hoje = agoraBrasilia().data, pessoaId = null) {
 
 function erro(msg, status = 400) {
   return Object.assign(new Error(msg), { status });
+}
+
+// Antecedência da geração em dias úteis (configuracoes.rota_antecedencia_dias)
+function antecedencia() {
+  const n = Number(db.prepare("SELECT valor FROM configuracoes WHERE chave = 'rota_antecedencia_dias'").get()?.valor);
+  return Number.isInteger(n) && n >= 1 && n <= ANTECEDENCIA_MAX ? n : ANTECEDENCIA_PADRAO;
+}
+function gravarAntecedencia(valor) {
+  const n = Number(valor);
+  if (!Number.isInteger(n) || n < 1 || n > ANTECEDENCIA_MAX) throw erro(`Antecedência inválida — de 1 a ${ANTECEDENCIA_MAX} dias úteis.`);
+  db.prepare(
+    `INSERT INTO configuracoes (chave, valor) VALUES ('rota_antecedencia_dias', ?)
+     ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`
+  ).run(String(n));
+  console.log(`rota: antecedência da geração = ${n} dia(s) útil(eis)`);
+  return { antecedencia: n, geracao: garantirRotas() };
+}
+// Datas que já devem ter rota agora: hoje (se dia útil) e os próximos N dias
+// úteis a partir das 17h (N−1 antes) — feriado e fim de semana pulados
+function datasDevidas({ data: hoje, hora } = agoraBrasilia(), n = antecedencia()) {
+  const datas = diaUtil(hoje) ? [hoje] : [];
+  let d = hoje;
+  for (let i = 0; i < (hora >= HORA_GERACAO ? n : n - 1); i++) datas.push((d = proximoDiaUtil(d)));
+  return datas;
+}
+// Último dia cujas extras já podem ser herdadas: hoje depois das 17h, senão ontem
+function diaEncerrado({ data: hoje, hora } = agoraBrasilia()) {
+  return hora >= HORA_GERACAO ? hoje : somarDias(hoje, -1);
 }
 
 // ---------- telefone ----------
@@ -503,13 +543,16 @@ function gerarRotas(data, { usuarioId = null } = {}) {
       `SELECT i.id origem, i.contato_id id, i.tipo_id tipoId, a.telefone, a.setor, a.codigo_ibge codigo
        FROM rota_itens i JOIN contatos_ativo a ON a.id = i.contato_id
        WHERE i.rota_id = (SELECT id FROM rotas WHERE pessoa_id = ? AND data < ? ORDER BY data DESC LIMIT 1)
+         AND (SELECT data FROM rotas WHERE id = i.rota_id) <= ?
          AND i.extra = 1 AND i.baixa_metodo IS NULL
+         AND NOT EXISTS (SELECT 1 FROM rota_itens x WHERE x.origem_item_id = i.id)
          AND a.telefone_valido = 1 AND a.telefone IS NOT NULL AND COALESCE(a.contato_inexistente, 0) = 0 AND COALESCE(a.linha_oculta, 0) = 0
        ORDER BY i.posicao`
     );
+    const encerrado = diaEncerrado();
     for (const s of estados) {
       const tiposDaFila = new Set(s.fases.map((f) => f.tipo.id));
-      for (const c of herdaveis.all(s.pessoa.id, data)) {
+      for (const c of herdaveis.all(s.pessoa.id, data, encerrado)) {
         const chave = chaveTelefone(c.telefone);
         if (!chave || !tiposDaFila.has(c.tipoId) || tomados.has(chave) || contatosTomados.has(c.id) || s.itens.length >= s.tipoRota.cota) continue;
         tomados.add(chave);
@@ -603,15 +646,12 @@ function gerarRotas(data, { usuarioId = null } = {}) {
   })();
 }
 
-// Tique (a cada 5 min e no boot): hoje, se for dia útil e faltar rota; a do
-// próximo dia útil a partir das 17h
+// Tique (a cada 5 min e no boot): hoje, se for dia útil e faltar rota, e os
+// próximos dias úteis da antecedência (datasDevidas), em ordem; depois, o
+// encaixe das extras do dia que acabou
 function garantirRotas() {
-  const { data: hoje, hora } = agoraBrasilia();
   const feitas = [];
-  const datas = [];
-  if (diaUtil(hoje)) datas.push(hoje);
-  if (hora >= HORA_GERACAO) datas.push(proximoDiaUtil(hoje));
-  for (const d of datas) {
+  for (const d of datasDevidas()) {
     try {
       const r = gerarRotas(d);
       if (r.geradas) {
@@ -623,7 +663,73 @@ function garantirRotas() {
       console.error(`✖  rota: falha ao gerar ${d}:`, err.message || err);
     }
   }
+  try {
+    encaixarExtras();
+  } catch (err) {
+    console.error("✖  rota: falha ao encaixar as extras:", err.message || err);
+  }
   return feitas;
+}
+
+// ENCAIXE DAS EXTRAS (decisão do usuário, 2026-10-28): com a rota seguinte já
+// gerada, as extras sem baixa do último dia encerrado entram por cima nela —
+// nas primeiras posições, dentro da cota, na ordem em que estavam. Os itens da
+// rota seguinte descem: o que passa da cota vira extra, e o que passa de cota +
+// extra sem baixa sai (nunca foi trabalhado; o telefone volta a ficar livre).
+// Mesmas condições da herança na geração: tipo na fila da rota seguinte,
+// contato apto, telefone em nenhuma rota daquela data e contato fora dela.
+// Roda uma vez por dia encerrado (`configuracoes.rota_extras_encaixadas_ate`);
+// a extra já herdada (tem item com origem nela) nunca entra duas vezes.
+function encaixarExtras() {
+  const dia = db.prepare("SELECT MAX(data) d FROM rotas WHERE data <= ?").get(diaEncerrado())?.d;
+  if (!dia) return null;
+  const feito = db.prepare("SELECT valor FROM configuracoes WHERE chave = 'rota_extras_encaixadas_ate'").get()?.valor;
+  if (feito && feito >= dia) return null;
+  return db.transaction(() => {
+    const pendentes = db.prepare(
+      `SELECT i.id origem, i.contato_id id, i.tipo_id tipoId, a.telefone, a.setor, a.codigo_ibge codigo
+       FROM rota_itens i JOIN contatos_ativo a ON a.id = i.contato_id
+       WHERE i.rota_id = ? AND i.extra = 1 AND i.baixa_metodo IS NULL
+         AND NOT EXISTS (SELECT 1 FROM rota_itens x WHERE x.origem_item_id = i.id)
+         AND a.telefone_valido = 1 AND a.telefone IS NOT NULL AND COALESCE(a.contato_inexistente, 0) = 0 AND COALESCE(a.linha_oculta, 0) = 0
+       ORDER BY i.posicao`
+    );
+    const resumo = [];
+    for (const r of db.prepare("SELECT r.id, r.pessoa_id pessoaId, p.nome FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id WHERE r.data = ?").all(dia)) {
+      const alvo = db.prepare("SELECT id, data, cota, extra, setores_json FROM rotas WHERE pessoa_id = ? AND data > ? ORDER BY data LIMIT 1").get(r.pessoaId, dia);
+      if (!alvo) continue; // sem rota seguinte ainda: a geração dela herda (o dia já acabou)
+      const tiposDaFila = new Set(JSON.parse(alvo.setores_json).map((x) => x.tipoId).filter(Boolean));
+      const tomados = new Set(db.prepare("SELECT i.telefone FROM rota_itens i JOIN rotas x ON x.id = i.rota_id WHERE x.data = ?")
+        .all(alvo.data).map((i) => chaveTelefone(i.telefone)));
+      const naRota = new Set(db.prepare("SELECT contato_id c FROM rota_itens WHERE rota_id = ?").all(alvo.id).map((i) => i.c));
+      const entram = [];
+      for (const c of pendentes.all(r.id)) {
+        const chave = chaveTelefone(c.telefone);
+        if (!chave || !tiposDaFila.has(c.tipoId) || tomados.has(chave) || naRota.has(c.id) || entram.length >= alvo.cota) continue;
+        tomados.add(chave);
+        naRota.add(c.id);
+        entram.push(c);
+      }
+      if (!entram.length) continue;
+      db.prepare("UPDATE rota_itens SET posicao = posicao + ? WHERE rota_id = ?").run(entram.length, alvo.id);
+      const ins = db.prepare(
+        "INSERT INTO rota_itens (rota_id, contato_id, posicao, telefone, setor, codigo_ibge, tipo_id, extra, origem_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)");
+      entram.forEach((c, i) => ins.run(alvo.id, c.id, i + 1, c.telefone, c.setor, c.codigo, c.tipoId, c.origem));
+      const sairam = db.prepare("DELETE FROM rota_itens WHERE rota_id = ? AND posicao > ? AND baixa_metodo IS NULL")
+        .run(alvo.id, alvo.cota + (alvo.extra ?? EXTRA_POR_DIA)).changes;
+      // posições contíguas de novo (se um item com baixa ficou depois do corte) e extra = depois da cota
+      db.prepare(
+        `UPDATE rota_itens SET posicao = (SELECT COUNT(*) FROM rota_itens y WHERE y.rota_id = rota_itens.rota_id AND y.posicao <= rota_itens.posicao)
+         WHERE rota_id = ?`).run(alvo.id);
+      db.prepare("UPDATE rota_itens SET extra = (posicao > ?) WHERE rota_id = ?").run(alvo.cota, alvo.id);
+      resumo.push(`${r.nome} ${entram.length} → ${alvo.data}${sairam ? ` (${sairam} extra(s) saíram)` : ""}`);
+    }
+    db.prepare(
+      `INSERT INTO configuracoes (chave, valor) VALUES ('rota_extras_encaixadas_ate', ?)
+       ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`).run(dia);
+    if (resumo.length) console.log(`rota: extras de ${dia} sem baixa encaixadas na rota seguinte — ${resumo.join(", ")}`);
+    return { dia, resumo };
+  })();
 }
 
 // ---------- baixa ----------
@@ -743,7 +849,7 @@ function rotaDoDia({ data, pessoaId }, usuario, escopo) {
     `SELECT DISTINCT data FROM rotas WHERE (? IS NULL OR pessoa_id = ?) ORDER BY data DESC LIMIT 30`
   ).all(escopo ? escopo.pessoaId : null, escopo ? escopo.pessoaId : null).map((r) => r.data);
   const base = {
-    data, hoje, proximaGeracao: proximoDiaUtil(hoje), datas,
+    data, hoje, proximaGeracao: proximoDiaUtil(hoje), datas, devidas: datasDevidas(), antecedencia: antecedencia(),
     pessoas: escopo ? null : pessoas,
     campanha: pessoaId ? campanhaDaPessoa(data, pessoaId) : (participantes(data)[0]?.campanha ?? campanhaVigente(data)),
   };
@@ -1062,6 +1168,7 @@ function painel(dataArg) {
 
   return {
     hoje, hora, data, proximaGeracao: proxima, horaGeracao: HORA_GERACAO, sobreposicao: sobre,
+    antecedencia: antecedencia(), antecedenciaMax: ANTECEDENCIA_MAX, devidas: datasDevidas(),
     bloqueio: { dias: BLOQUEIO_DIAS, semLigacaoDias: BLOQUEIO_SEM_LIGACAO_DIAS },
     campanha: { hoje: campanhaHoje, dia: campanhaDia, proxima: campanhaProxima, agendada: campanhaAgendada(proxima), historico, voltas, vendedores },
     rotasDia, extras: { semanaDe, porPessoa: extrasSemana, porDia: EXTRA_POR_DIA }, estoque: estoqueInfo, acumulados, tipos: listarTipos(),
@@ -1076,7 +1183,7 @@ module.exports = {
   agoraBrasilia, proximoDiaUtil, proximaDataSemRota, chaveTelefone,
   listarTipos, lerTipo, setoresDisponiveis, gravarTipo,
   campanhaVigente, campanhaDaPessoa, trocarCampanha, participantes,
-  bloqueiosPara, sobreposicao, gerarRotas, garantirRotas,
+  bloqueiosPara, sobreposicao, gerarRotas, garantirRotas, encaixarExtras, antecedencia, gravarAntecedencia, datasDevidas,
   baixarPeloCdr, baixarPorRegistro, desfazerBaixa, itemDaTela, progressoTv, rotasDaSemanaTv,
   rotaDoDia, painel,
   BLOQUEIO_DIAS, BLOQUEIO_SEM_LIGACAO_DIAS, HORA_GERACAO, EXTRA_POR_DIA,

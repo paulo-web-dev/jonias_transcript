@@ -14,8 +14,9 @@ const diaSemana = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("pt-B
 const rotuloDia = (iso, hoje) => {
   if (!iso) return "";
   const base = `${diaSemana(iso)} ${dataBr(iso)}`;
-  return iso === hoje ? `hoje · ${base}` : iso > hoje ? `${base} (próxima)` : base;
+  return iso === hoje ? `hoje · ${base}` : iso > hoje ? `${base} (à frente)` : base;
 };
+const quandoGera = (n) => `às 17h, ${n === 1 ? "no dia útil anterior" : `${n} dias úteis antes`}`;
 const umaCasa = (n) => (Math.round(n * 10) / 10).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
 const horaDe = (iso) => (iso ? String(iso).slice(11, 16) : "");
 
@@ -180,10 +181,10 @@ const recarregarRota = () => carregarRota({ manter: true });
 function motivoSemRota(d) {
   if (rotaUi.admin && !d.pessoas?.length) {
     if (!d.campanha?.tipoId) return "Nenhuma campanha vigente nesta data — escolha o setor no painel acima.";
-    return d.data > d.hoje ? `As rotas de ${dataBr(d.data)} são geradas às 17h do dia útil anterior.` : "Nenhuma rota gerada nesta data (nenhum consultor com carteira?).";
+    return d.data > d.hoje ? `As rotas de ${dataBr(d.data)} são geradas ${quandoGera(d.antecedencia)}.` : "Nenhuma rota gerada nesta data (nenhum consultor com carteira?).";
   }
   if (!d.campanha?.tipoId) return "Não há campanha de rota vigente nesta data.";
-  if (d.data > d.hoje) return `A rota de ${dataBr(d.data)} fica pronta às 17h do dia útil anterior.`;
+  if (d.data > d.hoje) return `A rota de ${dataBr(d.data)} fica pronta ${quandoGera(d.antecedencia)}.`;
   return "Você não tem rota nesta data — sem setores/carteira atribuídos ou sem rota gerada. Fale com o administrador.";
 }
 
@@ -193,8 +194,8 @@ function renderizarCabecalhoRota(d) {
   document.getElementById("rota-subtitulo").textContent = r
     ? `${rotuloDia(r.data, d.hoje)} · ${r.tipos?.length ? `setores: ${r.tipos.join(" → ")}` : `campanha ${r.tipo}`} · gerada ${dataHoraBr(r.geradaEm)}`
     : d.campanha?.tipoId ? `${rotuloDia(d.data, d.hoje)} · campanha ${d.campanha.nome}` : rotuloDia(d.data, d.hoje);
-  // dias: hoje, próxima geração e as datas que já têm rota
-  const datas = [...new Set([d.hoje, d.proximaGeracao, d.data, ...(d.datas || [])])].sort().reverse();
+  // dias: hoje, os dias à frente que já devem ter rota (antecedência), a próxima geração e as datas que já têm rota
+  const datas = [...new Set([d.hoje, d.proximaGeracao, d.data, ...(d.devidas || []), ...(d.datas || [])])].sort().reverse();
   document.getElementById("rota-data").innerHTML = datas.map((x) => `<option value="${x}" ${x === d.data ? "selected" : ""}>${escapeHtml(rotuloDia(x, d.hoje))}</option>`).join("");
   const sel = document.getElementById("rota-pessoa");
   sel.classList.toggle("oculto", !rotaUi.admin);
@@ -280,8 +281,11 @@ function renderizarPainelRota(p) {
   ].filter(Boolean).join("<br>") || `Nenhuma campanha vigente hoje.`;
   const proxima = c.proxima;
   document.getElementById("rota-campanha-agenda").innerHTML =
-    `Próxima geração: <strong>${escapeHtml(rotuloDia(p.proximaGeracao, p.hoje))}</strong>, às ${p.horaGeracao}h do dia útil anterior — fila ${nomeCamp(proxima)}` +
+    `Próxima geração: <strong>${escapeHtml(rotuloDia(p.proximaGeracao, p.hoje))}</strong>, ${quandoGera(p.antecedencia)} — fila ${nomeCamp(proxima)}` +
     ` · bloqueio: ${p.bloqueio.dias} dias (ligado/baixa) e ${p.bloqueio.semLigacaoDias} dias (entrou na rota e não foi ligado) — por telefone dentro do mesmo setor, por contato entre setores`;
+  const selAnt = document.getElementById("rota-antecedencia");
+  selAnt.innerHTML = Array.from({ length: p.antecedenciaMax }, (_, i) => i + 1)
+    .map((n) => `<option value="${n}" ${n === p.antecedencia ? "selected" : ""}>${n}</option>`).join("");
   renderizarDonosFila(p);
   if (!rotaUi.filaAlterada) rotaUi.fila = filaDoDono(p).map((t) => t.id);
   renderizarFila();
@@ -531,6 +535,18 @@ document.getElementById("rota-gerar").addEventListener("click", async () => {
     const r = await postJson("/api/rota/gerar", {});
     const n = r.geradas.reduce((s, g) => s + g.geradas, 0);
     avisar(n ? `${n} rota(s) gerada(s): ${r.geradas.map((g) => `${dataBr(g.data)} (${g.itens} itens)`).join(", ")}.` : "Nenhuma rota faltando.");
+    await carregarPainelRota();
+    await carregarRota();
+  } catch (e) {
+    avisar("⚠ " + e.message, true);
+  }
+});
+
+document.getElementById("rota-antecedencia").addEventListener("change", async (ev) => {
+  try {
+    const r = await postJson("/api/rota/config", { antecedencia: Number(ev.target.value) }, "PUT");
+    const n = r.geracao.reduce((s, g) => s + g.geradas, 0);
+    avisar(`Antecedência: ${r.antecedencia} dia(s) útil(eis)${n ? ` — ${n} rota(s) gerada(s): ${r.geracao.map((g) => dataBr(g.data)).join(", ")}` : ""}.`);
     await carregarPainelRota();
     await carregarRota();
   } catch (e) {

@@ -114,7 +114,9 @@
               <input type="checkbox" id="rota-refazer" /> refazer as rotas futuras já geradas que ninguém começou</label>
             <div class="rota-campanha-botoes">
               <button type="button" class="btn-mini btn-primario" id="rota-trocar">Salvar fila</button>
-              <button type="button" class="btn-mini" id="rota-gerar" title="gera as rotas que faltam (hoje e, depois das 17h, o próximo dia útil)">Gerar faltantes agora</button>
+              <button type="button" class="btn-mini" id="rota-gerar" title="gera as rotas que faltam: hoje e os dias úteis da antecedência (depois das 17h, um a mais)">Gerar faltantes agora</button>
+              <label class="trab-flag" title="quantos dias úteis à frente a rota fica pronta: às 17h gera os próximos N dias úteis (feriado e fim de semana pulados); vale já ao trocar">
+                antecedência <select id="rota-antecedencia" class="campo-select"></select> dia(s) útil(eis)</label>
             </div>
           </div>
         </div>
