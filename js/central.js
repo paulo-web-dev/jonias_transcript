@@ -186,6 +186,40 @@ function blocoOcorrencias(titulo, grupo) {
   return `<h4>${escapeHtml(titulo)}</h4><ul>${itens}</ul>`;
 }
 
+// CDR × Rota (2026-11-10): baixas automáticas por bloco e o que ficou pendente,
+// separando "não ligou" (item com telefone, sem ligação para ele) de "sem
+// telefone cadastrado" (órgão novo: só a anotação do vendedor dá baixa) e das
+// ligações para números que não estão na base.
+function blocoRotaCdr(rota, resumo) {
+  if (!rota && !resumo) return "";
+  const n = (v) => (v || 0).toLocaleString("pt-BR");
+  const pb = rota?.porBloco || {};
+  const NOMES = { base: "45 obrigatórias", extra: "Rota Extra (15)", novos: "Órgãos novos (20)" };
+  let h = `<h4>Rota do dia × CDR</h4><p>Baixas automáticas nesta importação: <strong>${n(rota?.baixadas)}</strong>` +
+    ` — ${NOMES.base}: <strong>${n(pb.base)}</strong> · ${NOMES.extra}: <strong>${n(pb.extra)}</strong> · ${NOMES.novos}: <strong>${n(pb.novos)}</strong>.</p>`;
+  if (!resumo) return h;
+  const t = resumo.total;
+  const linha = (b) => `<tr><td>${NOMES[b]}</td><td>${n(t[b].itens)}</td><td>${n(t[b].cdr)}</td><td>${n(t[b].manual)}</td>` +
+    `<td>${n(t[b].pendentesComTelefone)}</td><td>${b === "novos" ? `<strong>${n(t[b].pendentesSemTelefone)}</strong>` : n(t[b].pendentesSemTelefone)}</td></tr>`;
+  h += `<p class="texto-suave">Rotas de ${escapeHtml(resumo.de.split("-").reverse().join("/"))} a ${escapeHtml(resumo.ate.split("-").reverse().join("/"))} (dias cobertos pelo arquivo):</p>` +
+    `<table class="tabela-metricas"><thead><tr><th>Bloco</th><th>Itens</th><th>Baixa pelo PABX</th><th>Baixa manual</th>` +
+    `<th title="tem telefone e não houve ligação do vendedor para ele no dia">Pendente: não ligou</th>` +
+    `<th title="órgão novo sem telefone cadastrado: o CDR não tem como casar — a baixa é a anotação do vendedor">Pendente: sem telefone</th></tr></thead>` +
+    `<tbody>${["base", "extra", "novos"].map(linha).join("")}</tbody></table>`;
+  h += `<p>Ligações de saída para números <strong>fora da base</strong> (nenhum contato com esse número, sem baixa em item): <strong>${n(resumo.ligacoesForaDaBase)}</strong>` +
+    ` — é onde aparece "ligou, mas o número não está cadastrado". Se for o órgão novo, o vendedor preenche o telefone na tela e a próxima importação dá a baixa.</p>`;
+  const dias = resumo.porPessoaDia.filter((x) => x.novos.pendentesSemTelefone || x.ligacoesForaDaBase || x.base.pendentesComTelefone);
+  if (dias.length) {
+    h += `<details><summary>Por vendedor e dia (${dias.length})</summary><table class="tabela-metricas"><thead><tr><th>Dia</th><th>Vendedor</th>` +
+      `<th>45: feitas</th><th>45: não ligou</th><th>Extra: feitas</th><th>Órgãos: feitos</th><th>Órgãos: sem telefone</th><th>Ligações fora da base</th></tr></thead><tbody>` +
+      dias.map((x) => `<tr class="sem-clique"><td>${escapeHtml(x.data.split("-").reverse().join("/"))}</td><td>${escapeHtml(x.nome)}</td>` +
+        `<td>${n(x.base.cdr + x.base.manual)}/${n(x.base.itens)}</td><td>${n(x.base.pendentesComTelefone)}</td>` +
+        `<td>${n(x.extra.cdr + x.extra.manual)}/${n(x.extra.itens)}</td><td>${n(x.novos.cdr + x.novos.manual)}/${n(x.novos.itens)}</td>` +
+        `<td>${n(x.novos.pendentesSemTelefone)}</td><td>${n(x.ligacoesForaDaBase)}</td></tr>`).join("") + "</tbody></table></details>";
+  }
+  return h;
+}
+
 function mostrarRelatorio(titulo, resultado) {
   const d = resultado.detalhes || {};
   bloqueiosAtuais = resultado.bloqueios || d.bloqueios || [];
@@ -226,6 +260,7 @@ function mostrarRelatorio(titulo, resultado) {
     linhas.push(blocoAbasProspeccao(resultado.abas || d.abas));
     linhas.push(blocoNaoReconhecidas(d.colunasNaoReconhecidas));
   }
+  if (resultado.tipo === "cdr" || d.rotaResumo) linhas.push(blocoRotaCdr(d.rota, d.rotaResumo));
   linhas.push(blocoOcorrencias("Linhas ignoradas (por quê)", d.motivos));
   linhas.push(blocoOcorrencias("Linhas mantidas com ressalva", d.problemas));
   if (d.avisos?.length) {

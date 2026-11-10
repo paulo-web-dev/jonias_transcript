@@ -418,7 +418,12 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
     relatorio.cruzamento = cruzamento;
     // Rota: ligação do consultor para o número de um item da rota do dia = baixa
     // (require tardio: rota.js → prospeccao.js → importacao.js)
-    relatorio.rota = require("./rota.js").baixarPeloCdr();
+    const rotaJs = require("./rota.js");
+    relatorio.rota = rotaJs.baixarPeloCdr();
+    // retrato dos três blocos da rota nos dias cobertos pelo arquivo
+    const faixaCdr = db.prepare("SELECT MIN(substr(data_hora, 1, 10)) de, MAX(substr(data_hora, 1, 10)) ate FROM ligacoes WHERE importacao_id = ?")
+      .get(resultado.importacaoId);
+    relatorio.rotaResumo = rotaJs.resumoBaixasCdr(faixaCdr?.de, faixaCdr?.ate);
     db.prepare("UPDATE importacoes SET detalhes_json = ? WHERE id = ?").run(JSON.stringify(relatorio), resultado.importacaoId);
 
     return {

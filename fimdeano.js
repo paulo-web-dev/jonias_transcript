@@ -226,7 +226,7 @@ function ajustarCelula({ pessoaId, data, tipoId }, usuarioId) {
     const r = db.prepare(
       `DELETE FROM rotas WHERE pessoa_id = ? AND data = ? AND data > ?
          AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`).run(pessoaId, data, hoje);
-    if (r.changes) { refeita = true; rotaJs().garantirRotas(); }
+    if (r.changes) { refeita = true; rotaJs().gerarRotas(data); }
   }
   return { pessoaId, data, tipoId: c.tipoId, curso: c.curso, refeita };
 }
@@ -285,6 +285,39 @@ function publicar(usuarioId) {
   return { ...resultado, publicadoEm: publicadoEm(), geracao };
 }
 
+// Dias do período que a geração cobre de uma vez (rota.garantirRotas): com o
+// plano publicado, os dias úteis de hoje até 15/12 (decisão do usuário,
+// 2026-11-10 — todas as rotas visíveis já, não dia a dia). Sem publicar: nenhum.
+function datasDoPeriodo() {
+  if (!publicadoEm()) return [];
+  const hoje = hojeBrasilia();
+  return hoje > FIM ? [] : diasUteis(hoje > INICIO ? hoje : INICIO, FIM);
+}
+
+// REFAZER os dias futuros que ninguém começou: descarta as rotas do plano de
+// `desde` (> hoje) até 15/12 SEM NENHUMA baixa — rota com qualquer baixa fica
+// como está — e gera de novo, em ordem, pelo plano atual. Os bloqueios veem o
+// que ficou (dias trabalhados e rotas mantidas). Sem `desde` = amanhã.
+function refazerFuturas(desde, usuarioId) {
+  if (!publicadoEm()) throw erro("Publique o plano antes.");
+  const hoje = hojeBrasilia();
+  desde = desde || somarDias(hoje, 1);
+  if (!RE_DATA.test(String(desde))) throw erro("Data inválida — use AAAA-MM-DD.");
+  if (desde <= hoje) throw erro("Só dá para refazer de amanhã em diante: a rota de hoje já pode ter sido começada.");
+  const ids = vendedores().map((p) => p.id);
+  const marc = ids.map(() => "?").join(",") || "NULL";
+  const mantidas = db.prepare(
+    `SELECT p.nome, r.data FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id WHERE r.data BETWEEN ? AND ? AND r.pessoa_id IN (${marc})
+       AND EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = r.id AND i.baixa_metodo IS NOT NULL) ORDER BY r.data`).all(desde, FIM, ...ids);
+  const descartadas = db.prepare(
+    `DELETE FROM rotas WHERE data BETWEEN ? AND ? AND pessoa_id IN (${marc})
+       AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`).run(desde, FIM, ...ids).changes;
+  console.log(`fim de ano: ${descartadas} rota(s) de ${desde} a ${FIM} sem baixa descartada(s) para refazer` +
+    (mantidas.length ? `; mantidas (já com baixa): ${mantidas.map((m) => `${m.nome} ${m.data}`).join(", ")}` : ""));
+  const geracao = rotaJs().garantirRotas();
+  return { desde, descartadas, mantidas, geracao: geracao.map((g) => ({ data: g.data, geradas: g.geradas, itens: g.itens, curtas: g.curtas })) };
+}
+
 // O dia do vendedor para a geração (rota.js): null = sem plano publicado/sem
 // célula. fila = [curso do dia, os outros cursos abertos (complemento)].
 function planoDoDia(pessoaId, data) {
@@ -314,9 +347,11 @@ function planoCompleto(admin, pessoaId = null) {
   const rotas = {};
   for (const r of db.prepare(
     `SELECT r.pessoa_id p, r.data, COUNT(i.id) itens, SUM(i.extra = 0) base, SUM(i.extra = 0 AND i.baixa_metodo IS NOT NULL) feitas,
+       SUM(i.extra = 0 AND i.atendida = 1) atendidas, SUM(i.extra = 1) extra, SUM(i.extra = 1 AND i.baixa_metodo IS NOT NULL) extraFeitas,
        SUM(i.extra = 2) novos, SUM(i.extra = 2 AND i.baixa_metodo IS NOT NULL) novosFeitos
      FROM rotas r LEFT JOIN rota_itens i ON i.rota_id = r.id WHERE r.data BETWEEN ? AND ? GROUP BY r.id`).all(INICIO, FIM)) {
-    if (admin || r.p === pessoaId) rotas[`${r.p}|${r.data}`] = { base: r.base || 0, feitas: r.feitas || 0, novos: r.novos || 0, novosFeitos: r.novosFeitos || 0 };
+    if (admin || r.p === pessoaId) rotas[`${r.p}|${r.data}`] = { base: r.base || 0, feitas: r.feitas || 0, atendidas: r.atendidas || 0,
+      extra: r.extra || 0, extraFeitas: r.extraFeitas || 0, novos: r.novos || 0, novosFeitos: r.novosFeitos || 0 };
   }
   const faixas = faixasVigentes(INICIO).filter((f) => admin || f.pessoaId === pessoaId);
   const mun = municipiosPorPessoa(INICIO);
@@ -365,5 +400,5 @@ function ligarContador(ativo) {
 
 module.exports = {
   INICIO, FIM, NOVOS_POR_DIA, diasUteis, faixasVigentes, municipiosDaFaixa, vendedores, cursos, cursoDoTipo, tipoNovos, abertos,
-  ofertaOrgao, gerarRascunho, ajustarCelula, publicar, planoDoDia, planoCompleto, publicadoEm, contador, ligarContador, normNome,
+  ofertaOrgao, gerarRascunho, ajustarCelula, publicar, datasDoPeriodo, refazerFuturas, planoDoDia, planoCompleto, publicadoEm, contador, ligarContador, normNome,
 };

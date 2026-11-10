@@ -892,6 +892,14 @@ app.post("/api/fim-de-ano/publicar", (req, res) => {
     res.json(r);
   } catch (err) { responderErroRota("fim-de-ano/publicar", err, res); }
 });
+app.post("/api/fim-de-ano/refazer", (req, res) => {
+  if (soAdminAqui(req, res)) return;
+  try {
+    const r = fimDeAno.refazerFuturas((req.body || {}).desde, req.usuario.id);
+    emitirEventoTv("rota", "config");
+    res.json(r);
+  } catch (err) { responderErroRota("fim-de-ano/refazer", err, res); }
+});
 app.post("/api/fim-de-ano/orgaos", corpoXlsx, async (req, res) => {
   if (soAdminAqui(req, res)) return;
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: "Corpo vazio — envie a planilha .xlsx." });

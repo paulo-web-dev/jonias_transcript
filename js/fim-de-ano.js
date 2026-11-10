@@ -43,7 +43,7 @@ function render() {
       ? `Seu plano de ${dataBr(d.inicio)} a ${dataBr(d.fim)}: o curso que você oferece em cada dia. Todo dia a rota traz ${d.cota} obrigatórias (as que contam para a meta e o prêmio), ${d.extra} da Rota Extra e ${d.novosPorDia} de órgãos novos.`
       : "O plano ainda não foi publicado. Ele aparece aqui assim que o administrador publicar.";
   document.getElementById("fa-admin").classList.toggle("oculto", !d.admin);
-  if (d.admin) renderAdmin();
+  if (d.admin) { renderAdmin(); renderProgresso(); }
   renderLegenda();
   renderPlano();
 }
@@ -94,6 +94,32 @@ function renderAdmin() {
     `<tfoot><tr><td colspan="${5 + d.vendedores.length}" class="texto-suave" style="text-align:left">Estoque = telefones distintos aptos da faixa nas abas do curso, sem descontar bloqueios. Cada curso é um tipo de rota novo, então o bloqueio por telefone não herda as rotas anteriores; entre cursos, o bloqueio é por contato.</td></tr></tfoot>`;
 }
 
+// Calendário de progresso (admin): vendedores × dias; a célula abre a rota
+// do vendedor naquele dia na aba Rota do dia (a mesma tela que ele vê)
+const linkRota = (pessoaId, data) => `/prospeccao#rota?data=${data}&pessoa=${pessoaId}`;
+function renderProgresso() {
+  const d = estado.dados;
+  const alvo = document.getElementById("fa-progresso");
+  const cab = `<tr><th class="fa-vend">Vendedor</th>${d.datas.map((dt) => `<th class="${dt === d.hoje ? "fa-hoje" : ""}">${diaSemana(dt)}<br>${ddmm(dt)}</th>`).join("")}<th>Total</th></tr>`;
+  const corPct = (p, futuro) => (futuro ? "rgba(255,255,255,0.05)" : p >= 100 ? "rgba(61,220,132,0.35)" : p >= 70 ? "rgba(255,200,87,0.3)" : "rgba(255,92,114,0.28)");
+  const linhas = d.vendedores.map((v) => {
+    const tot = { feitas: 0, base: 0, extraFeitas: 0, novosFeitos: 0 };
+    const cels = d.datas.map((dt) => {
+      const r = d.rotas[`${v.id}|${dt}`];
+      if (!r) return `<td class="texto-suave">—</td>`;
+      const futuro = dt > d.hoje;
+      if (!futuro) { tot.feitas += r.feitas; tot.base += r.base; tot.extraFeitas += r.extraFeitas; tot.novosFeitos += r.novosFeitos; }
+      const pct = r.base ? Math.round((r.feitas / r.base) * 100) : 0;
+      return `<td class="fa-cel ${dt === d.hoje ? "fa-hoje" : ""}" style="background:${corPct(pct, futuro)}"><a href="${linkRota(v.id, dt)}" title="abrir a rota de ${escapeHtml(v.nome)} em ${dataBr(dt)}">` +
+        (futuro ? `<span class="texto-suave">${r.base} + E${r.extra} + N${r.novos}</span>`
+          : `<strong>${r.feitas}/${r.base}</strong><span class="fa-rota">E ${r.extraFeitas}/${r.extra} · N ${r.novosFeitos}/${r.novos}</span>`) + "</a></td>";
+    }).join("");
+    return `<tr><td class="fa-vend">${escapeHtml(v.nome)}</td>${cels}<td><strong>${inteiro(tot.feitas)}/${inteiro(tot.base)}</strong><span class="fa-rota">E ${inteiro(tot.extraFeitas)} · N ${inteiro(tot.novosFeitos)}</span></td></tr>`;
+  }).join("");
+  alvo.innerHTML = `<div class="fa-grade-wrap"><table class="fa-grade"><thead>${cab}</thead><tbody>${linhas}</tbody></table></div>` +
+    `<p class="texto-suave">Dias passados e hoje: obrigatórias feitas/total (verde ≥ 100%, âmbar ≥ 70%), E = Rota Extra, N = órgãos novos. Dias à frente: o que a rota já tem gerado. Total = até hoje.</p>`;
+}
+
 function renderLegenda() {
   const d = estado.dados;
   document.getElementById("fa-legenda").innerHTML = d.cursos.filter((c) => c.papel !== "novos")
@@ -111,9 +137,9 @@ function renderPlano() {
       const cel = d.celulas[`${v.id}|${dt}`];
       const c = cel && porTipo.get(cel.tipoId);
       const r = d.rotas[`${v.id}|${dt}`];
-      return `<div class="fa-dia-card ${dt === d.hoje ? "fa-hoje" : ""}"><small>${diaSemana(dt)} ${dataBr(dt)}${dt === d.hoje ? " · hoje" : ""}</small>
+      return `<div class="fa-dia-card ${dt === d.hoje ? "fa-hoje" : ""}"><small>${diaSemana(dt)} ${dataBr(dt)}${dt === d.hoje ? " · hoje" : ""}${r ? ` · <a href="/prospeccao#rota?data=${dt}">abrir a rota ›</a>` : ""}</small>
         ${c ? `<span class="fa-chip" style="background:${corDe(c.tipoId)}">${escapeHtml(c.curso)}</span><small>${escapeHtml(c.setor)}${c.turma ? ` · turma ${dataBr(c.turma)}` : ""}</small>` : "<small>—</small>"}
-        ${r ? `<small>rota: ${inteiro(r.feitas)}/${inteiro(r.base)} · órgãos novos ${inteiro(r.novosFeitos)}/${inteiro(r.novos)}</small>` : ""}</div>`;
+        ${r ? `<small>obrigatórias ${inteiro(r.feitas)}/${inteiro(r.base)} · Extra ${inteiro(r.extraFeitas)}/${inteiro(r.extra)} · órgãos novos ${inteiro(r.novosFeitos)}/${inteiro(r.novos)}</small>` : ""}</div>`;
     }).join("")}</div>`;
     return;
   }
@@ -173,6 +199,22 @@ document.getElementById("fa-publicar").addEventListener("click", async () => {
     avisar(`Publicado: vale a partir de ${dataBr(r.vale)}. ${r.descartadas} rota(s) futura(s) refeita(s). ${g}`);
     await carregar();
   } catch (e) { avisar("⚠ " + e.message); renderAdmin(); }
+});
+document.getElementById("fa-refazer").addEventListener("click", async () => {
+  const desde = document.getElementById("fa-refazer-data").value;
+  const b = document.getElementById("fa-refazer");
+  if (b.dataset.confirmar !== "1") {
+    b.dataset.confirmar = "1"; b.textContent = `Confirmar: refazer ${desde ? "de " + dataBr(desde) : "de amanhã"} a 15/12`;
+    setTimeout(() => { b.dataset.confirmar = ""; b.textContent = "↻ Refazer"; }, 8000);
+    return;
+  }
+  b.dataset.confirmar = ""; b.textContent = "↻ Refazer";
+  try {
+    const r = await chamarApi("/api/fim-de-ano/refazer", json("POST", { desde: desde || undefined }));
+    avisar(`Refeito a partir de ${dataBr(r.desde)}: ${r.descartadas} rota(s) descartada(s) e geradas de novo` +
+      (r.mantidas.length ? `; ${r.mantidas.length} mantida(s) por já terem baixa` : "") + ".");
+    await carregar();
+  } catch (e) { avisar("⚠ " + e.message); }
 });
 document.getElementById("fa-contador-ligar").addEventListener("click", async () => {
   try { estado.contador = await chamarApi("/api/fim-de-ano/contador", json("PUT", { ativo: !estado.contador?.ativo })); renderAdmin(); avisar(estado.contador.ativo ? "Contador ligado: aparece no header de todas as telas e na TV." : "Contador desligado."); }

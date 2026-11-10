@@ -389,13 +389,26 @@ function bloqueiosPara(data, tipoId) {
     for (const v of variantes(n)) if (!telefones.has(v)) telefones.set(v, motivo);
   };
   const bloquearContato = (id, motivo) => { if (id && !contatos.has(id)) contatos.set(id, motivo); };
-  // rota: 7 dias para qualquer item (inclui hoje e datas já geradas à frente), 30 com baixa
+  // rota: 7 dias para item sem baixa de dia que já passou, 30 com baixa — e 30
+  // para item de dia que AINDA NÃO ACONTECEU (hoje ou à frente): com o período
+  // de fim de ano gerado de uma vez (2026-11-10), um dia futuro conta como
+  // ligado, senão o mesmo telefone voltaria 8 dias depois numa lista já pronta
+  const hoje = agoraBrasilia().data;
   for (const r of db.prepare(
-    `SELECT i.telefone, i.contato_id, i.baixa_metodo, COALESCE(i.tipo_id, r.tipo_id) tipo_id FROM rota_itens i JOIN rotas r ON r.id = i.rota_id
-     WHERE r.data >= ? AND (i.baixa_metodo IS NOT NULL OR r.data >= ?)`).all(d30, d7)) {
-    const motivo = r.baixa_metodo ? "rota_baixa" : "rota_7d";
+    `SELECT i.telefone, i.contato_id, i.baixa_metodo, COALESCE(i.tipo_id, r.tipo_id) tipo_id, r.data >= ? futuro FROM rota_itens i JOIN rotas r ON r.id = i.rota_id
+     WHERE r.data >= ? AND (i.baixa_metodo IS NOT NULL OR r.data >= ? OR r.data >= ?)`).all(hoje, d30, d7, hoje)) {
+    const motivo = r.baixa_metodo ? "rota_baixa" : r.futuro ? "rota_futura" : "rota_7d";
     if (r.tipo_id === tipoId) bloquearTelefone(r.telefone, motivo);
     else bloquearContato(r.contato_id, motivo);
+  }
+  // ROTA FINALIZAÇÃO DE ANO: dentro do período (11/11–15/12), telefone não se
+  // repete NO MESMO TIPO em nenhum dia do período (não só por 30 dias)
+  if (data >= fimDeAno.INICIO && data <= fimDeAno.FIM) {
+    for (const r of db.prepare(
+      `SELECT i.telefone FROM rota_itens i JOIN rotas r ON r.id = i.rota_id
+       WHERE r.data BETWEEN ? AND ? AND COALESCE(i.tipo_id, r.tipo_id) = ? AND i.telefone <> ''`).all(fimDeAno.INICIO, fimDeAno.FIM, tipoId)) {
+      bloquearTelefone(r.telefone, "periodo_fim_de_ano");
+    }
   }
   // CDR atribuível a um contato: saída (atendida ou não) ou entrada atendida
   for (const r of db.prepare(
@@ -532,6 +545,12 @@ function gerarRotas(data, { usuarioId = null } = {}) {
     const contatosTomados = new Set();  // tipos com abas em comum não repetem o contato
     const tomadosNoTipo = new Map();    // tipo id → telefones postos hoje em rota naquele tipo
     const noTipo = (id) => tomadosNoTipo.get(id) ?? tomadosNoTipo.set(id, new Set()).get(id);
+    // rotas que JÁ existem na data (dia refeito só para um vendedor): um telefone por dia vale com elas também
+    for (const i of db.prepare("SELECT i.telefone, i.contato_id c FROM rota_itens i JOIN rotas r ON r.id = i.rota_id WHERE r.data = ?").all(data)) {
+      const k = chaveTelefone(i.telefone);
+      if (k) tomados.add(k);
+      contatosTomados.add(i.c);
+    }
 
     const estados = faltam.map(({ pessoa: p, campanha }) => {
       const fases = fasesDaFila(campanha, data, cache);
@@ -635,8 +654,8 @@ function gerarRotas(data, { usuarioId = null } = {}) {
       const bN = bloqueiosPara(data, tipoN.tipoId);
       for (const r of db.prepare(
         `SELECT i.contato_id c FROM rota_itens i JOIN rotas r ON r.id = i.rota_id
-         WHERE i.extra = 2 AND r.data <> ? AND r.data >= ? AND (i.baixa_metodo IS NOT NULL OR r.data >= ?)`
-      ).all(data, somarDias(data, -BLOQUEIO_DIAS), somarDias(data, -BLOQUEIO_SEM_LIGACAO_DIAS))) bN.contatos.set(r.c, "rota_novos");
+         WHERE i.extra = 2 AND r.data <> ? AND r.data >= ? AND (i.baixa_metodo IS NOT NULL OR r.data >= ? OR r.data >= ?)`
+      ).all(data, somarDias(data, -BLOQUEIO_DIAS), somarDias(data, -BLOQUEIO_SEM_LIGACAO_DIAS), agoraBrasilia().data)) bN.contatos.set(r.c, "rota_novos");
       const candN = db.prepare(
         `SELECT id, telefone, setor, codigo_ibge codigo FROM contatos_ativo
          WHERE origem = 'orgaos_novos' AND pessoa_id = ? AND COALESCE(contato_inexistente, 0) = 0 AND COALESCE(linha_oculta, 0) = 0
@@ -698,7 +717,11 @@ function gerarRotas(data, { usuarioId = null } = {}) {
 // encaixe das extras do dia que acabou
 function garantirRotas() {
   const feitas = [];
-  for (const d of datasDevidas()) {
+  // ROTA FINALIZAÇÃO DE ANO (2026-11-10): com o plano publicado, o período
+  // inteiro (dias úteis de hoje a 15/12) é gerado de uma vez, em ordem — não
+  // só a antecedência
+  const datas = [...new Set([...datasDevidas(), ...fimDeAno.datasDoPeriodo()])].sort();
+  for (const d of datas) {
     try {
       const r = gerarRotas(d);
       if (r.geradas) {
@@ -789,12 +812,12 @@ function baixarPeloCdr() {
   const t0 = Date.now();
   // item herdado de uma extra (migração 35): vale também a ligação no dia da extra
   const itens = db.prepare(
-    `SELECT i.id, i.telefone, i.baixa_metodo metodo, i.ligacao_id ligacao, r.pessoa_id pessoa, r.data, ro.data origemData
+    `SELECT i.id, i.telefone, i.baixa_metodo metodo, i.ligacao_id ligacao, i.extra, r.pessoa_id pessoa, r.data, ro.data origemData
      FROM rota_itens i JOIN rotas r ON r.id = i.rota_id
        LEFT JOIN rota_itens o ON o.id = i.origem_item_id LEFT JOIN rotas ro ON ro.id = o.rota_id
      WHERE i.baixa_metodo IS NULL OR i.baixa_metodo = 'cdr' OR (i.baixa_metodo = 'manual' AND i.ligacao_id IS NULL)`
   ).all();
-  if (!itens.length) return { itens: 0, baixadas: 0, ms: Date.now() - t0 };
+  if (!itens.length) return { itens: 0, baixadas: 0, porBloco: { base: 0, extra: 0, novos: 0 }, ms: Date.now() - t0 };
   const datas = itens.flatMap((i) => (i.origemData ? [i.data, i.origemData] : [i.data])).sort();
   const indice = new Map();
   for (const l of db.prepare(
@@ -809,6 +832,7 @@ function baixarPeloCdr() {
   const limpar = db.prepare("UPDATE rota_itens SET baixa_em = NULL, baixa_metodo = NULL, ligacao_id = NULL, atendida = NULL WHERE id = ?");
   const evidencia = db.prepare("UPDATE rota_itens SET ligacao_id = ?, atendida = ? WHERE id = ?");
   let baixadas = 0;
+  const porBloco = { base: 0, extra: 0, novos: 0 }; // baixas NOVAS nesta rodada: 45 obrigatórias · Extra · órgãos novos
   db.transaction(() => {
     for (const i of itens) {
       const dias = i.origemData ? [i.data, i.origemData] : [i.data];
@@ -816,13 +840,60 @@ function baixarPeloCdr() {
       const l = ligs.sort((a, b) => b.atendida - a.atendida || b.data_hora.localeCompare(a.data_hora))[0];
       if (i.metodo === "manual") { if (l) evidencia.run(l.id, l.atendida, i.id); continue; }
       if (l) {
-        if (i.ligacao !== l.id) { marcarCdr.run(l.data_hora, l.id, l.atendida, i.id); baixadas++; }
+        if (i.ligacao !== l.id) {
+          marcarCdr.run(l.data_hora, l.id, l.atendida, i.id);
+          baixadas++;
+          if (!i.metodo) porBloco[i.extra === 2 ? "novos" : i.extra ? "extra" : "base"]++;
+        }
       } else if (i.metodo === "cdr") {
         limpar.run(i.id);
       }
     }
   })();
-  return { itens: itens.length, baixadas, ms: Date.now() - t0 };
+  return { itens: itens.length, baixadas, porBloco, ms: Date.now() - t0 };
+}
+
+// Retrato das rotas nos dias cobertos por um arquivo do CDR (relatório da
+// importação, 2026-11-10): por bloco (45 obrigatórias · Extra · órgãos novos),
+// quantos itens, com baixa pelo PABX, manual e PENDENTES — separando o
+// pendente COM telefone (não houve ligação para o número: não ligou) do órgão
+// novo SEM telefone cadastrado (o CDR não tem como casar; vale a anotação do
+// vendedor). Por vendedor e dia, as ligações de SAÍDA para número que não está
+// em contato nenhum da base (classe desconhecida) e não deram baixa em item:
+// é o "ligou, mas o número não está cadastrado".
+function resumoBaixasCdr(de, ate) {
+  if (!de || !ate) return null;
+  const hoje = agoraBrasilia().data;
+  if (ate > hoje) ate = hoje;
+  const vazio = () => ({ itens: 0, cdr: 0, manual: 0, pendentesComTelefone: 0, pendentesSemTelefone: 0 });
+  const total = { base: vazio(), extra: vazio(), novos: vazio() };
+  const porPessoaDia = new Map();
+  for (const i of db.prepare(
+    `SELECT r.pessoa_id pessoaId, p.nome, r.data, i.extra, i.baixa_metodo metodo, i.telefone
+     FROM rota_itens i JOIN rotas r ON r.id = i.rota_id JOIN pessoas p ON p.id = r.pessoa_id
+     WHERE r.data BETWEEN ? AND ?`).all(de, ate)) {
+    const b = i.extra === 2 ? "novos" : i.extra ? "extra" : "base";
+    const k = `${i.pessoaId}|${i.data}`;
+    const linha = porPessoaDia.get(k) ??
+      porPessoaDia.set(k, { pessoaId: i.pessoaId, nome: i.nome, data: i.data, base: vazio(), extra: vazio(), novos: vazio(), ligacoesForaDaBase: 0 }).get(k);
+    for (const alvo of [total[b], linha[b]]) {
+      alvo.itens++;
+      if (i.metodo === "cdr") alvo.cdr++;
+      else if (i.metodo === "manual") alvo.manual++;
+      else if (chaveTelefone(i.telefone)) alvo.pendentesComTelefone++;
+      else alvo.pendentesSemTelefone++;
+    }
+  }
+  for (const l of db.prepare(
+    `SELECT l.pessoa_id pessoaId, substr(l.data_hora, 1, 10) data, COUNT(*) n FROM ligacoes l
+     WHERE l.sentido = 'S' AND l.pessoa_id IS NOT NULL AND l.classe = 'desconhecida' AND l.data_hora BETWEEN ? AND ?
+       AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.ligacao_id = l.id)
+     GROUP BY l.pessoa_id, data`).all(`${de}T00:00:00`, `${ate}T23:59:59`)) {
+    const linha = porPessoaDia.get(`${l.pessoaId}|${l.data}`);
+    if (linha) linha.ligacoesForaDaBase = l.n;
+  }
+  const linhas = [...porPessoaDia.values()].sort((a, b) => a.data.localeCompare(b.data) || a.nome.localeCompare(b.nome));
+  return { de, ate, total, porPessoaDia: linhas, ligacoesForaDaBase: linhas.reduce((s, x) => s + x.ligacoesForaDaBase, 0) };
 }
 
 // Manual: registrar contato (qualquer canal) num contato que está numa rota
@@ -896,7 +967,7 @@ function rotaDoDia({ data, pessoaId }, usuario, escopo) {
     pessoaId = pessoas[0]?.id ?? null;
   }
   const datas = db.prepare(
-    `SELECT DISTINCT data FROM rotas WHERE (? IS NULL OR pessoa_id = ?) ORDER BY data DESC LIMIT 30`
+    `SELECT DISTINCT data FROM rotas WHERE (? IS NULL OR pessoa_id = ?) ORDER BY data DESC LIMIT 90`
   ).all(escopo ? escopo.pessoaId : null, escopo ? escopo.pessoaId : null).map((r) => r.data);
   const base = {
     data, hoje, proximaGeracao: proximoDiaUtil(hoje), datas, devidas: datasDevidas(), antecedencia: antecedencia(),
@@ -1252,7 +1323,7 @@ module.exports = {
   listarTipos, lerTipo, setoresDisponiveis, gravarTipo,
   campanhaVigente, campanhaDaPessoa, trocarCampanha, participantes,
   bloqueiosPara, sobreposicao, gerarRotas, garantirRotas, encaixarExtras, antecedencia, gravarAntecedencia, datasDevidas,
-  baixarPeloCdr, baixarPorRegistro, desfazerBaixa, itemDaTela, progressoTv, rotasDaSemanaTv,
+  baixarPeloCdr, resumoBaixasCdr, baixarPorRegistro, desfazerBaixa, itemDaTela, progressoTv, rotasDaSemanaTv,
   rotaDoDia, painel,
   BLOQUEIO_DIAS, BLOQUEIO_SEM_LIGACAO_DIAS, HORA_GERACAO, EXTRA_POR_DIA,
 };

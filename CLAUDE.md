@@ -1567,6 +1567,31 @@ Decisões do usuário de 2026-11-10, sobre o plano "Resumo_Rota Final_Unyflex.pd
 - Simulação local (todos os itens com baixa, pior caso): 45 obrigatórias em
   todos os dias; órgãos novos esgotam em 16/11 e voltam em 14/12; zero item
   fora da faixa, zero telefone repetido no dia.
+- **Período inteiro gerado de uma vez** (decisão do usuário, 2026-11-10): com o
+  plano publicado, `garantirRotas` cobre também `fimDeAno.datasDoPeriodo()`
+  (dias úteis de hoje a 15/12), em ordem — todas as rotas visíveis já, no
+  seletor de data (até 90 datas). Para a lista pronta não repetir número,
+  `bloqueiosPara` passou a tratar item de dia que AINDA NÃO ACONTECEU (hoje ou à
+  frente) como ligado (30 dias) e, dentro do período, telefone não se repete
+  no MESMO TIPO em dia nenhum; a geração de um dia semeia o "um telefone por
+  dia" com as rotas que já existem na data (dia refeito para um vendedor só).
+  Medido na cópia local: 120 rotas em ~7 s, nenhuma curta, zero repetição no
+  dia e no tipo. **Mudou o plano depois?** `/fim-de-ano` → "Refazer a partir
+  de [data]" (`refazerFuturas`, só de amanhã em diante): descarta as rotas do
+  plano sem NENHUMA baixa e gera de novo, em ordem; rota com qualquer baixa
+  fica (listada). Ajustar uma célula refaz só aquele dia.
+- **Calendário de progresso** em `/fim-de-ano` (vendedores × dias: obrigatórias
+  feitas/total, Extra, órgãos novos, total até hoje); cada célula abre a rota
+  daquele vendedor no dia na aba Rota do dia (`#rota?data=&pessoa=`), a mesma
+  tela que ele vê. O vendedor tem o link "abrir a rota" em cada dia do plano.
+- **CDR × três blocos**: `baixarPeloCdr` já olhava todo item sem baixa (45,
+  Extra e órgão novo com telefone); agora devolve `porBloco` (baixas novas) e
+  a importação grava `rotaResumo` (`resumoBaixasCdr(de, ate)` dos dias do
+  arquivo): por bloco itens, PABX, manual, **pendente com telefone (não
+  ligou)** e **pendente sem telefone** (órgão novo: vale a anotação do
+  vendedor), e por vendedor/dia as **ligações de saída para número fora da
+  base** sem baixa em item ("ligou, mas o número não está cadastrado"). A
+  /central mostra tudo no relatório do CDR.
 - **Migração 37 — Danilo e troca de ramais COM vigência** (2026-11-10): Danilo
   de Souza Santana = "Danilo Santana" no wallet e no Omie. A partir de
   **11/11/2026** o Frederico vai do 2005 para o 2004 e o Danilo assume o 2005,
