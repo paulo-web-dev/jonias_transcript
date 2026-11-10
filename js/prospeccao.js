@@ -311,7 +311,11 @@ const COLUNAS = [
   { campo: "status", fixa: true, render: (o) => chipStatus(o), editavel: "status" },
   { campo: "municipioNome", fixa: true, render: (o) => (trab.modo === "rota" && o.rotaPosicao ? `<small class="rota-pos"${o.rotaDica ? ` title="${escapeHtml(o.rotaDica)}"` : ""}>${escapeHtml(String(o.rotaRotulo ?? o.rotaPosicao))}</small>` : "") + escapeHtml(o.municipioNome) + (o.codigo_ibge ? "" : o.municipio_texto ? ' <span class="trab-sem-match" title="não casou com município oficial">?</span>' : ""), editavel: "municipio" },
   { campo: "regionalSigla", render: (o) => escapeHtml(o.regionalSigla) },
-  { campo: "setor", render: (o) => escapeHtml(o.setor), editavel: "setor" },
+  { campo: "setor", render: (o) => (o.entidade
+    // órgão novo (migração 36): entidade em destaque + selo "confirmar antes de ligar"
+    ? (o.confirmar_antes ? '<span class="rota-confirmar" title="Confirmar antes de ligar: valide que a entidade existe antes de gastar tempo">⚠ confirmar</span>' : "") +
+      `<span class="rota-entidade" title="${escapeHtml(o.entidade)} — ${escapeHtml(o.setor)}">${escapeHtml(o.entidade)}</span> <small class="texto-suave">· ${escapeHtml(o.setor)}</small>`
+    : escapeHtml(o.setor)), editavel: "setor" },
   { campo: "responsavel", render: (o) => escapeHtml(o.responsavel || ""), editavel: "texto" },
   { campo: "cargo", render: (o) => escapeHtml(o.cargo || ""), editavel: "texto" },
   { campo: "telefone", render: (o) => escapeHtml(o.telefone_original || "") + (o.telefone_original && o.telefone_valido === 0 ? ' <span class="trab-invalido" title="telefone inválido">!</span>' : ""), editavel: "texto", valor: (o) => o.telefone_original },
@@ -355,7 +359,7 @@ function htmlLinha(o, idx) {
   const classes = ["trab-linha", o.marca ? `trab-marca-${o.marca}` : "", o.linha_oculta ? "trab-oculta" : "", o.id === trab.selecionado ? "trab-selecionada" : "", o.editado_em ? "trab-editada" : "",
     trab.modo === "rota" && o.rotaGrupoInicio && trab.ordem.campo === "rotaPosicao" && idx > 0 ? "rota-grupo" : "",
     trab.modo === "rota" && o.rotaItem?.baixaMetodo ? "rota-feita" : "",
-    trab.modo === "rota" && o.rotaItem?.extra ? "rota-extra" : ""].filter(Boolean).join(" ");
+    trab.modo === "rota" && o.rotaItem?.extra === 1 ? "rota-extra" : "", trab.modo === "rota" && o.rotaItem?.extra === 2 ? "rota-novos" : ""].filter(Boolean).join(" ");
   const cursor = o.id === trab.selecionado ? trab.coluna : -1;
   return `<tr class="${classes}" data-id="${o.id}" data-idx="${idx}">${COLS.map((c, i) => `<td class="c-${c.campo}${c.editavel ? " editavel" : ""}${c.fixa ? " fixa" : ""}${i === cursor ? " cursor" : ""}" data-campo="${c.campo}">${c.render(o)}</td>`).join("")}</tr>`;
 }

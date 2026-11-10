@@ -99,6 +99,13 @@ function atualizarProgressoRota() {
   const feitas = document.getElementById("rota-barra-feitas"), atendidas = document.getElementById("rota-barra-atendidas");
   if (!r) { numeros.textContent = ""; feitas.style.width = "0"; atendidas.style.width = "0"; return; }
   const p = progressoLocal(r);
+  const blocos = document.getElementById("rota-blocos");
+  if (blocos) {
+    blocos.classList.toggle("oculto", !p.novos.itens && !p.extra.itens);
+    blocos.innerHTML = `<span class="rota-bloco b-base" title="as obrigatórias: são elas que contam para a meta e o prêmio">1 · Obrigatórias: <strong>${inteiro(p.feitas)}</strong> de ${inteiro(p.itens)}</span>` +
+      (p.extra.itens ? `<span class="rota-bloco b-extra" title="opcional, não conta contra você">2 · Rota Extra (E1…): <strong>${inteiro(p.extra.feitas)}</strong> de ${inteiro(p.extra.itens)}</span>` : "") +
+      (p.novos.itens ? `<span class="rota-bloco b-novos" title="consórcios, autarquias e RPPS — indicador próprio, fora das ${inteiro(p.cota)} e do prêmio">3 · Órgãos novos (N1…): <strong>${inteiro(p.novos.feitas)}</strong> de ${inteiro(p.novos.itens)}</span>` : "");
+  }
   const base = Math.max(p.cota, p.itens) || 1;
   feitas.style.width = `${(p.feitas / base) * 100}%`;
   atendidas.style.width = `${(p.atendidas / base) * 100}%`;
@@ -112,9 +119,11 @@ function atualizarProgressoRota() {
 // Só os itens da cota contam; a Rota Extra vem à parte (nunca contra)
 function progressoLocal(r) {
   const itens = r.itens.filter((i) => !i.extra);
-  const extras = r.itens.filter((i) => i.extra);
+  const extras = r.itens.filter((i) => i.extra === 1);
+  const novos = r.itens.filter((i) => i.extra === 2);
   const feitas = itens.filter((i) => i.baixaMetodo).length;
   return { cota: r.cota, itens: itens.length, feitas, atendidas: itens.filter((i) => i.atendida === 1).length,
+    novos: { itens: novos.length, feitas: novos.filter((i) => i.baixaMetodo).length },
     manuais: itens.filter((i) => i.baixaMetodo === "manual").length, pelaCdr: itens.filter((i) => i.baixaMetodo === "cdr").length, pendentes: itens.length - feitas,
     extra: { itens: extras.length, feitas: extras.filter((i) => i.baixaMetodo).length } };
 }
@@ -156,11 +165,15 @@ async function carregarRota({ manter = false } = {}) {
   let anterior;
   for (const o of trab.linhas) {
     const it = itemPorContato.get(o.id);
-    const grupo = `${it.extra ? 1 : 0}|${it.tipoId}|${o.codigo_ibge}`; // faixa entre municípios, na troca de setor da fila e no início da Extra
-    const rotulo = it.extra ? `E${it.posicao - d.rota.cota}` : it.origemItemId ? `${it.posicao}↪` : it.posicao;
-    const dica = it.extra ? "Rota Extra — opcional: não conta contra você; se não fizer, entra amanhã entre as primeiras da rota"
+    // faixa entre municípios, na troca de setor da fila, no início da Extra e no bloco de órgãos novos
+    const grupo = it.extra === 2 ? "novos" : `${it.extra ? 1 : 0}|${it.tipoId}|${o.codigo_ibge}`;
+    const rotulo = it.extra === 2 ? `N${it.posicao - 1000}` : it.extra ? `E${it.posicao - d.rota.cota}` : it.origemItemId ? `${it.posicao}↪` : it.posicao;
+    const dica = it.extra === 2
+      ? `ÓRGÃO NOVO — bloco à parte, não entra nas ${d.rota.cota}.${it.oferta ? ` Ofereça: ${it.oferta.curso}${it.oferta.turma ? ` (turma ${dataBr(it.oferta.turma)})` : ""}.` : ""}${o.telefone ? "" : " Sem telefone: ache o número, preencha na coluna Telefone e dê baixa ao registrar o contato."}`
+      : it.extra ? "Rota Extra — opcional: não conta contra você; se não fizer, entra amanhã entre as primeiras da rota"
       : it.origemItemId ? "veio da Rota Extra do dia anterior — a ligação feita naquele dia também vale" : "";
-    Object.assign(o, { rotaItem: it, rotaPosicao: it.posicao, rotaRotulo: rotulo, rotaDica: dica, rotaTipo: it.tipoNome || "",
+    const tipoChip = it.extra === 2 ? `Órgão novo${it.oferta ? ` · ${it.oferta.curso}` : ""}` : it.tipoNome || "";
+    Object.assign(o, { rotaItem: it, rotaPosicao: it.posicao, rotaRotulo: rotulo, rotaDica: dica, rotaTipo: tipoChip,
       rotaBaixaOrdem: it.baixaMetodo ? (it.atendida ? 2 : 1) : 0, rotaGrupoInicio: grupo !== anterior });
     anterior = grupo;
   }
@@ -207,10 +220,12 @@ function renderizarCabecalhoRota(d) {
   // só as de hoje em diante, a próxima em destaque
   const oferta = document.getElementById("rota-oferta");
   const turmas = (r?.turmas || []).filter((t) => t.data >= r.data);
-  oferta.classList.toggle("oculto", !turmas.length);
-  oferta.innerHTML = turmas.length
-    ? "Oferecendo: " + turmas.map((t, i) => `<span class="${i ? "" : "rota-turma-proxima"}"><strong>${escapeHtml(t.curso)}</strong> — turma ${dataBr(t.data)}${i ? "" : " (próxima)"}</span>`).join(" · ")
-    : "";
+  const pc = r?.planoCurso;
+  oferta.classList.toggle("oculto", !turmas.length && !pc);
+  oferta.innerHTML = (r?.finalizacaoDeAno ? '<strong class="rota-fa">ROTA FINALIZAÇÃO DE ANO</strong> · ' : "") +
+    (pc ? `Curso do dia: <span class="rota-turma-proxima"><strong>${escapeHtml(pc.curso)}</strong>${pc.turma ? ` — turma ${dataBr(pc.turma)}` : ""}</span> <small class="texto-suave">(${escapeHtml(pc.setor)})</small>` +
+      (turmas.filter((t) => t.curso !== pc.curso).length ? " · completando com: " + turmas.filter((t) => t.curso !== pc.curso).map((t) => `${escapeHtml(t.curso)} — turma ${dataBr(t.data)}`).join(" · ") : "")
+    : turmas.length ? "Oferecendo: " + turmas.map((t, i) => `<span class="${i ? "" : "rota-turma-proxima"}"><strong>${escapeHtml(t.curso)}</strong> — turma ${dataBr(t.data)}${i ? "" : " (próxima)"}</span>`).join(" · ") : "");
   const curta = r && r.itens.filter((i) => !i.extra).length < r.cota;
   const aviso = document.getElementById("rota-aviso");
   if (curta) {
@@ -319,6 +334,12 @@ function renderizarPainelRota(p) {
     cards.push(card(`Rota Extra — semana de ${dataBr(ex.semanaDe)}`, `${inteiro(tot)} <small>extras feitas</small>`,
       ex.porPessoa.map((x) => `${escapeHtml(x.nome)} ${inteiro(x.feitas)} de ${inteiro(x.oferecidas)}`).join(" · ") + ` · ${ex.porDia} por dia, opcionais (só a favor)`));
   }
+  const nv = p.novos;
+  if (nv?.porPessoa?.length) {
+    const tot = nv.porPessoa.reduce((s, x) => s + x.feitas, 0);
+    cards.push(card(`Órgãos novos — semana de ${dataBr(nv.semanaDe)}`, `${inteiro(tot)} <small>órgãos feitos</small>`,
+      nv.porPessoa.map((x) => `${escapeHtml(x.nome)} ${inteiro(x.feitas)} de ${inteiro(x.oferecidas)}`).join(" · ") + ` · ${nv.porDia} por dia, fora das 45 e do prêmio`));
+  }
   const sb = p.sobreposicao;
   if (sb) {
     cards.push(card(`Telefone compartilhado — ${escapeHtml(sb.tipo)}`, `${inteiro(sb.compartilham)} <small>de ${inteiro(sb.contatos)}</small>`,
@@ -355,17 +376,18 @@ function renderizarPainelRota(p) {
       <td>${curta ? `<span class="pct-meio" title="rota curta: a fila inteira acabou (${inteiro(r.elegiveis)} elegíveis na geração)">${inteiro(g.itens)}/${inteiro(r.cota)}</span>` : `${inteiro(g.itens)}/${inteiro(r.cota)}`}</td>
       <td>${inteiro(g.feitas)}</td><td>${pctDe(g.feitas, g.itens)}</td><td>${inteiro(g.atendidas)}</td><td>${inteiro(g.manuais)}</td><td>${inteiro(g.pendentes)}</td>
       <td title="Rota Extra: feitas de oferecidas (opcional)">${g.extra?.itens ? `${inteiro(g.extra.feitas)}/${inteiro(g.extra.itens)}` : "—"}</td>
+      <td title="Órgãos novos: feitos de oferecidos (indicador próprio, fora do prêmio)" class="rota-novos-num">${g.novos?.itens ? `${inteiro(g.novos.feitas)}/${inteiro(g.novos.itens)}` : "—"}</td>
       <td style="text-align:left"><div class="rota-barra rota-barra-mini"><i class="rota-barra-feitas" style="width:${g.itens ? (g.feitas / Math.max(g.itens, r.cota)) * 100 : 0}%"></i><i class="rota-barra-atendidas" style="width:${g.itens ? (g.atendidas / Math.max(g.itens, r.cota)) * 100 : 0}%"></i></div></td>
       ${colunasEstoque(est)}</tr>`;
   });
   // consultores com estoque e sem rota no dia (ex.: carteira nova, ou dia sem geração)
   for (const x of e?.porConsultor || []) {
     if (p.rotasDia.some((r) => r.pessoaId === x.pessoaId)) continue;
-    linhas.push(`<tr class="sem-clique"><td style="text-align:left">${escapeHtml(x.nome)}</td><td colspan="8" class="texto-suave">sem rota em ${dataBr(p.data)}</td>
+    linhas.push(`<tr class="sem-clique"><td style="text-align:left">${escapeHtml(x.nome)}</td><td colspan="9" class="texto-suave">sem rota em ${dataBr(p.data)}</td>
       ${colunasEstoque(x)}</tr>`);
   }
   document.querySelector("#tabela-rotas-dia tbody").innerHTML = linhas.join("") ||
-    `<tr class="sem-clique"><td colspan="12" class="texto-suave">Nenhuma rota nesta data e nenhum consultor com carteira.</td></tr>`;
+    `<tr class="sem-clique"><td colspan="13" class="texto-suave">Nenhuma rota nesta data e nenhum consultor com carteira.</td></tr>`;
 
   // estoque por regional (soma dos setores da fila)
   document.getElementById("rota-estoque-legenda").textContent = e ? `— fila ${e.tipo}, para ${dataBr(e.data)}` : "";

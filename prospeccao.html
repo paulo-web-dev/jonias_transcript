@@ -131,7 +131,7 @@
         <h2 class="secao-titulo">Rotas do dia <span class="texto-suave" id="rota-painel-data"></span></h2>
         <div class="tabela-scroll">
           <table class="tabela-metricas" id="tabela-rotas-dia">
-            <thead><tr><th style="text-align:left">Consultor</th><th>Rota</th><th>Feitas</th><th>%</th><th>Atendidas</th><th>Baixa manual</th><th>Pendentes</th><th title="Rota Extra: feitas de oferecidas (opcional, não conta no 100% nem no prêmio)">Extra</th><th style="text-align:left">Progresso</th><th style="text-align:left" title="ponto do ciclo na próxima geração: a fila é cíclica — cada consultor anda do 1º ao último setor e só então volta ao 1º">Setor atual</th><th title="telefones disponíveis no setor atual ÷ cota do setor">Dias no setor</th><th title="Σ telefones do setor atual até o último da fila ÷ cota de cada setor (estimativa: o bloqueio vence no caminho e colegas da regional dividem o estoque)">Dias p/ fechar a volta</th></tr></thead>
+            <thead><tr><th style="text-align:left">Consultor</th><th>Rota</th><th>Feitas</th><th>%</th><th>Atendidas</th><th>Baixa manual</th><th>Pendentes</th><th title="Rota Extra: feitas de oferecidas (opcional, não conta no 100% nem no prêmio)">Extra</th><th title="Órgãos novos (consórcios, autarquias, RPPS): feitos de oferecidos — indicador próprio, fora das 45 e do prêmio">Órgãos novos</th><th style="text-align:left">Progresso</th><th style="text-align:left" title="ponto do ciclo na próxima geração: a fila é cíclica — cada consultor anda do 1º ao último setor e só então volta ao 1º">Setor atual</th><th title="telefones disponíveis no setor atual ÷ cota do setor">Dias no setor</th><th title="Σ telefones do setor atual até o último da fila ÷ cota de cada setor (estimativa: o bloqueio vence no caminho e colegas da regional dividem o estoque)">Dias p/ fechar a volta</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -208,6 +208,7 @@
         <div class="rota-barra" aria-hidden="true"><i class="rota-barra-feitas" id="rota-barra-feitas"></i><i class="rota-barra-atendidas" id="rota-barra-atendidas"></i></div>
         <div class="rota-numeros" id="rota-numeros"></div>
       </div>
+      <div class="rota-blocos oculto" id="rota-blocos"></div>
       <p id="rota-aviso" class="conflito-aviso oculto"></p>
       <p class="texto-suave trab-dicas"><strong>A Rota do dia é o que conta para a meta e o prêmio</strong> (as 45 do seu setor; a Extra só a favor) — a aba Trabalho é livre. Ligue na ordem: a rota agrupa os contatos por município e órgão, andando por cidades vizinhas. A baixa vem sozinha
         quando o CDR do PABX é importado (ligação sua para o número, no dia da rota). Falou por WhatsApp ou o número não casou? <strong>dar baixa</strong>

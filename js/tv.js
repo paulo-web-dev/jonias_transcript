@@ -605,6 +605,22 @@ function montar(d) {
   montado = true;
 }
 
+// Contador dos R$ 500 mil (fimdeano.js): só com o contador ligado pelo admin.
+// Número do servidor (matrículas de nov/dez, sem canceladas), nada calculado aqui.
+function metaFimDeAno(c) {
+  const alvo = el("tv-meta-ano");
+  if (!alvo) return;
+  alvo.classList.toggle("oculto", !c?.ativo);
+  if (!c?.ativo) return;
+  const r = (v) => "R$ " + Math.round(v / 100).toLocaleString("pt-BR");
+  const sm = c.supermeta;
+  const pct = Math.min(100, (c.vendidoCentavos / sm.metaCentavos) * 100);
+  alvo.innerHTML = `<span class="tv-ma-falta">faltam <strong>${r(sm.faltaCentavos)}</strong> para R$ 500 mil</span>` +
+    `<span class="tv-ma-barra"><i style="width:${pct.toFixed(1)}%"></i></span>` +
+    `<span class="tv-ma-det">${r(c.vendidoCentavos)} vendidos · base R$ 400 mil: ${c.base.faltaCentavos ? "faltam " + r(c.base.faltaCentavos) : "✓"} · ` +
+    `${sm.porDiaCentavos !== null ? r(sm.porDiaCentavos) + "/dia" : ""} em ${c.diasUteisRestantes} dias úteis</span>`;
+}
+
 function renderizar(d, origem) {
   somConfig = !!d.som;
   tentarArmarSom();
@@ -621,6 +637,7 @@ function renderizar(d, origem) {
   }
   ultimaAtualizacao = new Date(d.atualizadoEm);
   relogio();
+  metaFimDeAno(d.fimAno);
 
   // ---- Diff para animação/som/celebração (só com payload anterior) ----
   const mudancas = { houve: false };

@@ -482,7 +482,7 @@ const COLUNAS_CONTATO = [
 // saiu em 2026-10-02 (migração 30: carteira removida, fora da lista).
 // Para a lista não voltar a divergir da operação, a equipe atual também inclui
 // todo consultor ativo com carteira ou com usuário vendedor ativo.
-const CONSULTORES_ATUAIS = ["Frederico", "Renato", "Eduardo", "Agnes", "Bianca"];
+const CONSULTORES_ATUAIS = ["Frederico", "Renato", "Eduardo", "Agnes", "Bianca", "Danilo"]; // Danilo: 2026-11-10 (migração 36)
 function equipeAtual() {
   const marcadores = CONSULTORES_ATUAIS.map(() => "?").join(",");
   return db.prepare(
@@ -952,7 +952,7 @@ const CAMPOS_TRABALHO = [
   "id", "setor", "orgao", "municipio_texto", "codigo_ibge", "responsavel", "cargo", "telefone",
   "telefone_original", "whatsapp", "email", "data_ultimo_contato", "observacoes", "curso",
   "consultor_planilha", "pessoa_id", "cor_linha", "contato_inexistente", "cadastro_crm", "linha_oculta",
-  "origem", "editado_em", "telefone_valido",
+  "origem", "editado_em", "telefone_valido", "entidade", "confirmar_antes",
 ];
 const SQL_LINHA_TRABALHO = `SELECT ${CAMPOS_TRABALHO.join(", ")} FROM contatos_ativo`;
 const linhaCompacta = (r) => CAMPOS_TRABALHO.map((c) => r[c] ?? null);
@@ -1182,6 +1182,15 @@ function atualizarContato(id, mudancas, usuarioId, escopo = null) {
   // Fase 4: telefone/WhatsApp/município alterados reclassificam só as ligações desses números
   if (registros.length && campos.some((c) => ["telefone", "whatsapp", "codigo_ibge"].includes(c))) {
     cdr.cruzarLigacoes({ numeros: [linha.telefone, linha.whatsapp, colunas.telefone, colunas.whatsapp].filter(Boolean) });
+  }
+  // Rota (migração 36): telefone preenchido/trocado vale para os itens de rota
+  // ainda sem baixa, de hoje em diante — é o número que a baixa pelo CDR casa
+  // (órgãos novos chegam quase todos sem telefone; o vendedor acha na hora)
+  if (registros.length && campos.includes("telefone")) {
+    const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    db.prepare(
+      `UPDATE rota_itens SET telefone = ? WHERE contato_id = ? AND baixa_metodo IS NULL
+         AND rota_id IN (SELECT id FROM rotas WHERE data >= ?)`).run(colunas.telefone || "", linha.id, hoje);
   }
   const nova = linhaCompactaDe(linha.id, escopo);
   // telefone trocado: a última ligação da coluna passa a ser a do número novo
@@ -1518,7 +1527,127 @@ function gerencial() {
   return { regionais, semRegional, porUf, geradoEm: new Date().toISOString() };
 }
 
+// ======================================================================
+// ÓRGÃOS NOVOS (migração 36, decisões do usuário 2026-11-10): consórcios,
+// autarquias e RPPS de PR/SC, da aba "Lista geral" da planilha
+// Base_Testes_Orgaos_PR_SC.xlsx (as outras abas são recortes da mesma lista).
+// - Entram TODAS as linhas, com ou sem telefone (só 32 de 351 têm): o
+//   vendedor acha o número na hora e preenche na tela; preenchido, vale para
+//   o CDR e a baixa (atualizarContato atualiza os itens de rota abertos).
+// - Vendedor: a coluna "Consultor" da planilha é IGNORADA (deixava 109 com a
+//   Agnes); divisão igual entre os cinco da rota de fim de ano, em rodízio
+//   sobre a lista ordenada por UF e tipo — cada um recebe ~1/5 de cada grupo.
+//   Reimportar não redistribui (pessoa_id de linha existente fica).
+// - "Confirmar antes de ligar" (coluna Verificação) → confirmar_antes = 1.
+// - "Cursos aderentes" → curso (a oferta do dia sai daqui, não do setor).
+// - setor = coluna Setor; origem = 'orgaos_novos'; orgao = 'Autarquia'.
+// ======================================================================
+const VENDEDORES_ORGAOS_NOVOS = ["Frederico", "Agnes", "Eduardo", "Bianca", "Danilo"];
+async function importarOrgaosNovos(buffer, arquivoNome, usuarioId) {
+  const erro = (m) => Object.assign(new Error(m), { status: 422, validacao: true });
+  const wb = new ExcelJS.Workbook();
+  try { await wb.xlsx.load(buffer); } catch (e) { throw erro(`Arquivo ilegível como .xlsx: ${e.message}`); }
+  const ws = wb.worksheets.find((w) => normalizarRotulo(w.name) === normalizarRotulo("Lista geral"));
+  if (!ws) throw erro(`Aba "Lista geral" não encontrada (abas: ${wb.worksheets.map((w) => w.name).join(", ")}).`);
+  let linhaCab = 0, cab = null;
+  for (let r = 1; r <= 5 && !cab; r++) {
+    const vals = Array.from(ws.getRow(r).values, (v) => (v === null || v === undefined ? "" : normalizarRotulo(String(valorCelula(v) ?? ""))));
+    if (vals.some((v) => v === "entidade")) { linhaCab = r; cab = vals; }
+  }
+  if (!cab) throw erro('Cabeçalho com a coluna "Entidade" não encontrado nas 5 primeiras linhas.');
+  const col = (prefixo) => cab.findIndex((v) => v.startsWith(normalizarRotulo(prefixo)));
+  const C = { entidade: col("entidade"), tipo: col("tipo"), setor: col("setor"), uf: col("uf"), municipio: col("municipio"),
+    consultor: col("consultor"), contato: col("contato"), telefone: col("telefone"), email: col("e-mail") >= 0 ? col("e-mail") : col("email"),
+    cnpj: col("cnpj"), cursos: col("cursos"), fonte: col("fonte"), verificacao: col("verificacao"), status: col("status"), obs: col("observ") };
+  const faltam = ["entidade", "setor", "uf", "municipio"].filter((k) => C[k] < 0);
+  if (faltam.length) throw erro(`Colunas obrigatórias ausentes: ${faltam.join(", ")}.`);
+  const pessoas = VENDEDORES_ORGAOS_NOVOS.map((n) => db.prepare("SELECT id, nome FROM pessoas WHERE nome = ? AND tipo = 'consultor' AND ativo = 1").get(n));
+  if (pessoas.some((p) => !p)) throw erro(`Consultor ausente: ${VENDEDORES_ORGAOS_NOVOS.filter((_, i) => !pessoas[i]).join(", ")}.`);
+  const cel = (row, k) => (C[k] < 0 ? null : texto(textoDaCelula(row.getCell(C[k])), 4000));
+  const lidas = [];
+  const ignoradas = [];
+  ws.eachRow((row, n) => {
+    if (n <= linhaCab) return;
+    const entidade = cel(row, "entidade");
+    if (!entidade) return;
+    const uf = String(cel(row, "uf") || "").toUpperCase().trim();
+    const setor = cel(row, "setor");
+    if (!UFS_ACEITAS.includes(uf) || !setor) { ignoradas.push({ linha: n, entidade, motivo: !setor ? "sem setor" : `UF inválida "${uf}"` }); return; }
+    lidas.push({ n, uf, setor, entidade, tipo: cel(row, "tipo"), municipio: cel(row, "municipio"), consultorPlanilha: cel(row, "consultor"),
+      contato: cel(row, "contato"), telefone: cel(row, "telefone"), email: cel(row, "email"), cnpj: cel(row, "cnpj"),
+      cursos: cel(row, "cursos"), fonte: cel(row, "fonte"), verificacao: cel(row, "verificacao"), status: cel(row, "status"), obs: cel(row, "obs") });
+  });
+  if (!lidas.length) throw erro('Nenhuma linha com "Entidade" na aba Lista geral.');
+  // rodízio sobre UF → tipo → município → entidade: cada vendedor fica com ~1/5 de cada grupo
+  const ordem = [...lidas].sort((a, b) => a.uf.localeCompare(b.uf) || String(a.tipo || "").localeCompare(String(b.tipo || "")) ||
+    String(a.municipio || "").localeCompare(String(b.municipio || "")) || a.entidade.localeCompare(b.entidade));
+  ordem.forEach((l, i) => { l.pessoaId = pessoas[i % pessoas.length].id; });
+  const idx = indiceMunicipios();
+  const hash = hashSha256(buffer);
+  const agora = new Date().toISOString();
+  const relatorio = { uf: null, orgaosNovos: true, lidas: lidas.length, ignoradas, porVendedor: {}, comTelefone: 0, confirmar: 0, semMunicipio: [] };
+  const buscar = db.prepare("SELECT id, pessoa_id, editado_em FROM contatos_ativo WHERE uf = ? AND setor = ? AND linha_origem = ?");
+  let novos = 0, atualizados = 0;
+  const importacaoId = db.transaction(() => {
+    const impId = db.prepare(`INSERT INTO importacoes (tipo, arquivo_nome, hash_sha256, usuario_id, iniciado_em) VALUES ('prospeccao', ?, ?, ?, ?)`)
+      .run(arquivoNome, hash, usuarioId, agora).lastInsertRowid;
+    for (const l of lidas) {
+      const tel = normalizarTelefoneOriginal(l.telefone);
+      const cand = (idx.porNome.get(normalizarCidade(l.municipio || "").nome) || []).filter((m) => m.uf === l.uf);
+      const codigo = cand.length === 1 ? cand[0].codigo : null;
+      if (!codigo) relatorio.semMunicipio.push(`${l.uf} ${l.municipio || "(vazio)"} — ${l.entidade}`);
+      const confirmar = /confirmar/i.test(l.verificacao || "") ? 1 : 0;
+      const extras = { "Tipo": l.tipo, "Fonte": l.fonte, "Verificação": l.verificacao, "Status do contato": l.status,
+        "Consultor (planilha, ignorado)": l.consultorPlanilha };
+      for (const k of Object.keys(extras)) if (!extras[k]) delete extras[k];
+      const base = {
+        uf: l.uf, setor: l.setor, linha_origem: l.n, orgao: "Autarquia", origem: "orgaos_novos", entidade: l.entidade.slice(0, 300),
+        cnpj: l.cnpj, confirmar_antes: confirmar, curso: l.cursos ? l.cursos.slice(0, 300) : null, observacoes: l.obs,
+        municipio_texto: l.municipio ? l.municipio.slice(0, 200) : null, codigo_ibge: codigo,
+        municipio_metodo: codigo ? "exato_uf" : null, municipio_confianca: codigo ? "alta" : null,
+        responsavel: l.contato ? l.contato.slice(0, 200) : null, email: l.email ? l.email.slice(0, 200) : null,
+        telefone_original: tel.original, telefone: tel.digitos, telefone_valido: tel.valido,
+        extras_json: Object.keys(extras).length ? JSON.stringify(extras) : null,
+        arquivo_nome: arquivoNome, importacao_id: impId,
+      };
+      const existente = buscar.get(l.uf, l.setor, l.n);
+      if (!existente) {
+        const linha = { ...base, pessoa_id: l.pessoaId, criado_em: agora, contato_inexistente: 0, linha_oculta: 0 };
+        const cols = Object.keys(linha);
+        db.prepare(`INSERT INTO contatos_ativo (${cols.join(", ")}) VALUES (${cols.map((c) => "@" + c).join(", ")})`).run(linha);
+        novos++;
+      } else {
+        // reimportação: atualiza o que veio da planilha; o que o vendedor já
+        // editou (telefone, contato, e-mail) e o vendedor da linha ficam
+        const campos = { ...base };
+        if (existente.editado_em) for (const k of ["responsavel", "email", "telefone_original", "telefone", "telefone_valido"]) delete campos[k];
+        for (const k of ["uf", "setor", "linha_origem"]) delete campos[k];
+        db.prepare(`UPDATE contatos_ativo SET ${Object.keys(campos).map((c) => `${c} = @${c}`).join(", ")}, atualizado_em = @agora WHERE id = @id`)
+          .run({ ...campos, agora, id: existente.id });
+        atualizados++;
+      }
+    }
+    return impId;
+  })();
+  for (const r of db.prepare(
+    `SELECT p.nome, COUNT(*) n, SUM(a.telefone_valido = 1) tel, SUM(a.confirmar_antes) conf FROM contatos_ativo a JOIN pessoas p ON p.id = a.pessoa_id
+     WHERE a.origem = 'orgaos_novos' GROUP BY p.nome ORDER BY p.nome`).all()) {
+    relatorio.porVendedor[r.nome] = { orgaos: r.n, comTelefone: r.tel, confirmar: r.conf };
+    relatorio.comTelefone += r.tel; relatorio.confirmar += r.conf;
+  }
+  if (relatorio.semMunicipio.length) cruzarMunicipios();
+  relatorio.ligacoes = cdr.cruzarLigacoes();
+  db.prepare(
+    `UPDATE importacoes SET linhas_lidas = ?, linhas_validas = ?, linhas_ignoradas = ?, registros_novos = ?, registros_atualizados = ?,
+       registros_identicos = 0, detalhes_json = ?, concluido_em = ? WHERE id = ?`
+  ).run(lidas.length + ignoradas.length, lidas.length, ignoradas.length, novos, atualizados, JSON.stringify(relatorio), new Date().toISOString(), importacaoId);
+  console.log(`prospecção: órgãos novos importados de ${arquivoNome} — ${novos} novo(s), ${atualizados} atualizado(s), ` +
+    `${ignoradas.length} ignorada(s); ${Object.entries(relatorio.porVendedor).map(([n, v]) => `${n} ${v.orgaos}`).join(", ")}`);
+  return { importacaoId, novos, atualizados, ...relatorio };
+}
+
 module.exports = {
+  importarOrgaosNovos,
   importarProspeccao,
   coberturaProspeccao,
   listarCores,

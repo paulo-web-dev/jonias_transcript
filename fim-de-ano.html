@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rota finalização de ano — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">rota finalização de ano</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/prospeccao" class="btn-topo">📇 Prospecção</a>
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista fa-pagina">
+    <h2 class="fa-titulo-vendedor" id="fa-titulo">ROTA FINALIZAÇÃO DE ANO</h2>
+    <p class="texto-suave" id="fa-intro">carregando…</p>
+
+    <section id="fa-admin" class="oculto">
+      <div class="fa-acoes">
+        <span id="fa-status" class="rota-bloco"></span>
+        <button type="button" class="btn-mini" id="fa-rascunho" title="refaz as células automáticas (as ajustadas à mão ficam)">↻ Gerar rascunho</button>
+        <button type="button" class="btn-mini btn-primario" id="fa-publicar">Publicar plano</button>
+        <span class="texto-suave" id="fa-publicar-dica"></span>
+      </div>
+
+      <h3 class="secao-titulo">Contador dos R$ 500 mil (header de todas as telas e TV)</h3>
+      <div class="fa-acoes">
+        <span id="fa-contador"></span>
+        <button type="button" class="btn-mini" id="fa-contador-ligar"></button>
+      </div>
+
+      <h3 class="secao-titulo">Faixas alfabéticas e órgãos novos</h3>
+      <div class="fa-grade-wrap"><table class="tabela-metricas" id="fa-faixas"></table></div>
+      <div class="fa-acoes">
+        <label class="btn-mini">📥 Importar órgãos novos (.xlsx, aba "Lista geral")
+          <input type="file" id="fa-orgaos" accept=".xlsx" class="oculto" /></label>
+        <span class="texto-suave" id="fa-orgaos-res"></span>
+      </div>
+
+      <h3 class="secao-titulo">Cursos, captação e estoque (telefones distintos na faixa)</h3>
+      <div class="fa-grade-wrap"><table class="tabela-metricas" id="fa-cursos"></table></div>
+    </section>
+
+    <h3 class="secao-titulo" id="fa-plano-titulo">Plano por dia</h3>
+    <div class="fa-legenda" id="fa-legenda"></div>
+    <div id="fa-plano"></div>
+    <p class="texto-suave" id="fa-rodape"></p>
+  </main>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/fim-de-ano.js"></script>
+</body>
+</html>

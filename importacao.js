@@ -259,12 +259,15 @@ function importarCdr(textoBruto, arquivoNome, usuarioId) {
   for (const v of db.prepare("SELECT ramal, pessoa_id, vigente_desde, vigente_ate FROM ramal_vigencias").all()) {
     (vigenciasPorRamal.get(v.ramal) ?? vigenciasPorRamal.set(v.ramal, []).get(v.ramal)).push(v);
   }
+  // Ramal COM vigência só tem dono pela vigência (migração 37, 2026-11-10): data
+  // fora de todas = SEM dono — o 2004 de 03/10 a 10/11/2026 fica sem dono mesmo
+  // com o Frederico em pessoas.ramal = '2004' a partir de 11/11.
   function pessoaDoRamal(ramal, dataHora) {
     const vigencias = vigenciasPorRamal.get(ramal);
     if (vigencias && dataHora) {
       const dia = dataHora.slice(0, 10);
       const v = vigencias.find((x) => (!x.vigente_desde || x.vigente_desde <= dia) && (!x.vigente_ate || dia <= x.vigente_ate));
-      if (v) return v.pessoa_id;
+      return v ? v.pessoa_id : null;
     }
     return pessoaPorRamal.get(ramal) ?? null;
   }

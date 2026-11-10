@@ -1549,6 +1549,180 @@ const MIGRACOES = [
     `);
     console.log("migração 35: Rota Extra — rota_itens.extra, rota_itens.origem_item_id, rotas.extra.");
   },
+  // 36 — ROTA FINALIZAÇÃO DE ANO (decisões do usuário, 2026-11-10; plano
+  // "Resumo_Rota Final_Unyflex.pdf"). Só ESTRUTURA — nada muda nas rotas até o
+  // admin publicar o plano em /fim-de-ano (fimdeano.js):
+  // - Danilo, vendedor novo (nome completo, ramal, wallet e Omie pendentes);
+  // - faixas_vendedor: faixa ALFABÉTICA de município por vendedor e UF, com
+  //   vigência TEMPORÁRIA 11/11–15/12 (em janeiro voltam as carteiras);
+  // - contatos_ativo.entidade/cnpj/confirmar_antes (base de ÓRGÃOS NOVOS:
+  //   consórcios, autarquias, RPPS — importados da planilha, origem
+  //   'orgaos_novos');
+  // - fim_ano_cursos: curso → tipo de rota (abas do setor), turma e janela de
+  //   captação; tipos de rota NOVOS por curso (bloqueio por telefone não herda
+  //   as rotas de outubro/novembro), + LicitaExpo (até 13/11), Turmas 2027
+  //   (14–15/12) e "Órgãos novos" (bloco de 20, rota_itens.extra = 2);
+  // - fim_ano_plano: vendedor × dia → tipo (curso do dia), rascunho até publicar.
+  () => {
+    db.exec(`
+      ALTER TABLE contatos_ativo ADD COLUMN entidade TEXT;
+      ALTER TABLE contatos_ativo ADD COLUMN cnpj TEXT;
+      ALTER TABLE contatos_ativo ADD COLUMN confirmar_antes INTEGER NOT NULL DEFAULT 0;
+      CREATE TABLE faixas_vendedor (
+        id            INTEGER PRIMARY KEY,
+        pessoa_id     INTEGER NOT NULL REFERENCES pessoas(id),
+        uf            TEXT NOT NULL,
+        inicio        TEXT NOT NULL,
+        fim           TEXT NOT NULL,
+        vigente_desde TEXT NOT NULL,
+        vigente_ate   TEXT,
+        UNIQUE (pessoa_id, uf, vigente_desde)
+      );
+      CREATE TABLE fim_ano_cursos (
+        tipo_id       INTEGER PRIMARY KEY REFERENCES rota_tipos(id),
+        curso         TEXT NOT NULL,
+        setor         TEXT NOT NULL,
+        turma         TEXT,
+        captacao_de   TEXT NOT NULL,
+        captacao_ate  TEXT NOT NULL,
+        ordem         INTEGER NOT NULL,
+        papel         TEXT NOT NULL DEFAULT 'curso' CHECK (papel IN ('curso', 'licitaexpo', '2027', 'novos'))
+      );
+      CREATE TABLE fim_ano_plano (
+        pessoa_id     INTEGER NOT NULL REFERENCES pessoas(id),
+        data          TEXT NOT NULL,
+        tipo_id       INTEGER NOT NULL REFERENCES rota_tipos(id),
+        manual        INTEGER NOT NULL DEFAULT 0,
+        atualizado_em TEXT NOT NULL,
+        usuario_id    INTEGER REFERENCES usuarios(id),
+        PRIMARY KEY (pessoa_id, data)
+      );
+      CREATE INDEX idx_contatos_origem ON contatos_ativo(origem) WHERE origem <> 'planilha';
+    `);
+    if (!db.prepare("SELECT 1 FROM pessoas WHERE nome = 'Danilo'").get()) {
+      db.prepare(
+        `INSERT INTO pessoas (nome, ramal, ativo, entra_feedback, nomes_alternativos, tipo, entra_painel, entra_tv)
+         VALUES ('Danilo', NULL, 1, 1, '[]', 'consultor', 1, 1)`).run();
+    }
+    const pid = (n) => db.prepare("SELECT id FROM pessoas WHERE nome = ? AND tipo = 'consultor'").get(n)?.id;
+    const FAIXAS = [
+      ["Frederico", "PR", "ABATIA", "COLOMBO"], ["Agnes", "PR", "COLORADO", "ITAMBE"], ["Eduardo", "PR", "ITAPEJARA DO OESTE", "NOVA OLIMPIA"],
+      ["Bianca", "PR", "NOVA PRATA DO IGUACU", "SALTO DO ITARARE"], ["Danilo", "PR", "SALTO DO LONTRA", "XAMBRE"],
+      ["Frederico", "SC", "Abdon Batista", "Canelinha"], ["Agnes", "SC", "Canoinhas", "Ipira"], ["Eduardo", "SC", "Iporã do Oeste", "Orleans"],
+      ["Bianca", "SC", "Otacílio Costa", "Santiago do Sul"], ["Danilo", "SC", "Santo Amaro da Imperatriz", "Zortéa"],
+    ];
+    const insFaixa = db.prepare("INSERT INTO faixas_vendedor (pessoa_id, uf, inicio, fim, vigente_desde, vigente_ate) VALUES (?, ?, ?, ?, '2026-11-11', '2026-12-15')");
+    for (const [n, uf, ini, fim] of FAIXAS) {
+      if (pid(n)) insFaixa.run(pid(n), uf, ini, fim);
+      else console.warn(`⚠ migração 36: consultor "${n}" não encontrado — faixa ${uf} ${ini} → ${fim} não gravada`);
+    }
+
+    // abas por setor (decisões do usuário, 2026-11-10), por nome exato e, se
+    // não houver, normalizado; aba inexistente = aviso no log
+    const norm = (t) => String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+    const existentes = db.prepare("SELECT DISTINCT uf, setor FROM contatos_ativo").all();
+    const resolver = (uf, setor) => existentes.find((x) => x.uf === uf && x.setor === setor) ||
+      existentes.find((x) => x.uf === uf && norm(x.setor) === norm(setor)) || null;
+    const PR = "PR", SC = "SC";
+    const SETORES = {
+      "Compras e licitações": [[PR, "LICITAÇÃO PM"], [SC, "LICITAÇÃO PM"], [PR, "LICITAÇÃO CM"], [SC, "LICITAÇÃO CM"], [PR, "Compras PM"], [PR, "Compras CM"],
+        [SC, "COMPRAS"], [PR, "PREGOEIRO"], [SC, "PREGOEIRO"], [PR, "LICITAÇÃO PM - com população"], [PR, "Licitação CM com Papulação"],
+        [SC, "SAUDE LICITACAO"], [PR, "ETP E TR"]],
+      "Transparência e ouvidoria": [[PR, "TRANSPARENCIA PM"], [PR, "Controle interno"], [SC, "CONTROLE INTERNO PM"], [PR, "Controle Interno - CM"], [SC, "CONTROLE INTERNO CM"]],
+      "Gestão e fiscalização de contratos": [[PR, "GESTOR E FISCAL DE CONTRATOS"], [SC, "Agente de contrataçãoFiscais"], [PR, "JURIDICO PM"], [SC, "JURIDICO PM"],
+        [PR, "JURIDICO CM"], [SC, "JURIDICO CM"]],
+      "Patrimônio e frotas": [[PR, "PATRIMONIO PM"], [PR, "FROTAS E PATRIMONIO PM"], [SC, "PATRIMONIOFROTAS PM"], [PR, "Patrimonio CM"], [SC, "PATRIMONIOFROTAS CM"]],
+      "Contabilidade e tesouraria": [[PR, "CONTABILIDADE PM"], [SC, "CONTABILIDADE PM"], [PR, "TESOURARIA PM"], [SC, "TESOURARIA PM"], [PR, "FINANÇAS PM"],
+        [PR, "CONTABILIDADE CM"], [SC, "CONTABILIDADE CM"], [PR, "TESOURARIA CM"], [SC, "TESOURARIA CM"], [PR, "Planejamento"], [SC, "PLANEJAMENTO"]],
+      "Administração e servidores": [[PR, "RH PM"], [SC, "RH PM"], [PR, "RH CM"], [SC, "RH CM"], [PR, "Servidores CM"], [PR, "Servidores Secretários"], [SC, "SERVIDORES"]],
+      "Legislativo e assessoria": [[PR, "Legislativo CM"], [SC, "LEGISLATIVO CM"], [PR, "ASSESSOR CM"], [SC, "ASSESSOR CM"], [PR, "Chefe de Gabinete CM"],
+        [PR, "COMUNICAÇÃO CM"], [SC, "COMUNICAÇÃO CM"]],
+    };
+    SETORES["Turmas 2027 (todos os setores)"] = [...new Map(Object.values(SETORES).flat().map((s) => [s.join("|"), s])).values()];
+    // [curso, setor, turma (data de início), captação de, até, papel]
+    const CURSOS = [
+      ["LICITAEXPO Blindagem nas Licitações", "Compras e licitações", "2026-11-24", "2026-11-11", "2026-11-13", "licitaexpo"],
+      ["Compras, Licitações e Contratos", "Compras e licitações", "2026-12-01", "2026-11-16", "2026-11-27", "curso"],
+      ["Portal, LGPD, e-SIC e Ouvidoria", "Transparência e ouvidoria", "2026-12-01", "2026-11-16", "2026-11-27", "curso"],
+      ["Fiscais de Contratos e Papel do Gestor", "Gestão e fiscalização de contratos", "2026-12-08", "2026-11-16", "2026-12-04", "curso"],
+      ["Patrimônio Público com IA", "Patrimônio e frotas", "2026-12-08", "2026-11-23", "2026-12-04", "curso"],
+      ["Encerramento do Exercício Municipal", "Contabilidade e tesouraria", "2026-12-08", "2026-11-23", "2026-12-04", "curso"],
+      ["Formação Técnica para Servidor Público", "Administração e servidores", "2026-12-08", "2026-11-23", "2026-12-04", "curso"],
+      ["IA na Câmara Municipal", "Legislativo e assessoria", "2026-12-15", "2026-11-30", "2026-12-11", "curso"],
+      ["Licitações com Inteligência Artificial", "Compras e licitações", "2026-12-15", "2026-11-30", "2026-12-11", "curso"],
+      ["Turmas 2027", "Turmas 2027 (todos os setores)", null, "2026-12-14", "2026-12-15", "2027"],
+    ];
+    const agora = new Date().toISOString();
+    const nomesUsados = new Set(db.prepare("SELECT nome FROM rota_tipos").all().map((r) => r.nome));
+    const novoTipo = (nomeBase, setores, turmas) => {
+      let nome = nomeBase;
+      if (nomesUsados.has(nome)) nome = `${nomeBase} (fim de ano)`;
+      nomesUsados.add(nome);
+      return Number(db.prepare("INSERT INTO rota_tipos (nome, setores_json, cota, ativo, turmas_json, criado_em) VALUES (?, ?, 45, 1, ?, ?)")
+        .run(nome, JSON.stringify(setores), JSON.stringify(turmas), agora).lastInsertRowid);
+    };
+    const insCurso = db.prepare("INSERT INTO fim_ano_cursos (tipo_id, curso, setor, turma, captacao_de, captacao_ate, ordem, papel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    const faltando = [];
+    CURSOS.forEach(([curso, setor, turma, de, ate, papel], i) => {
+      const abas = SETORES[setor].map(([uf, s]) => { const r = resolver(uf, s); if (!r && existentes.length) faltando.push(`${uf} "${s}"`); return r; })
+        .filter(Boolean).map((x) => ({ uf: x.uf, setor: x.setor }));
+      const id = novoTipo(curso, abas, turma ? [{ curso, data: turma }] : []);
+      insCurso.run(id, curso, setor, turma, de, ate, i + 1, papel);
+    });
+    const idNovos = novoTipo("Órgãos novos", [], []);
+    insCurso.run(idNovos, "Órgãos novos (consórcios, autarquias, RPPS)", "Órgãos novos", null, "2026-11-11", "2026-12-15", 99, "novos");
+    if (faltando.length) console.warn(`⚠ migração 36: abas inexistentes na base (ficam de fora): ${[...new Set(faltando)].join(", ")}`);
+    console.log(`migração 36: rota finalização de ano — Danilo cadastrado (#${pid("Danilo")}, sem ramal); ${FAIXAS.length} faixas alfabéticas ` +
+      `(11/11–15/12); ${CURSOS.length + 1} tipos de rota novos (cursos, LicitaExpo, Turmas 2027, Órgãos novos). Nada muda nas rotas até publicar o plano em /fim-de-ano.`);
+  },
+  // 37 — DANILO e TROCA DE RAMAIS COM VIGÊNCIA (decisões do usuário, 2026-11-10).
+  // - Danilo de Souza Santana: "Danilo Santana" no wallet da Unyflex e no
+  //   Vendedor do Omie (backfill só onde pessoa_id IS NULL).
+  // - A partir de 11/11/2026: Frederico sai do 2005 e vai para o 2004 (livre
+  //   desde a saída do Jhonnata); Danilo assume o 2005. Por ramal_vigencias,
+  //   NUNCA reatribuição total: 2005 até 10/11 = Frederico, de 11/11 = Danilo;
+  //   2004 até 21/09 = Douglas, 22/09–02/10 = Jhonnata, 03/10–10/11 SEM dono,
+  //   de 11/11 = Frederico. O importador do CDR passou a não cair em
+  //   pessoas.ramal quando o ramal tem vigência (senão a lacuna iria ao Frederico).
+  () => {
+    const VIRADA = "2026-11-11", ANTES = "2026-11-10";
+    const id = (n) => db.prepare("SELECT id FROM pessoas WHERE nome = ? AND tipo = 'consultor'").get(n)?.id;
+    const fred = id("Frederico"), danilo = id("Danilo");
+    if (!fred || !danilo) throw new Error("migração 37: Frederico ou Danilo não encontrado — abortada");
+    const NOMES_DANILO = ["Danilo Santana", "Danilo de Souza Santana", "Danilo Souza Santana"];
+    db.prepare("UPDATE pessoas SET wallet_nome = 'Danilo Santana', nomes_alternativos = ? WHERE id = ?").run(JSON.stringify(NOMES_DANILO), danilo);
+    const nomes = NOMES_DANILO.map((n) => n.toLowerCase());
+    const marc = nomes.map(() => "?").join(", ");
+    const mat = db.prepare(`UPDATE matriculas SET pessoa_id = ? WHERE pessoa_id IS NULL AND lower(trim(wallet)) IN (${marc})`).run(danilo, ...nomes).changes;
+    const opo = db.prepare(`UPDATE oportunidades SET pessoa_id = ? WHERE pessoa_id IS NULL AND lower(trim(vendedor)) IN (${marc})`).run(danilo, ...nomes).changes;
+
+    const vig = db.prepare("INSERT INTO ramal_vigencias (ramal, pessoa_id, vigente_desde, vigente_ate) VALUES (?, ?, ?, ?)");
+    // 2005: Frederico desde sempre até 10/11 (se o ramal ainda não tem vigência), Danilo de 11/11
+    if (!db.prepare("SELECT 1 FROM ramal_vigencias WHERE ramal = '2005'").get()) vig.run("2005", fred, null, ANTES);
+    else db.prepare("UPDATE ramal_vigencias SET vigente_ate = ? WHERE ramal = '2005' AND pessoa_id = ? AND (vigente_ate IS NULL OR vigente_ate > ?)").run(ANTES, fred, ANTES);
+    vig.run("2005", danilo, VIRADA, null);
+    // 2004: Douglas e Jhonnata já têm vigência fechada (migrações 26 e 30); a lacuna fica
+    vig.run("2004", fred, VIRADA, null);
+    // pessoas.ramal: o dono ATUAL (UNIQUE — solta o 2005 antes)
+    db.prepare("UPDATE pessoas SET ramal = NULL WHERE ramal IN ('2004', '2005')").run();
+    db.prepare("UPDATE pessoas SET ramal = '2004' WHERE id = ?").run(fred);
+    db.prepare("UPDATE pessoas SET ramal = '2005' WHERE id = ?").run(danilo);
+    // ligações já importadas: só as de 11/11 em diante mudam de dono
+    const p2005 = db.prepare("UPDATE ligacoes SET pessoa_id = ? WHERE ramal = '2005' AND data_hora >= ? AND (pessoa_id IS NULL OR pessoa_id != ?)")
+      .run(danilo, `${VIRADA}T00:00:00`, danilo).changes;
+    const p2004 = db.prepare("UPDATE ligacoes SET pessoa_id = ? WHERE ramal = '2004' AND data_hora >= ? AND (pessoa_id IS NULL OR pessoa_id != ?)")
+      .run(fred, `${VIRADA}T00:00:00`, fred).changes;
+    const conta = (ramal, de, ate, pessoa) => db.prepare(
+      `SELECT COUNT(*) n FROM ligacoes WHERE ramal = ? AND (? IS NULL OR data_hora >= ?) AND (? IS NULL OR data_hora <= ?) AND pessoa_id IS ?`
+    ).get(ramal, de, de && `${de}T00:00:00`, ate, ate && `${ate}T23:59:59`, pessoa).n;
+    const nomeDe = (pid) => db.prepare("SELECT nome FROM pessoas WHERE id = ?").get(pid)?.nome;
+    const jh = id("Jhonnata"), dg = id("Douglas");
+    console.log(`migração 37: Danilo = "Danilo Santana" (wallet/Omie) — backfill ${mat} matrícula(s), ${opo} oportunidade(s).`);
+    console.log(`migração 37: ramais a partir de ${VIRADA} — 2005: Frederico até 10/11 = ${conta("2005", null, ANTES, fred)} ligação(ões), ` +
+      `Danilo de 11/11 = ${conta("2005", VIRADA, null, danilo)} (${p2005} reatribuída(s) agora); ` +
+      `2004: ${dg ? `${nomeDe(dg)} até 21/09 = ${conta("2004", null, "2026-09-21", dg)}, ` : ""}${jh ? `Jhonnata 22/09–02/10 = ${conta("2004", "2026-09-22", "2026-10-02", jh)}, ` : ""}` +
+      `sem dono 03/10–10/11 = ${conta("2004", "2026-10-03", ANTES, null)}, Frederico de 11/11 = ${conta("2004", VIRADA, null, fred)} (${p2004} reatribuída(s) agora).`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

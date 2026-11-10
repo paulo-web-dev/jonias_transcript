@@ -77,6 +77,9 @@ aula-ai/
 ├── cruzamento.js    # Fase 4: CDR × prospecção/Omie/matrículas (classe por ligação, painéis)
 ├── rota.js          # Rota do dia: campanha por setor, geração 17h, bloqueio por telefone, baixa CDR/manual, painel
 ├── feriados.js      # feriados (migração 33): dia útil = seg–sex fora da tabela — Rota, metas e TV
+├── fimdeano.js      # ROTA FINALIZAÇÃO DE ANO (migração 36): faixas alfabéticas, plano curso×dia, publicar, contador R$ 500 mil
+├── fim-de-ano.html  # plano (admin, editável) / "ROTA FINALIZAÇÃO DE ANO" (vendedor)  (rota /fim-de-ano)
+├── scripts/diagnostico-fim-de-ano.js # SÓ LEITURA: faixas × IBGE, aptos por vendedor/setor, faturamento nov/dez × PDF, dias úteis
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
 ├── escopo.js        # papéis (admin | vendedor) e escopo por regional (campanha própria da Rota: prospecção livre) — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
@@ -215,7 +218,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **35**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **37**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -743,6 +746,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `PUT /api/rota/config` | admin: `{antecedencia: 1–5}` → `configuracoes.rota_antecedencia_dias`; gera na hora o que passou a ser devido; fora da faixa → 400 |
 | `GET/POST /api/feriados`, `DELETE /api/feriados/:data` | admin: feriados (migração 33). POST `{data, nome}` só hoje em diante (passado → 400: mudaria relatórios fechados), descarta as rotas dessa data sem baixa (`descartadas`, `comBaixa`); DELETE de feriado futuro devolve a data a dia útil e roda `garantirRotas`. Ambos emitem SSE `config` (a TV refaz o fetch) |
 | `GET/POST /api/rota/tipos`, `PUT /api/rota/tipos/:id` | admin: tipos de rota + setores disponíveis (uf, aba, linhas, aptas); `turmas: [{curso, data}]` (migração 34; até 12; ausente no PUT = mantém); setor inexistente/cota fora de 1–500/nome repetido/turma sem curso ou data → 400 |
+| `GET /api/fim-de-ano`, `POST …/rascunho`, `PUT …/plano`, `POST …/publicar`, `POST …/orgaos?arquivo=`, `GET/PUT …/contador` | ROTA FINALIZAÇÃO DE ANO (fimdeano.js): GET = plano (admin: tudo, com estoque; vendedor: só a própria linha, só depois de publicado); escritas só admin (403); `orgaos` = .xlsx binário (aba "Lista geral"); contador GET para todos (`{ativo:false}` para vendedor enquanto desligado) |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
 Erros que escapam das rotas passam por um tratador final em `server.js`: corpo
@@ -1509,6 +1513,70 @@ Decisões do usuário (2026-10-28):
   (geral da prefeitura) na rota de um colega em 04/11 — um telefone por dia
   em todas as rotas — e voltam pelo estoque depois do bloqueio de 7 dias. Na
   virada 30/10 → 03/11 nada é encaixado: os tipos de 03/11 são outros.
+
+### ✅ Rota finalização de ano (2026-11-10, migração 36; prazo 15/12)
+Decisões do usuário de 2026-11-10, sobre o plano "Resumo_Rota Final_Unyflex.pdf"
+(`fimdeano.js`, tela `/fim-de-ano`, **zero IA**):
+- **Faixa ALFABÉTICA de município** por vendedor e UF (`faixas_vendedor`,
+  vigência temporária 11/11–15/12; em janeiro voltam as carteiras): Frederico,
+  Agnes, Eduardo, Bianca e **Danilo** (vendedor novo, migração 36; nome
+  completo, ramal, wallet e Omie PENDENTES — sem ramal a baixa dele só sai
+  manual). Comparação sem acento/caixa e "d'" + vogal = "do"; os 10 limites
+  casam com o IBGE, faixas contíguas (PR 80/80/79/80/80, SC 59 cada).
+  `elegiveisDe` corta pelo `pessoa.municipios` (consultor do contato ignorado).
+- **Curso do dia** (`fim_ano_plano`, vendedor × dia → tipo): 8 cursos do PDF
+  + LicitaExpo (11–13/11) + Turmas 2027 (14–15/12, todas as abas) viraram tipos
+  de rota NOVOS (`fim_ano_cursos`: curso, setor, turma, captação) — bloqueio
+  por telefone não herda as rotas anteriores. Abas por setor (decisões do
+  usuário): Jurídico PM/CM em Gestão e fiscalização; Planejamento em
+  Contabilidade e tesouraria; Comunicação CM em Legislativo e assessoria;
+  Controle Interno em Transparência; RH em Administração e servidores.
+  **Rascunho** (`gerarRascunho`): um curso por dia, rodízio entre os de
+  captação aberta, pela menor fração do estoque já planejada (dias × 45 ÷
+  telefones da faixa), escalonado entre vendedores; célula ajustada à mão
+  (`manual`) não é tocada. Só vale depois de **PUBLICAR**: campanha própria
+  `modo = 'plano'` por vendedor (fila do DIA = curso do dia + os outros cursos
+  abertos como complemento), Renato e a campanha geral encerrados na mesma data
+  (Renato sai da geração; vendas dele seguem no contador), rotas futuras sem
+  baixa refeitas. Ajustar célula depois de publicado refaz a rota futura
+  daquele dia.
+- **Três blocos na rota**: 45 obrigatórias (base, contam para meta/prêmio/TV),
+  15 da Rota Extra (`extra = 1`) e **20 de ÓRGÃOS NOVOS TODO DIA**
+  (`rota_itens.extra = 2`, posições 1001…, rótulos N1…; fora do progresso, do
+  "rota 100%", do prêmio e do encaixe das extras — indicador próprio no painel).
+  Órgãos novos = consórcios, autarquias e RPPS da aba "Lista geral" da
+  planilha (`importarOrgaosNovos` em prospeccao.js, `origem =
+  'orgaos_novos'`, `entidade`, `cnpj`, `confirmar_antes` ← "Confirmar antes de
+  ligar", `curso` ← "Cursos aderentes"); a coluna Consultor é IGNORADA:
+  rodízio sobre UF → tipo (71/70/70/70/70). Entram com ou sem telefone (32 de
+  351 têm): telefone preenchido na tela atualiza os itens de rota abertos
+  (baixa pelo CDR passa a casar); sem telefone, baixa manual. Bloqueio por
+  contato (30 d com baixa, 7 sem). Oferta do dia = primeiro curso aderente com
+  captação aberta. ⚠ Com 70 por vendedor e 20/dia, a base acaba no 4º dia e
+  volta conforme os bloqueios vencem (base ampliada prometida no PDF).
+- **Contador dos R$ 500 mil** (header de todas as telas via `js/nav.js`, faixa
+  na TV via `fimAno` do payload): matrículas por `criada_em` de 01/11 a
+  31/12, sem canceladas, só **consultores** (é a definição dos R$ 79.580 do PDF:
+  os cinco + Renato), meta base R$ 400 mil, supermeta R$ 500 mil, "por dia útil"
+  até 15/12 (hoje incluído). Nasce DESLIGADO (`configuracoes.fim_ano_contador`):
+  o admin confere com `scripts/diagnostico-fim-de-ano.js` em produção e liga em
+  `/fim-de-ano`.
+- **Turmas 2027 é o último complemento de TODO dia** (decisão do usuário,
+  2026-11-10): sem ele, a base ficava curta de 09 a 11/12 (só IA na Câmara e
+  Licitações com IA abertos, abas de licitação já usadas por contato).
+- Simulação local (todos os itens com baixa, pior caso): 45 obrigatórias em
+  todos os dias; órgãos novos esgotam em 16/11 e voltam em 14/12; zero item
+  fora da faixa, zero telefone repetido no dia.
+- **Migração 37 — Danilo e troca de ramais COM vigência** (2026-11-10): Danilo
+  de Souza Santana = "Danilo Santana" no wallet e no Omie. A partir de
+  **11/11/2026** o Frederico vai do 2005 para o 2004 e o Danilo assume o 2005,
+  só por `ramal_vigencias`: 2005 até 10/11 = Frederico, de 11/11 = Danilo;
+  2004 até 21/09 = Douglas, 22/09–02/10 = Jhonnata, **03/10–10/11 sem dono**,
+  de 11/11 = Frederico. Mudança de regra no importador do CDR
+  (`pessoaDoRamal`): ramal que TEM vigência só tem dono pela vigência — data
+  fora de todas fica sem dono, sem cair em `pessoas.ramal` (senão a lacuna do
+  2004 iria ao Frederico numa reimportação). O log da migração mostra as
+  ligações de cada um.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

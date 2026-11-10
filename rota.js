@@ -65,6 +65,7 @@ const fs = require("fs");
 const path = require("path");
 const db = require("./db.js");
 const { normalizarNumero, variantes } = require("./cruzamento.js");
+const fimDeAno = require("./fimdeano.js"); // ROTA FINALIZAÇÃO DE ANO (migração 36)
 
 // Rota Extra (migração 35): itens opcionais além da cota, no fim da rota
 const EXTRA_POR_DIA = 15;
@@ -344,7 +345,21 @@ function participantes(data) {
   const lista = [];
   for (const [pid, c] of proprias) {
     const p = ativos.get(pid);
-    if (p && c?.tipoId) lista.push({ pessoa: { id: p.id, nome: p.nome, regionais: null }, campanha: c });
+    if (!p || !c?.tipoId) continue;
+    // ROTA FINALIZAÇÃO DE ANO (migração 36): a fila do DIA sai do plano
+    // publicado (curso do dia + os outros cursos abertos como complemento), os
+    // contatos só da FAIXA ALFABÉTICA de municípios do vendedor, e a rota leva
+    // o bloco de órgãos novos. Sem célula no plano = sem rota no dia.
+    if (c.modo === "plano") {
+      const dia = fimDeAno.planoDoDia(pid, data);
+      if (!dia) continue;
+      lista.push({
+        pessoa: { id: p.id, nome: p.nome, regionais: null, municipios: fimDeAno.municipiosDaFaixa(pid, data), orgaosNovos: true },
+        campanha: { ...c, tipoId: dia.tipoId, fila: dia.fila.map((id) => ({ id })), nome: dia.curso?.curso || c.nome, modo: "prioridade", plano: true },
+      });
+      continue;
+    }
+    lista.push({ pessoa: { id: p.id, nome: p.nome, regionais: null }, campanha: c });
   }
   const geral = campanhaVigente(data);
   if (geral?.tipoId) for (const p of consultoresComCarteira()) if (!proprias.has(p.id)) lista.push({ pessoa: p, campanha: geral });
@@ -423,6 +438,7 @@ function carregarCandidatos(setores) {
 function elegiveisDe(pessoa, candidatos, bloqueados) {
   const porChave = new Map();
   for (const c of candidatos) {
+    if (pessoa.municipios && !pessoa.municipios.has(c.codigo)) continue; // faixa alfabética (fim de ano)
     if (pessoa.regionais) {
       if (!pessoa.regionais.has(c.regional)) continue;
       if (c.pessoaId !== null && c.pessoaId !== pessoa.id) continue;
@@ -610,6 +626,35 @@ function gerarRotas(data, { usuarioId = null } = {}) {
         }
       }
     }
+    // ÓRGÃOS NOVOS (migração 36): bloco separado de NOVOS_POR_DIA itens, todo
+    // dia, dos órgãos atribuídos ao vendedor (com ou sem telefone — sem número,
+    // a baixa é manual). Bloqueio por CONTATO (30 dias com baixa, 7 sem), mais o
+    // telefone dentro do tipo; um telefone por dia em todas as rotas.
+    const tipoN = estados.some((s) => s.pessoa.orgaosNovos) ? fimDeAno.tipoNovos() : null;
+    if (tipoN) {
+      const bN = bloqueiosPara(data, tipoN.tipoId);
+      for (const r of db.prepare(
+        `SELECT i.contato_id c FROM rota_itens i JOIN rotas r ON r.id = i.rota_id
+         WHERE i.extra = 2 AND r.data <> ? AND r.data >= ? AND (i.baixa_metodo IS NOT NULL OR r.data >= ?)`
+      ).all(data, somarDias(data, -BLOQUEIO_DIAS), somarDias(data, -BLOQUEIO_SEM_LIGACAO_DIAS))) bN.contatos.set(r.c, "rota_novos");
+      const candN = db.prepare(
+        `SELECT id, telefone, setor, codigo_ibge codigo FROM contatos_ativo
+         WHERE origem = 'orgaos_novos' AND pessoa_id = ? AND COALESCE(contato_inexistente, 0) = 0 AND COALESCE(linha_oculta, 0) = 0
+         ORDER BY (telefone_valido = 1) DESC, confirmar_antes, uf, municipio_texto, id`);
+      for (const s of estados) {
+        s.novos = [];
+        if (!s.pessoa.orgaosNovos) continue;
+        for (const c of candN.all(s.pessoa.id)) {
+          if (s.novos.length >= fimDeAno.NOVOS_POR_DIA) break;
+          if (contatosTomados.has(c.id) || bloqueado(bN, c)) continue;
+          const chave = c.telefone ? chaveTelefone(c.telefone) : null;
+          if (chave && tomados.has(chave)) continue;
+          if (chave) tomados.add(chave);
+          contatosTomados.add(c.id);
+          s.novos.push({ ...c, tipoId: tipoN.tipoId });
+        }
+      }
+    }
     // ponteiro para o próximo dia e volta concluída (só fila cíclica)
     for (const s of estados) {
       if (s.prioridade) { s.ponteiro = null; s.concluiu = 0; continue; }
@@ -636,7 +681,9 @@ function gerarRotas(data, { usuarioId = null } = {}) {
         s.ponto.ciclo, s.ponteiro, s.concluiu, EXTRA_POR_DIA).lastInsertRowid;
       // depois da cota, extra (opcional)
       s.itens.forEach((c, i) => insItem.run(rotaId, c.id, i + 1, c.telefone, c.setor, c.codigo, c.tipoId, i >= s.tipoRota.cota ? 1 : 0, c.origem ?? null));
-      itens += s.itens.length;
+      // órgãos novos: posições 1001…, extra = 2 (fora das 45, da Extra, da TV e do prêmio)
+      (s.novos || []).forEach((c, i) => insItem.run(rotaId, c.id, 1001 + i, c.telefone || "", c.setor, c.codigo, c.tipoId, 2, null));
+      itens += s.itens.length + (s.novos?.length || 0);
       if (s.itens.length < s.tipoRota.cota) curtas.push(`${s.pessoa.nome} ${s.itens.length}/${s.tipoRota.cota}`);
     }
     const voltas = estados.filter((s) => s.concluiu).map((s) => `${s.pessoa.nome} (volta ${s.ponto.ciclo})`);
@@ -711,17 +758,18 @@ function encaixarExtras() {
         entram.push(c);
       }
       if (!entram.length) continue;
-      db.prepare("UPDATE rota_itens SET posicao = posicao + ? WHERE rota_id = ?").run(entram.length, alvo.id);
+      // órgãos novos (extra = 2) ficam fora do encaixe: posições e bloco próprios
+      db.prepare("UPDATE rota_itens SET posicao = posicao + ? WHERE rota_id = ? AND extra <> 2").run(entram.length, alvo.id);
       const ins = db.prepare(
         "INSERT INTO rota_itens (rota_id, contato_id, posicao, telefone, setor, codigo_ibge, tipo_id, extra, origem_item_id) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)");
       entram.forEach((c, i) => ins.run(alvo.id, c.id, i + 1, c.telefone, c.setor, c.codigo, c.tipoId, c.origem));
-      const sairam = db.prepare("DELETE FROM rota_itens WHERE rota_id = ? AND posicao > ? AND baixa_metodo IS NULL")
+      const sairam = db.prepare("DELETE FROM rota_itens WHERE rota_id = ? AND posicao > ? AND baixa_metodo IS NULL AND extra <> 2")
         .run(alvo.id, alvo.cota + (alvo.extra ?? EXTRA_POR_DIA)).changes;
       // posições contíguas de novo (se um item com baixa ficou depois do corte) e extra = depois da cota
       db.prepare(
-        `UPDATE rota_itens SET posicao = (SELECT COUNT(*) FROM rota_itens y WHERE y.rota_id = rota_itens.rota_id AND y.posicao <= rota_itens.posicao)
-         WHERE rota_id = ?`).run(alvo.id);
-      db.prepare("UPDATE rota_itens SET extra = (posicao > ?) WHERE rota_id = ?").run(alvo.cota, alvo.id);
+        `UPDATE rota_itens SET posicao = (SELECT COUNT(*) FROM rota_itens y WHERE y.rota_id = rota_itens.rota_id AND y.extra <> 2 AND y.posicao <= rota_itens.posicao)
+         WHERE rota_id = ? AND extra <> 2`).run(alvo.id);
+      db.prepare("UPDATE rota_itens SET extra = (posicao > ?) WHERE rota_id = ? AND extra <> 2").run(alvo.cota, alvo.id);
       resumo.push(`${r.nome} ${entram.length} → ${alvo.data}${sairam ? ` (${sairam} extra(s) saíram)` : ""}`);
     }
     db.prepare(
@@ -816,9 +864,11 @@ const itemDaTela = (id) => db.prepare(`${SQL_ITEM} WHERE i.id = ?`).get(Number(i
 // nunca conta contra ninguém
 function progressoDe(todos, cota) {
   const itens = todos.filter((i) => !i.extra);
-  const extras = todos.filter((i) => i.extra);
+  const extras = todos.filter((i) => i.extra === 1);
+  const novos = todos.filter((i) => i.extra === 2); // órgãos novos (migração 36): indicador próprio
   const feitas = itens.filter((i) => i.baixaMetodo).length;
   return {
+    novos: { itens: novos.length, feitas: novos.filter((i) => i.baixaMetodo).length, atendidas: novos.filter((i) => i.atendida === 1).length },
     cota, itens: itens.length, feitas,
     atendidas: itens.filter((i) => i.atendida === 1).length,
     manuais: itens.filter((i) => i.baixaMetodo === "manual").length,
@@ -868,7 +918,17 @@ function rotaDoDia({ data, pessoaId }, usuario, escopo) {
   // da rota), em ordem de data — a tela destaca a próxima a partir da data da rota
   const camp = comFila(db.prepare(`${SQL_CAMPANHA} WHERE c.id = ?`).get(rota.campanhaId));
   const turmas = new Map();
-  for (const t of camp?.fila || []) for (const x of t.turmas) turmas.set(`${x.data}|${x.curso}`, x);
+  if (camp?.modo === "plano") {
+    // fim de ano: o curso do dia (plano) primeiro, depois os cursos dos itens que completaram a cota
+    const dia = fimDeAno.planoDoDia(rota.pessoaId, rota.data);
+    rota.planoCurso = dia?.curso ? { curso: dia.curso.curso, turma: dia.curso.turma, setor: dia.curso.setor } : null;
+    rota.finalizacaoDeAno = true;
+    const ids = [...new Set([dia?.tipoId, ...itens.filter((i) => i.extra !== 2).map((i) => i.tipoId)].filter(Boolean))];
+    for (const id of ids) for (const x of lerTipo(id)?.turmas || []) turmas.set(`${x.data}|${x.curso}`, x);
+    // órgãos novos: o curso a oferecer sai dos "cursos aderentes" da planilha
+    const cursoDe = db.prepare("SELECT curso FROM contatos_ativo WHERE id = ?");
+    for (const i of itens) if (i.extra === 2) i.oferta = fimDeAno.ofertaOrgao(cursoDe.get(i.contatoId)?.curso, rota.data);
+  } else for (const t of camp?.fila || []) for (const x of t.turmas) turmas.set(`${x.data}|${x.curso}`, x);
   rota.turmas = [...turmas.values()].sort((a, b) => a.data.localeCompare(b.data));
   rota.campanha = camp?.nome ?? null;
   // tipos da fila que entraram nesta rota, na ordem dos itens
@@ -1144,6 +1204,13 @@ function painel(dataArg) {
      FROM rota_itens i JOIN rotas r ON r.id = i.rota_id JOIN pessoas p ON p.id = r.pessoa_id
      WHERE i.extra = 1 AND r.data BETWEEN ? AND ? GROUP BY p.id ORDER BY feitas DESC, p.nome`
   ).all(semanaDe, data);
+  // Órgãos novos (migração 36): indicador próprio, fora das 45 e do prêmio
+  const novosSemana = db.prepare(
+    `SELECT p.id pessoaId, p.nome, COUNT(i.id) oferecidas, COALESCE(SUM(i.baixa_metodo IS NOT NULL), 0) feitas,
+            COALESCE(SUM(i.atendida = 1), 0) atendidas
+     FROM rota_itens i JOIN rotas r ON r.id = i.rota_id JOIN pessoas p ON p.id = r.pessoa_id
+     WHERE i.extra = 2 AND r.data BETWEEN ? AND ? GROUP BY p.id ORDER BY feitas DESC, p.nome`
+  ).all(semanaDe, data);
 
   // estoque para a próxima geração, pelas filas que vão valer nela
   const estoqueInfo = estoqueDaFila(proxima);
@@ -1171,7 +1238,8 @@ function painel(dataArg) {
     antecedencia: antecedencia(), antecedenciaMax: ANTECEDENCIA_MAX, devidas: datasDevidas(),
     bloqueio: { dias: BLOQUEIO_DIAS, semLigacaoDias: BLOQUEIO_SEM_LIGACAO_DIAS },
     campanha: { hoje: campanhaHoje, dia: campanhaDia, proxima: campanhaProxima, agendada: campanhaAgendada(proxima), historico, voltas, vendedores },
-    rotasDia, extras: { semanaDe, porPessoa: extrasSemana, porDia: EXTRA_POR_DIA }, estoque: estoqueInfo, acumulados, tipos: listarTipos(),
+    rotasDia, extras: { semanaDe, porPessoa: extrasSemana, porDia: EXTRA_POR_DIA },
+    novos: { semanaDe, porPessoa: novosSemana, porDia: fimDeAno.NOVOS_POR_DIA }, estoque: estoqueInfo, acumulados, tipos: listarTipos(),
     // donos possíveis de fila própria: consultores ativos do painel (ou que já têm uma)
     consultores: db.prepare(
       `SELECT id, nome FROM pessoas p WHERE tipo = 'consultor' AND ativo = 1

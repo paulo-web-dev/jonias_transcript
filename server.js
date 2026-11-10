@@ -32,6 +32,7 @@ const territorio = require("./territorio.js");
 const prospeccao = require("./prospeccao.js");
 const cruzamento = require("./cruzamento.js");
 const rota = require("./rota.js");
+const fimDeAno = require("./fimdeano.js"); // ROTA FINALIZAÇÃO DE ANO (migração 36)
 const feriados = require("./feriados.js");
 const backup = require("./backup.js");
 const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
@@ -196,7 +197,7 @@ app.get("/api/tv/dados", (req, res) => {
   const ok = tokenTvValido(req);
   if (ok === null) return res.status(503).json({ error: "Modo TV desabilitado." });
   if (!ok) return res.status(401).json({ error: "Token inválido." });
-  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv() });
+  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador() });
 });
 
 // SSE: empurra "dados atualizados" para as TVs quando uma ingestão termina.
@@ -387,6 +388,10 @@ app.get("/territorio", exigirLoginPagina, (req, res) =>
 );
 app.get("/prospeccao", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "prospeccao.html"))
+);
+// ROTA FINALIZAÇÃO DE ANO: admin vê e ajusta o plano; vendedor, a própria linha publicada
+app.get("/fim-de-ano", exigirLoginPagina, (req, res) =>
+  res.sendFile(path.join(__dirname, "fim-de-ano.html"))
 );
 
 // ---------- CRUD de aulas ----------
@@ -858,6 +863,55 @@ function responderErroRota(nome, err, res) {
   if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message });
   responderErroProspeccao(nome, err, res);
 }
+
+// ---------- ROTA FINALIZAÇÃO DE ANO (migração 36, fimdeano.js) ----------
+// GET plano e contador: todos (vendedor vê só a própria linha, e só depois
+// de publicado; o contador só depois de ligado). Escritas: só admin.
+const soAdminAqui = (req, res) => (req.usuario.papel === "admin" ? false : (res.status(403).json({ error: "Só o administrador." }), true));
+app.get("/api/fim-de-ano", (req, res) => {
+  try {
+    const admin = req.usuario.papel === "admin";
+    res.json(fimDeAno.planoCompleto(admin, admin ? null : req.usuario.pessoa_id ?? -1));
+  } catch (err) {
+    responderErroRota("fim-de-ano", err, res);
+  }
+});
+app.post("/api/fim-de-ano/rascunho", (req, res) => {
+  if (soAdminAqui(req, res)) return;
+  try { res.json(fimDeAno.gerarRascunho(req.usuario.id)); } catch (err) { responderErroRota("fim-de-ano/rascunho", err, res); }
+});
+app.put("/api/fim-de-ano/plano", (req, res) => {
+  if (soAdminAqui(req, res)) return;
+  try { res.json(fimDeAno.ajustarCelula(req.body || {}, req.usuario.id)); } catch (err) { responderErroRota("fim-de-ano/plano", err, res); }
+});
+app.post("/api/fim-de-ano/publicar", (req, res) => {
+  if (soAdminAqui(req, res)) return;
+  try {
+    const r = fimDeAno.publicar(req.usuario.id);
+    emitirEventoTv("rota", "config");
+    res.json(r);
+  } catch (err) { responderErroRota("fim-de-ano/publicar", err, res); }
+});
+app.post("/api/fim-de-ano/orgaos", corpoXlsx, async (req, res) => {
+  if (soAdminAqui(req, res)) return;
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: "Corpo vazio — envie a planilha .xlsx." });
+  try {
+    res.json(await prospeccao.importarOrgaosNovos(req.body, String(req.query.arquivo || "orgaos-novos.xlsx").slice(0, 200), req.usuario.id));
+  } catch (err) {
+    responderErroRota("fim-de-ano/orgaos", err, res);
+  }
+});
+app.get("/api/fim-de-ano/contador", (req, res) => {
+  try { res.json(fimDeAno.contador({ admin: req.usuario.papel === "admin" })); } catch (err) { responderErroRota("fim-de-ano/contador", err, res); }
+});
+app.put("/api/fim-de-ano/contador", (req, res) => {
+  if (soAdminAqui(req, res)) return;
+  try {
+    const r = fimDeAno.ligarContador(!!(req.body || {}).ativo);
+    emitirEventoTv("contador", "config");
+    res.json(r);
+  } catch (err) { responderErroRota("fim-de-ano/contador", err, res); }
+});
 
 app.get("/api/rota", (req, res) => {
   try {
