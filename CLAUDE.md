@@ -218,7 +218,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **37**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **38**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -1592,6 +1592,18 @@ Decisões do usuário de 2026-11-10, sobre o plano "Resumo_Rota Final_Unyflex.pd
   vendedor), e por vendedor/dia as **ligações de saída para número fora da
   base** sem baixa em item ("ligou, mas o número não está cadastrado"). A
   /central mostra tudo no relatório do CDR.
+- **Cota individual de fim de ano** (migração 38, 2026-11-10): R$ 100 mil
+  (supermeta) e R$ 80 mil (base) por vendedor DO PLANO até 15/12, indicadores
+  `cota_fim_ano_super`/`cota_fim_ano_base` (padrão desde 01/11, editáveis em
+  /metas no escopo `fimano`, mesma vigência das outras metas). Vendido = as
+  matrículas DELE (wallet → `matriculas.pessoa_id`) de nov/dez por
+  `criada_em`, sem canceladas — a mesma fonte do contador geral; Renato aparece
+  como "sem cota (coletivo)". Liga/desliga próprio (`configuracoes.fim_ano_cotas`,
+  nasce desligado): admin vê sempre (prévia, com a comparação "Plano 10/11"
+  por pessoa em /fim-de-ano), vendedor vê só a DELE no header (vendido, falta
+  para 100k e 80k, por dia útil), a TV vê todas lado a lado numa linha própria
+  abaixo do topo. Conferido na cópia local com matrículas simuladas nos valores
+  do plano: soma e falta por pessoa batem; cancelada e canal ficam fora.
 - **Migração 37 — Danilo e troca de ramais COM vigência** (2026-11-10): Danilo
   de Souza Santana = "Danilo Santana" no wallet e no Omie. A partir de
   **11/11/2026** o Frederico vai do 2005 para o 2004 e o Danilo assume o 2005,

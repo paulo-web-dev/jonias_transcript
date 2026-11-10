@@ -69,6 +69,28 @@ async function contadorFimDeAno(sessao) {
     `<span>base R$ 400 mil: ${b.faltaCentavos ? `faltam ${reais(b.faltaCentavos)}` : "✓ batida"}</span>` +
     `<span title="dias úteis até ${c.ate.split("-").reverse().join("/")}, hoje incluído">${c.diasUteisRestantes} dias úteis · ` +
     `<strong>${sm.porDiaCentavos !== null ? reais(sm.porDiaCentavos) : "—"}</strong>/dia (500 mil) · ${b.porDiaCentavos !== null ? reais(b.porDiaCentavos) : "—"}/dia (400 mil)</span>`;
+  // COTA INDIVIDUAL (migração 38): vendedor vê a DELE; admin vê todas (prévia enquanto desligadas)
+  const ct = c.cotas;
+  if (ct?.lista?.length) {
+    const kmil = (v) => (v >= 100000 ? `${(v / 100000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}k` : reais(v).replace("R$ ", ""));
+    const box = document.createElement("div");
+    box.className = "cfa-cotas" + (c.cotasAtivas ? "" : " contador-previa");
+    if (sessao.papel === "vendedor") {
+      const x = ct.lista[0];
+      box.innerHTML = `<span class="cfa-rotulo">Sua cota até ${c.ate.split("-").reverse().join("/")}</span>` +
+        `<span>vendido <strong>${reais(x.vendidoCentavos)}</strong></span>` +
+        (x.supermeta ? `<span>faltam <strong>${reais(x.supermeta.faltaCentavos)}</strong> para ${reais(x.supermeta.metaCentavos)} · <strong>${reais(x.supermeta.porDiaCentavos || 0)}</strong>/dia</span>` : "") +
+        (x.base ? `<span>base ${reais(x.base.metaCentavos)}: ${x.base.faltaCentavos ? `faltam ${reais(x.base.faltaCentavos)} · ${reais(x.base.porDiaCentavos || 0)}/dia` : "✓ batida"}</span>` : "");
+    } else {
+      box.innerHTML = `<span class="cfa-rotulo">${c.cotasAtivas ? "" : "<em>prévia (só admin) · </em>"}Cotas individuais</span>` +
+        ct.lista.map((x) => `<span class="cfa-cota" title="${x.nome}: ${reais(x.vendidoCentavos)} vendidos · faltam ${x.supermeta ? reais(x.supermeta.faltaCentavos) : "—"} para a supermeta e ${x.base ? reais(x.base.faltaCentavos) : "—"} para a base">` +
+          `<strong>${x.nome}</strong> ${kmil(x.vendidoCentavos)}${x.supermeta ? ` / ${kmil(x.supermeta.metaCentavos)}` : ""}` +
+          `<span class="cfa-mini"><span style="width:${Math.min(100, x.supermeta?.pct || 0)}%"></span></span>` +
+          `<small>falta ${x.supermeta ? kmil(x.supermeta.faltaCentavos) : "—"} · base ${x.base ? (x.base.faltaCentavos ? kmil(x.base.faltaCentavos) : "✓") : "—"}</small></span>`).join("") +
+        (ct.fora?.length ? `<span class="cfa-fora">sem cota (coletivo): ${ct.fora.map((f) => `${f.nome} ${kmil(f.vendidoCentavos)}`).join(" · ")}</span>` : "");
+    }
+    faixa.append(box);
+  }
   const topo = document.querySelector("header.topo");
   if (topo) topo.after(faixa);
   else document.body.prepend(faixa);

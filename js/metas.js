@@ -58,18 +58,21 @@ const hojeIso = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-const ROTULO_ESCOPO = { dia: "Diária", semana: "Semanal", mes: "Mensal" };
-const ESCOPOS_PESSOA = ["dia", "semana", "mes"];
+const ROTULO_ESCOPO = { dia: "Diária", semana: "Semanal", mes: "Mensal", fimano: "Cota fim de ano" };
+// fimano (migração 38): cota individual em R$ até 15/12 sobre as matrículas de nov/dez — só vale para os vendedores do plano de fim de ano
+const ESCOPOS_PESSOA = ["dia", "semana", "mes", "fimano"];
 // Semanas por mês (52 ÷ 12) — projeção informativa da meta semanal de receita
 const SEMANAS_POR_MES = 52 / 12;
 const projecaoMes = (semanaCentavos) => Math.round(semanaCentavos * SEMANAS_POR_MES);
 const ROTULO_CAMPO = { ligacoes: "📞 Ligações", pipeline: "📈 Pipeline (R$/dia)", matriculas: "🎓 Matrículas", receita: "💰 Receita (R$)",
-  semana: "💰 Meta da SEMANA (R$)", mes: "💰 Meta do MÊS (R$)" };
+  semana: "💰 Meta da SEMANA (R$)", mes: "💰 Meta do MÊS (R$)",
+  supermeta: "🎯 Supermeta até 15/12 (R$)", base: "🎯 Meta base até 15/12 (R$)" };
 const ROTULO_INDICADOR = {
   ligacoes_dia: "Ligações/dia", leads_dia: "Leads/dia", pipeline_dia: "Pipeline/dia", matriculas_dia: "Matrículas/dia", receita_dia: "Receita/dia",
   receita_semana: "Receita/semana",
   ligacoes_mes: "Ligações/mês", leads_mes: "Leads/mês", matriculas_mes: "Matrículas/mês", receita_mes: "Receita/mês",
   receita_semana_equipe: "EQUIPE — receita/semana", receita_mes_equipe: "EQUIPE — receita/mês",
+  cota_fim_ano_super: "Cota fim de ano — supermeta", cota_fim_ano_base: "Cota fim de ano — base",
 };
 
 // ---------- Render ----------
@@ -115,6 +118,16 @@ function celulaPipelineDerivada(escopo, fonte, comHeranca) {
 
 function linhaEscopo(escopo, fonte, comHeranca, pessoaId, nome) {
   const inds = dados.indicadores[escopo];
+  if (escopo === "fimano") {
+    // supermeta e base lado a lado; nas outras duas colunas, a explicação
+    return `<tr>
+    <td class="celula-nome">${ROTULO_ESCOPO[escopo]}</td>
+    ${celulaMeta(inds.supermeta, fonte[inds.supermeta], comHeranca).replace(/^<td class="([^"]*)">/, '<td class="$1"><small class="texto-suave">🎯 supermeta</small><br>')}
+    ${celulaMeta(inds.base, fonte[inds.base], comHeranca).replace(/^<td class="([^"]*)">/, '<td class="$1"><small class="texto-suave">🎯 base</small><br>')}
+    <td class="texto-suave meta-celula" colspan="2"><small>R$ das matrículas de nov/dez até 15/12 — só para os vendedores do plano de fim de ano (Renato conta no coletivo, sem cota)</small></td>
+    <td><button class="btn btn-secundario btn-mini" data-editar="${escopo}" data-pessoa="${pessoaId ?? ""}"
+      data-nome="${escapeHtml(nome)}">✎ Editar</button></td></tr>`;
+  }
   const celulas = ["ligacoes", "pipeline", "matriculas", "receita"].map((campo) => {
     if (campo === "pipeline" && escopo !== "dia") return celulaPipelineDerivada(escopo, fonte, comHeranca);
     if (!inds[campo]) return `<td class="texto-suave meta-celula meta-celula-vazia">—</td>`;

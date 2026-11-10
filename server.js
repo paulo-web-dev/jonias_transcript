@@ -197,7 +197,7 @@ app.get("/api/tv/dados", (req, res) => {
   const ok = tokenTvValido(req);
   if (ok === null) return res.status(503).json({ error: "Modo TV desabilitado." });
   if (!ok) return res.status(401).json({ error: "Token inválido." });
-  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador() });
+  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador({ tv: true }) });
 });
 
 // SSE: empurra "dados atualizados" para as TVs quando uma ingestão termina.
@@ -287,7 +287,7 @@ app.get("/api/metas", (req, res) => {
 app.put("/api/metas", (req, res) => {
   const { pessoaId = null, escopo, vigenteDesde, valores } = req.body || {};
   const mapa = INDICADORES[escopo];
-  if (!mapa) return res.status(400).json({ error: "Escopo inválido — use dia, semana, mes ou equipe." });
+  if (!mapa) return res.status(400).json({ error: "Escopo inválido — use dia, semana, mes, fimano ou equipe." });
   if (!RE_DATA.test(vigenteDesde || "") || isNaN(new Date(vigenteDesde + "T00:00:00Z"))) {
     return res.status(400).json({ error: "Data de vigência inválida — use YYYY-MM-DD." });
   }
@@ -910,12 +910,16 @@ app.post("/api/fim-de-ano/orgaos", corpoXlsx, async (req, res) => {
   }
 });
 app.get("/api/fim-de-ano/contador", (req, res) => {
-  try { res.json(fimDeAno.contador({ admin: req.usuario.papel === "admin" })); } catch (err) { responderErroRota("fim-de-ano/contador", err, res); }
+  try {
+    const admin = req.usuario.papel === "admin";
+    res.json(fimDeAno.contador({ admin, pessoaId: admin ? null : req.usuario.pessoa_id ?? null }));
+  } catch (err) { responderErroRota("fim-de-ano/contador", err, res); }
 });
 app.put("/api/fim-de-ano/contador", (req, res) => {
   if (soAdminAqui(req, res)) return;
   try {
-    const r = fimDeAno.ligarContador(!!(req.body || {}).ativo);
+    const corpo = req.body || {};
+    const r = "cotas" in corpo ? fimDeAno.ligarCotas(!!corpo.cotas) : fimDeAno.ligarContador(!!corpo.ativo);
     emitirEventoTv("contador", "config");
     res.json(r);
   } catch (err) { responderErroRota("fim-de-ano/contador", err, res); }

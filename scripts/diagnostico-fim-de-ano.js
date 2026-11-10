@@ -133,7 +133,7 @@ const linhas = db.prepare(
    FROM matriculas m LEFT JOIN pessoas p ON p.id = m.pessoa_id
    WHERE m.criada_em >= '2026-11-01' AND m.criada_em < '2027-01-01'
    GROUP BY 1, 2 ORDER BY v DESC`).all();
-const PDF = { Frederico: 2128000, Agnes: 940000, Eduardo: 2410000, Bianca: 1450000, Renato: 1030000 };
+const PDF = { Frederico: 2128000, Agnes: 940000, Eduardo: 2410000, Bianca: 1450000, Danilo: 0, Renato: 1030000 };
 let tc = 0, te = 0, tcan = 0;
 for (const l of linhas) {
   if (l.tipo === "consultor") tc += l.v || 0;

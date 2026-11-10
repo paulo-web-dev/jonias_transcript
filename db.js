@@ -1723,6 +1723,42 @@ const MIGRACOES = [
       `2004: ${dg ? `${nomeDe(dg)} até 21/09 = ${conta("2004", null, "2026-09-21", dg)}, ` : ""}${jh ? `Jhonnata 22/09–02/10 = ${conta("2004", "2026-09-22", "2026-10-02", jh)}, ` : ""}` +
       `sem dono 03/10–10/11 = ${conta("2004", "2026-10-03", ANTES, null)}, Frederico de 11/11 = ${conta("2004", VIRADA, null, fred)} (${p2004} reatribuída(s) agora).`);
   },
+  // 38 — COTA INDIVIDUAL DE FIM DE ANO (decisão do usuário, 2026-11-10):
+  // R$ 100 mil (supermeta) e R$ 80 mil (base) por vendedor do plano, até
+  // 15/12, sobre as matrículas de nov/dez (fimdeano.js). Indicadores
+  // `cota_fim_ano_super` e `cota_fim_ano_base` (centavos), editáveis em /metas
+  // com a mesma vigência das outras metas; padrão (pessoa_id NULL) desde
+  // 01/11/2026. Renato não tem cota (não está nas faixas do plano). O SQLite
+  // não altera CHECK: a tabela é recriada e a contagem conferida.
+  () => {
+    const antes = db.prepare("SELECT COUNT(*) n FROM metas").get().n;
+    db.exec(`
+      CREATE TABLE metas_nova (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        pessoa_id     INTEGER REFERENCES pessoas(id),
+        indicador     TEXT    NOT NULL CHECK (indicador IN (
+                        'ligacoes_dia', 'leads_dia', 'matriculas_dia', 'receita_dia', 'pipeline_dia',
+                        'receita_semana',
+                        'ligacoes_mes', 'leads_mes', 'matriculas_mes', 'receita_mes',
+                        'receita_semana_equipe', 'receita_mes_equipe',
+                        'cota_fim_ano_super', 'cota_fim_ano_base')),
+        valor         REAL    NOT NULL,
+        vigente_desde TEXT    NOT NULL,
+        vigente_ate   TEXT,
+        UNIQUE (indicador, pessoa_id, vigente_desde)
+      );
+      INSERT INTO metas_nova (id, pessoa_id, indicador, valor, vigente_desde, vigente_ate)
+        SELECT id, pessoa_id, indicador, valor, vigente_desde, vigente_ate FROM metas;
+      DROP TABLE metas;
+      ALTER TABLE metas_nova RENAME TO metas;
+    `);
+    const depois = db.prepare("SELECT COUNT(*) n FROM metas").get().n;
+    if (depois !== antes) throw new Error(`migração 38: metas ${antes} → ${depois} — abortada`);
+    const ins = db.prepare("INSERT INTO metas (pessoa_id, indicador, valor, vigente_desde) VALUES (NULL, ?, ?, '2026-11-01')");
+    ins.run("cota_fim_ano_super", 10000000);
+    ins.run("cota_fim_ano_base", 8000000);
+    console.log(`migração 38: ${depois} meta(s) preservadas; cota individual de fim de ano = R$ 100.000 (supermeta) e R$ 80.000 (base) por vendedor, desde 01/11.`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

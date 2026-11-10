@@ -65,6 +65,22 @@ function renderAdmin() {
       `<span class="texto-suave">Unyflex sincronizada em ${c.sincronizadoEm ? new Date(c.sincronizadoEm).toLocaleString("pt-BR") : "—"}. ${c.ativo ? "Visível para todos." : "Desligado: só você vê a prévia."}</span>`
     : "";
   document.getElementById("fa-contador-ligar").textContent = c?.ativo ? "Desligar contador" : "Ligar contador (conferi o número)";
+  // cotas: comparação com o plano de 10/11 (PDF) para conferir a atribuição por pessoa antes de ligar
+  const PDF = { Frederico: 2128000, Eduardo: 2410000, Bianca: 1450000, Agnes: 940000, Danilo: 0, Renato: 1030000 };
+  const ct = c?.cotas;
+  const difPdf = (nome, v) => (PDF[nome] === undefined ? "—" : v === PDF[nome] ? '<span class="pct-ok">✓ bate</span>' : `<span class="pct-baixo">${v > PDF[nome] ? "+" : ""}${reais(v - PDF[nome])}</span>`);
+  document.getElementById("fa-cotas").innerHTML = ct
+    ? `<thead><tr><th>Vendedor</th><th>Vendido nov/dez</th><th>Matrículas</th><th>Plano 10/11</th><th>Diferença</th><th>Falta p/ supermeta</th><th>Falta p/ base</th><th>Por dia útil (super)</th></tr></thead><tbody>` +
+      ct.lista.map((x) => `<tr class="sem-clique"><td>${escapeHtml(x.nome)}</td><td>${reais(x.vendidoCentavos)}</td><td>${inteiro(x.matriculas)}</td>
+        <td>${PDF[x.nome] !== undefined ? reais(PDF[x.nome]) : "—"}</td><td>${difPdf(x.nome, x.vendidoCentavos)}</td>
+        <td>${x.supermeta ? `${reais(x.supermeta.faltaCentavos)} <small class="texto-suave">de ${reais(x.supermeta.metaCentavos)}</small>` : "sem cota"}</td>
+        <td>${x.base ? `${reais(x.base.faltaCentavos)} <small class="texto-suave">de ${reais(x.base.metaCentavos)}</small>` : "sem cota"}</td>
+        <td>${x.supermeta ? reais(x.supermeta.porDiaCentavos || 0) : "—"}</td></tr>`).join("") +
+      (ct.fora || []).map((f) => `<tr class="sem-clique texto-suave"><td>${escapeHtml(f.nome)} <small>(sem cota, coletivo)</small></td><td>${reais(f.vendidoCentavos)}</td><td></td>
+        <td>${PDF[f.nome] !== undefined ? reais(PDF[f.nome]) : "—"}</td><td>${difPdf(f.nome, f.vendidoCentavos)}</td><td colspan="3"></td></tr>`).join("") + "</tbody>" +
+      `<tfoot><tr><td colspan="8" class="texto-suave" style="text-align:left">Mesma fonte do contador (matrículas por data de criação, nov/dez, sem canceladas), por vendedor da matrícula (wallet). Diferença ≠ 0 = atribuição torta ou venda nova/cancelada depois de 10/11: confira antes de ligar.</td></tr></tfoot>`
+    : "";
+  document.getElementById("fa-cotas-ligar").textContent = c?.cotasAtivas ? "Desligar cotas individuais" : "Ligar cotas individuais (conferi por pessoa)";
   // faixas
   const faixas = d.faixas;
   const porPessoa = (pid, uf) => faixas.find((f) => f.pessoaId === pid && f.uf === uf);
@@ -215,6 +231,10 @@ document.getElementById("fa-refazer").addEventListener("click", async () => {
       (r.mantidas.length ? `; ${r.mantidas.length} mantida(s) por já terem baixa` : "") + ".");
     await carregar();
   } catch (e) { avisar("⚠ " + e.message); }
+});
+document.getElementById("fa-cotas-ligar").addEventListener("click", async () => {
+  try { estado.contador = await chamarApi("/api/fim-de-ano/contador", json("PUT", { cotas: !estado.contador?.cotasAtivas })); renderAdmin(); avisar(estado.contador.cotasAtivas ? "Cotas ligadas: cada vendedor vê a dele; a TV mostra todas." : "Cotas desligadas."); }
+  catch (e) { avisar("⚠ " + e.message); }
 });
 document.getElementById("fa-contador-ligar").addEventListener("click", async () => {
   try { estado.contador = await chamarApi("/api/fim-de-ano/contador", json("PUT", { ativo: !estado.contador?.ativo })); renderAdmin(); avisar(estado.contador.ativo ? "Contador ligado: aparece no header de todas as telas e na TV." : "Contador desligado."); }

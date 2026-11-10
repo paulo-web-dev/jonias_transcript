@@ -1777,3 +1777,18 @@ col.c-rota-tipo { width: 120px; }
 .pagina-lista.fa-pagina { width: min(1600px, 100%); padding-left: 16px; padding-right: 16px; }
 .fa-pagina .tabela-metricas tfoot td { white-space: normal; }
 .fa-cel { min-width: 96px; }
+/* cotas individuais de fim de ano (migração 38) */
+.cfa-cotas { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 1rem; padding-top: 0.4rem; border-top: 1px solid rgba(56, 214, 224, 0.2); }
+.cfa-cotas.contador-previa { border-top-style: dashed; }
+.cfa-cota { display: inline-flex; align-items: center; gap: 0.35rem; }
+.cfa-cota small, .cfa-fora { color: var(--texto-suave); font-size: 0.8rem; }
+.cfa-mini { width: 56px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; display: inline-block; }
+.cfa-mini span { display: block; height: 100%; background: var(--grad); }
+/* TV: cotas lado a lado */
+.tv-ma-cotas { flex-basis: 100%; display: flex; justify-content: center; flex-wrap: wrap; gap: 0.3vw 1.4vw; font-size: 1.2vw; }
+.tv-ma-cotas strong { color: var(--texto); }
+.tv-ma-cotas .tv-ma-c { white-space: nowrap; color: var(--texto-suave); }
+/* TV: o contador ocupa uma linha própria abaixo do topo (cabem as cotas lado a lado) */
+.tv-topo { flex-wrap: wrap; }
+.tv-topo .tv-meta-ano { order: 3; flex: 0 0 100%; padding: 0.3vw 1vw; }
+.tv-topo .tv-ma-det { flex-basis: auto; }

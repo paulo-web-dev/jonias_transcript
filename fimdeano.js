@@ -373,8 +373,38 @@ function planoCompleto(admin, pessoaId = null) {
 
 // ---------- contador dos R$ 500 mil ----------
 
-function contador({ admin = false } = {}) {
+// COTA INDIVIDUAL (migração 38, decisão do usuário 2026-11-10): R$ 100 mil na
+// supermeta e R$ 80 mil na base por vendedor do plano (meta vigente hoje,
+// própria ou padrão — editável em /metas), sobre as matrículas DELE de nov/dez
+// (mesma fonte e filtro do contador geral, por matriculas.pessoa_id = wallet).
+// Quem vendeu e não está no plano (Renato) aparece em `fora`: conta para o
+// coletivo, sem cota. Visibilidade própria (fim_ano_cotas): admin vê sempre
+// (prévia), vendedor vê só a DELE, a TV vê todas.
+function cotas({ hoje, restantes, de, ate, pessoaId = null, todos = true }) {
+  const metaDe = (pid, ind) => db.prepare(
+    `SELECT valor FROM metas WHERE indicador = ? AND (pessoa_id = ? OR pessoa_id IS NULL) AND vigente_desde <= ? AND (vigente_ate IS NULL OR vigente_ate >= ?)
+     ORDER BY pessoa_id IS NULL, vigente_desde DESC LIMIT 1`).get(ind, pid, hoje, hoje)?.valor ?? null;
+  const vendido = new Map(db.prepare(
+    `SELECT m.pessoa_id p, COALESCE(SUM(m.valor_centavos), 0) v, COUNT(*) n FROM matriculas m JOIN pessoas x ON x.id = m.pessoa_id
+     WHERE x.tipo = 'consultor' AND m.criada_em BETWEEN ? AND ? AND (m.status IS NULL OR m.status != 'canceled') GROUP BY m.pessoa_id`
+  ).all(`${de}T00:00:00`, `${ate}T23:59:59`).map((r) => [r.p, r]));
+  const doPlano = vendedores();
+  const parte = (meta, v) => (meta == null ? null : { metaCentavos: meta, faltaCentavos: Math.max(0, meta - v),
+    porDiaCentavos: restantes ? Math.ceil(Math.max(0, meta - v) / restantes) : null, pct: meta ? Math.round((v / meta) * 1000) / 10 : null });
+  const lista = doPlano.filter((p) => todos || p.id === pessoaId).map((p) => {
+    const v = vendido.get(p.id)?.v || 0;
+    return { pessoaId: p.id, nome: p.nome, vendidoCentavos: v, matriculas: vendido.get(p.id)?.n || 0,
+      supermeta: parte(metaDe(p.id, "cota_fim_ano_super"), v), base: parte(metaDe(p.id, "cota_fim_ano_base"), v) };
+  });
+  const ids = new Set(doPlano.map((p) => p.id));
+  const fora = todos ? db.prepare(`SELECT id, nome FROM pessoas WHERE tipo = 'consultor'`).all()
+    .filter((p) => !ids.has(p.id) && vendido.get(p.id)?.v).map((p) => ({ nome: p.nome, vendidoCentavos: vendido.get(p.id).v })) : [];
+  return { lista, fora };
+}
+
+function contador({ admin = false, pessoaId = null, tv = false } = {}) {
   const ativo = config("fim_ano_contador") === "1";
+  const cotasAtivas = config("fim_ano_cotas") === "1";
   if (!ativo && !admin) return { ativo: false };
   const [de, ate] = PERIODO_VENDAS;
   const r = db.prepare(
@@ -390,7 +420,16 @@ function contador({ admin = false } = {}) {
     supermeta: { metaCentavos: SUPERMETA, faltaCentavos: falta(SUPERMETA), porDiaCentavos: restantes ? Math.ceil(falta(SUPERMETA) / restantes) : null },
     base: { metaCentavos: META_BASE, faltaCentavos: falta(META_BASE), porDiaCentavos: restantes ? Math.ceil(falta(META_BASE) / restantes) : null },
     diasUteisRestantes: restantes, ate: FIM, periodo: { de, ate }, sincronizadoEm: sync,
+    // cotas: admin sempre (prévia enquanto desligadas); TV todas; vendedor só a dele
+    cotasAtivas,
+    cotas: admin || (cotasAtivas && (tv || pessoaId))
+      ? cotas({ hoje, restantes, de, ate, pessoaId, todos: admin || tv }) : null,
   };
+}
+function ligarCotas(ativo) {
+  gravarConfig("fim_ano_cotas", ativo ? "1" : "0");
+  console.log(`fim de ano: cotas individuais ${ativo ? "LIGADAS" : "desligadas"}`);
+  return contador({ admin: true });
 }
 function ligarContador(ativo) {
   gravarConfig("fim_ano_contador", ativo ? "1" : "0");
@@ -400,5 +439,5 @@ function ligarContador(ativo) {
 
 module.exports = {
   INICIO, FIM, NOVOS_POR_DIA, diasUteis, faixasVigentes, municipiosDaFaixa, vendedores, cursos, cursoDoTipo, tipoNovos, abertos,
-  ofertaOrgao, gerarRascunho, ajustarCelula, publicar, datasDoPeriodo, refazerFuturas, planoDoDia, planoCompleto, publicadoEm, contador, ligarContador, normNome,
+  ofertaOrgao, gerarRascunho, ajustarCelula, publicar, datasDoPeriodo, refazerFuturas, planoDoDia, planoCompleto, publicadoEm, contador, ligarContador, ligarCotas, normNome,
 };

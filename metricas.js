@@ -970,10 +970,13 @@ const INDICADORES = {
   semana: { receita: "receita_semana" },
   mes: { ligacoes: "ligacoes_mes", matriculas: "matriculas_mes", receita: "receita_mes" },
   equipe: { semana: "receita_semana_equipe", mes: "receita_mes_equipe" },
+  // cota individual de fim de ano (migração 38): R$ sobre as matrículas de nov/dez, até 15/12 (fimdeano.js)
+  fimano: { supermeta: "cota_fim_ano_super", base: "cota_fim_ano_base" },
 };
-const ESCOPOS_PESSOA = ["dia", "semana", "mes"];
+const ESCOPOS_PESSOA = ["dia", "semana", "mes", "fimano"];
 const INDICADORES_RECEITA = new Set([
   "pipeline_dia", "receita_dia", "receita_semana", "receita_mes", "receita_semana_equipe", "receita_mes_equipe",
+  "cota_fim_ano_super", "cota_fim_ano_base",
 ]);
 
 function configBool(chave) {

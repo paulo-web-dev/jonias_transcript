@@ -618,7 +618,13 @@ function metaFimDeAno(c) {
   alvo.innerHTML = `<span class="tv-ma-falta">faltam <strong>${r(sm.faltaCentavos)}</strong> para R$ 500 mil</span>` +
     `<span class="tv-ma-barra"><i style="width:${pct.toFixed(1)}%"></i></span>` +
     `<span class="tv-ma-det">${r(c.vendidoCentavos)} vendidos · base R$ 400 mil: ${c.base.faltaCentavos ? "faltam " + r(c.base.faltaCentavos) : "✓"} · ` +
-    `${sm.porDiaCentavos !== null ? r(sm.porDiaCentavos) + "/dia" : ""} em ${c.diasUteisRestantes} dias úteis</span>`;
+    `${sm.porDiaCentavos !== null ? r(sm.porDiaCentavos) + "/dia" : ""} em ${c.diasUteisRestantes} dias úteis</span>` +
+    // cotas individuais (migração 38), lado a lado — só com as cotas ligadas pelo admin
+    (c.cotasAtivas && c.cotas?.lista?.length
+      ? `<span class="tv-ma-cotas">${c.cotas.lista.map((x) => {
+          const k = (v) => (v >= 100000 ? (v / 100000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k" : r(v));
+          return `<span class="tv-ma-c"><strong>${x.nome}</strong> ${k(x.vendidoCentavos)}${x.supermeta ? ` / ${k(x.supermeta.metaCentavos)} · falta ${k(x.supermeta.faltaCentavos)}` : ""}</span>`;
+        }).join("")}</span>` : "");
 }
 
 function renderizar(d, origem) {
