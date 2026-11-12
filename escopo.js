@@ -20,7 +20,8 @@
 
 const db = require("./db.js");
 
-const PAPEIS = ["admin", "vendedor"];
+// marketing (migração 39): só a área /marketing — o resto responde 403 (allowlist em server.js)
+const PAPEIS = ["admin", "vendedor", "marketing"];
 
 // Rotas liberadas enquanto a senha temporária não foi trocada
 const LIVRES_COM_SENHA_TEMPORARIA = ["/trocar-senha", "/api/senha", "/api/sessao", "/api/logout", "/login"];
@@ -128,10 +129,10 @@ function paginaProibida() {
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Acesso restrito — jonIAs</title>
 <link rel="stylesheet" href="/css/style.css"></head><body class="pagina-login"><main class="login-caixa">
 <h1>jon<span class="grad">IA</span>s</h1><p class="login-subtitulo">Esta tela é só do administrador.</p>
-<a class="btn btn-primario btn-largo" href="/prospeccao">Voltar para a minha carteira</a></main></body></html>`;
+<a class="btn btn-primario btn-largo" href="/">Voltar ao início</a></main></body></html>`;
 }
 
-const paginaInicialDe = (usuario) => (usuario.papel === "vendedor" ? "/prospeccao" : "/aulas");
+const paginaInicialDe = (usuario) => (usuario.papel === "vendedor" ? "/prospeccao" : usuario.papel === "marketing" ? "/marketing" : "/aulas");
 
 module.exports = {
   PAPEIS, escopoDe, clausulaMunicipios, dentroDoEscopo, exigirAdmin, exigirSenhaTrocada, paginaInicialDe,

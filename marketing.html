@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketing — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">marketing</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <a href="/aulas" class="btn-topo">🎓 Minhas Aulas</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista mk-pagina">
+    <nav class="mk-abas" aria-label="Frentes do marketing">
+      <button type="button" class="mk-aba ativa" data-aba="emails">✉ E-mail marketing</button>
+      <button type="button" class="mk-aba" disabled title="Fase 2">📢 Campanhas de ADS</button>
+      <button type="button" class="mk-aba" disabled title="Fase 2">💬 Grupos de WhatsApp</button>
+      <button type="button" class="mk-aba" disabled title="Fase 2">🗓 Planner de conteúdo</button>
+    </nav>
+
+    <section id="aba-emails">
+      <p class="texto-suave" id="mk-intro">carregando…</p>
+      <div class="grade-metricas" id="mk-resumo"></div>
+
+      <div class="mk-controles">
+        <div class="mk-filtro" role="tablist">
+          <button type="button" class="btn-mini ativo" data-visao="pendencias">Pendências</button>
+          <button type="button" class="btn-mini" data-visao="turmas">Por turma (histórico)</button>
+        </div>
+        <span class="texto-suave" id="mk-legenda"></span>
+      </div>
+      <div id="mk-lista"></div>
+
+      <section id="mk-admin" class="oculto">
+        <h3 class="secao-titulo">Regra de antecedência (admin)</h3>
+        <div class="mk-controles">
+          <label class="texto-suave">30/15/7 dias antes até a véspera de
+            <input type="date" id="mk-virada" class="campo-select" />; desse dia em diante, 60/30/15.</label>
+          <button type="button" class="btn-mini" id="mk-virada-salvar">Salvar</button>
+        </div>
+        <p class="texto-suave">Cada envio guarda a regra do dia em que nasceu: mudar a data só afeta as turmas que ainda vão entrar.</p>
+      </section>
+    </section>
+  </main>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/marketing.js"></script>
+</body>
+</html>

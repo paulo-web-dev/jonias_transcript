@@ -33,6 +33,7 @@ const prospeccao = require("./prospeccao.js");
 const cruzamento = require("./cruzamento.js");
 const rota = require("./rota.js");
 const fimDeAno = require("./fimdeano.js"); // ROTA FINALIZAÇÃO DE ANO (migração 36)
+const marketing = require("./marketing.js"); // MARKETING (migração 39)
 const feriados = require("./feriados.js");
 const backup = require("./backup.js");
 const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
@@ -100,10 +101,18 @@ function usuarioDaSessao(req) {
   );
 }
 
+// Papel marketing (migração 39): ALLOWLIST — só a área de marketing, a troca
+// de senha e a sessão. Mais seguro que auditar cada rota: tela ou API nova do
+// comercial nasce fechada para o marketing.
+const PAGINAS_MARKETING = ["/", "/trocar-senha", "/marketing"];
+const APIS_MARKETING = ["/api/marketing", "/api/sessao", "/api/senha", "/api/logout"];
+const caminhoDe = (req) => req.originalUrl.split("?")[0].replace(/\/+$/, "") || "/";
+
 function exigirLoginPagina(req, res, next) {
   const usuario = usuarioDaSessao(req);
   if (usuario) {
     req.usuario = usuario;
+    if (usuario.papel === "marketing" && !PAGINAS_MARKETING.includes(caminhoDe(req))) return res.status(403).send(paginaProibidaMarketing());
     return next();
   }
   req.session.destroy(() => res.redirect("/login"));
@@ -241,6 +250,13 @@ function emitirEventoTv(fonte, tipo = "dados") {
 // exceto a troca; rotas de gestão são só do admin (o vendedor recebe 403 —
 // e as rotas que ele usa filtram por escopo na consulta, ver escopo.js)
 app.use("/api", exigirLoginApi, exigirSenhaTrocada);
+app.use("/api", (req, res, next) => {
+  const caminho = caminhoDe(req);
+  const dentro = (lista) => lista.some((p) => caminho === p || caminho.startsWith(p + "/"));
+  if (req.usuario.papel === "marketing" && !dentro(APIS_MARKETING)) return res.status(403).json({ error: "Acesso restrito à área de marketing." });
+  if (dentro(["/api/marketing"]) && !["admin", "marketing"].includes(req.usuario.papel)) return res.status(403).json({ error: "Área do marketing." });
+  next();
+});
 const PREFIXOS_SO_ADMIN = [
   "/api/importacoes", "/api/sincronizacoes", "/api/config", "/api/periodos", "/api/saude",
   "/api/usuarios", "/api/carteiras", "/api/prospeccao/cobertura", "/api/prospeccao/gerencial", "/api/prospeccao/marcacoes",
@@ -349,7 +365,7 @@ app.put("/api/metas/config", (req, res) => {
 // ---------- Páginas internas ----------
 
 // Senha temporária: qualquer página interna redireciona para a troca
-app.use(["/aulas", "/aula-ao-vivo", "/aula", "/central", "/relatorios", "/saude", "/metas", "/territorio", "/prospeccao", "/usuarios", "/meu-painel"],
+app.use(["/aulas", "/aula-ao-vivo", "/aula", "/central", "/relatorios", "/saude", "/metas", "/territorio", "/prospeccao", "/usuarios", "/meu-painel", "/marketing"],
   exigirLoginPagina, exigirSenhaTrocada);
 
 app.get("/", exigirLoginPagina, (req, res) => res.redirect(req.usuario.senha_temporaria ? "/trocar-senha" : paginaInicialDe(req.usuario)));
@@ -390,6 +406,10 @@ app.get("/prospeccao", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "prospeccao.html"))
 );
 // ROTA FINALIZAÇÃO DE ANO: admin vê e ajusta o plano; vendedor, a própria linha publicada
+app.get("/marketing", exigirLoginPagina, (req, res) => {
+  if (!["admin", "marketing"].includes(req.usuario.papel)) return res.status(403).send(paginaProibidaMarketing());
+  res.sendFile(path.join(__dirname, "marketing.html"));
+});
 app.get("/fim-de-ano", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "fim-de-ano.html"))
 );
@@ -1389,7 +1409,7 @@ app.post("/api/usuarios", async (req, res) => {
     const nome = String(req.body?.nome || "").trim();
     const papel = String(req.body?.papel || "");
     if (!/^[a-z0-9._-]{3,40}$/.test(login)) return res.status(400).json({ error: "Login: 3–40 caracteres, letras minúsculas, números, ponto, hífen ou sublinhado." });
-    if (!PAPEIS.includes(papel)) return res.status(400).json({ error: "Papel deve ser admin ou vendedor." });
+    if (!PAPEIS.includes(papel)) return res.status(400).json({ error: "Papel deve ser admin, vendedor ou marketing." });
     if (db.prepare("SELECT 1 FROM usuarios WHERE lower(login) = ?").get(login)) return res.status(400).json({ error: "Login já existe." });
     const pessoaId = validarPessoaDeVendedor(papel, req.body?.pessoaId, null);
     const senhaInicial = gerarSenhaInicial();
@@ -1410,11 +1430,12 @@ app.patch("/api/usuarios/:id", (req, res) => {
     if (!alvo) return res.status(404).json({ error: "Usuário não encontrado." });
     const { nome, ativo, pessoaId, papel } = req.body || {};
     const novoPapel = papel === undefined ? alvo.papel : String(papel);
-    if (!PAPEIS.includes(novoPapel)) return res.status(400).json({ error: "Papel deve ser admin ou vendedor." });
+    if (!PAPEIS.includes(novoPapel)) return res.status(400).json({ error: "Papel deve ser admin, vendedor ou marketing." });
     if (alvo.id === req.usuario.id && (ativo === false || ativo === 0 || novoPapel !== "admin")) {
       return res.status(400).json({ error: "Você não pode desativar ou rebaixar o próprio usuário." });
     }
-    const novaPessoa = novoPapel === "vendedor"
+    const novaPessoa = novoPapel === "marketing" ? null // marketing não é consultor (Gustavo segue na Gerencial pelo nome no Omie)
+      : novoPapel === "vendedor"
       ? validarPessoaDeVendedor("vendedor", pessoaId === undefined ? alvo.pessoa_id : pessoaId, alvo.id)
       : (pessoaId === undefined ? alvo.pessoa_id : (pessoaId === null ? null : validarPessoaDeVendedor("vendedor", pessoaId, alvo.id)));
     db.prepare("UPDATE usuarios SET nome = ?, ativo = ?, pessoa_id = ?, papel = ? WHERE id = ?")
@@ -1530,6 +1551,95 @@ app.put("/api/territorio/municipios/:codigo/principal", (req, res) => {
 
 // ---------- Erros ----------
 
+// ---------- Marketing (migração 39; marketing.js) ----------
+
+app.get("/api/marketing/emails", (req, res) => res.json(marketing.listarEmails()));
+
+app.post("/api/marketing/emails/:id/enviado", (req, res) => {
+  try {
+    res.json({ envio: marketing.marcarEnviado(req.params.id, req.usuario.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("marketing/emails/enviado", err, res);
+  }
+});
+
+// Desfazer check: só admin (fica na trilha marketing_eventos)
+app.delete("/api/marketing/emails/:id/enviado", (req, res) => {
+  if (req.usuario.papel !== "admin") return res.status(403).json({ error: "Só o administrador desfaz um envio marcado." });
+  try {
+    res.json({ envio: marketing.desfazerEnviado(req.params.id, req.usuario.id, req.body?.observacao) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("marketing/emails/desfazer", err, res);
+  }
+});
+
+app.get("/api/marketing/emails/:id/eventos", (req, res) => {
+  try {
+    res.json({ eventos: marketing.eventosDoEnvio(req.params.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("marketing/emails/eventos", err, res);
+  }
+});
+
+app.put("/api/marketing/config", (req, res) => {
+  if (req.usuario.papel !== "admin") return res.status(403).json({ error: "Só o administrador." });
+  try {
+    res.json({ config: marketing.definirVirada(req.body?.virada) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("marketing/config", err, res);
+  }
+});
+
+// SYNC DIÁRIO AUTOMÁTICO DA UNYFLEX (decisão do usuário, 2026-11-12): depois
+// das 06:00 de Brasília, se ainda não há sync concluído hoje depois desse
+// horário, roda um — pelo mesmo caminho do botão da /central (auditoria em
+// importacoes, com o primeiro admin ativo como usuário, porque a coluna é NOT
+// NULL). Falha: nova tentativa em 1 h. Sem MYSQL_* no .env: não faz nada.
+const HORA_SYNC_AUTOMATICO = 6;
+let syncAutomaticoRodando = false;
+let proximaTentativaSync = 0;
+async function syncAutomatico() {
+  if (syncAutomaticoRodando || !credenciaisMysql() || Date.now() < proximaTentativaSync) return;
+  const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+  const corte = new Date(`${hoje}T${String(HORA_SYNC_AUTOMATICO).padStart(2, "0")}:00:00-03:00`).toISOString();
+  if (new Date().toISOString() < corte) return;
+  const ultima = db.prepare("SELECT concluido_em FROM importacoes WHERE tipo = 'mysql' AND status = 'concluida' ORDER BY id DESC LIMIT 1").get();
+  if (ultima?.concluido_em && ultima.concluido_em >= corte) return;
+  const admin = db.prepare("SELECT id FROM usuarios WHERE papel = 'admin' AND ativo = 1 ORDER BY id LIMIT 1").get();
+  if (!admin) return;
+  syncAutomaticoRodando = true;
+  try {
+    const r = await sincronizarMysql(admin.id);
+    console.log(`sync automático da Unyflex: ${r.turmas} turma(s), ${r.matriculasNoLote} matrícula(s) no lote (importação #${r.importacaoId}).`);
+    emitirEventoTv("mysql");
+  } catch (err) {
+    proximaTentativaSync = Date.now() + 60 * 60 * 1000;
+    console.error("✖ sync automático da Unyflex falhou (nova tentativa em 1 h):", err.message || err);
+  } finally {
+    syncAutomaticoRodando = false;
+  }
+}
+
+function tiqueMarketing() {
+  try {
+    marketing.gerarEnvios(); // turma futura nova / virada do dia
+  } catch (err) {
+    console.error("✖ marketing: falha ao gerar envios:", err.message || err);
+  }
+  syncAutomatico().catch((err) => console.error("✖ sync automático:", err.message || err));
+}
+
+function paginaProibidaMarketing() {
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Acesso restrito — jonIAs</title>
+<link rel="stylesheet" href="/css/style.css"></head><body class="pagina-login"><main class="login-caixa">
+<h1>jon<span class="grad">IA</span>s</h1><p class="login-subtitulo">Você não tem acesso a esta tela.</p>
+<a class="btn btn-primario btn-largo" href="/">Voltar ao início</a></main></body></html>`;
+}
+
 function tratarErro(rota, err, res) {
   console.error(`[/api/${rota}]`, err.message || err);
   if (err instanceof Anthropic.AuthenticationError) {
@@ -1594,6 +1704,10 @@ app.use((err, req, res, next) => {
   setInterval(() => rota.garantirRotas(), 5 * 60 * 1000).unref();
   // Backup diário do banco (03:00 Brasília, com recuperação após reinício)
   backup.iniciarAgendamento();
+  // Marketing (migração 39): envios das turmas futuras + sync diário da Unyflex
+  marketing.gerarEnvios();
+  setTimeout(tiqueMarketing, 60 * 1000).unref();
+  setInterval(tiqueMarketing, 10 * 60 * 1000).unref();
   app.listen(PORT, () => {
     console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
   });

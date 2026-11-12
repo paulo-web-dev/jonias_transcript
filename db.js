@@ -1759,6 +1759,49 @@ const MIGRACOES = [
     ins.run("cota_fim_ano_base", 8000000);
     console.log(`migração 38: ${depois} meta(s) preservadas; cota individual de fim de ano = R$ 100.000 (supermeta) e R$ 80.000 (base) por vendedor, desde 01/11.`);
   },
+  // 39 — MARKETING, Fase 1 (decisões do usuário, 2026-11-12; marketing.js):
+  // papel `marketing` (só código — usuarios.papel não tem CHECK) e o e-mail
+  // marketing do Gustavo, gerado das turmas futuras da cópia da Unyflex.
+  // - turmas.vista_em: quando o sync viu a turma pela 1ª vez (NULL = antes
+  //   desta migração); turmas.fora_da_origem_em: a turma saiu do filtro da
+  //   origem (desativada/cancelada) — sai das pendências, fica no histórico.
+  // - marketing_envios: 3 por turma (1 divulgação, 2 intermediário, 3 últimas
+  //   vagas); `antecedencia_dias` é a regra que valia quando o envio NASCEU
+  //   (nunca recalculada); prazo = data da turma − antecedência, derivado na
+  //   leitura (turma adiada leva o prazo junto). Nunca apagado.
+  // - marketing_eventos: trilha de cada check e de cada check desfeito.
+  // - configuracoes: marketing_ativado_em (hoje — prazo anterior = RETROATIVO,
+  //   fora do indicador de atraso) e marketing_email_virada (30/15/7 → 60/30/15).
+  () => {
+    const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+    db.exec(`
+      ALTER TABLE turmas ADD COLUMN vista_em TEXT;
+      ALTER TABLE turmas ADD COLUMN fora_da_origem_em TEXT;
+      CREATE TABLE marketing_envios (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        turma_id          INTEGER NOT NULL REFERENCES turmas(id),
+        ordem             INTEGER NOT NULL CHECK (ordem IN (1, 2, 3)),
+        antecedencia_dias INTEGER NOT NULL CHECK (antecedencia_dias > 0),
+        nasceu_em         TEXT    NOT NULL,
+        enviado_em        TEXT,
+        enviado_por       INTEGER REFERENCES usuarios(id),
+        UNIQUE (turma_id, ordem)
+      );
+      CREATE TABLE marketing_eventos (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        envio_id   INTEGER NOT NULL REFERENCES marketing_envios(id),
+        tipo       TEXT    NOT NULL CHECK (tipo IN ('enviado', 'desfeito')),
+        usuario_id INTEGER REFERENCES usuarios(id),
+        em         TEXT    NOT NULL,
+        observacao TEXT
+      );
+      CREATE INDEX idx_marketing_eventos_envio ON marketing_eventos(envio_id);
+    `);
+    const cfg = db.prepare("INSERT INTO configuracoes (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO NOTHING");
+    cfg.run("marketing_ativado_em", hoje);
+    cfg.run("marketing_email_virada", "2027-01-01");
+    console.log(`migração 39: marketing — e-mails ativados em ${hoje} (prazo anterior = retroativo); regra 30/15/7 até 31/12/2026, 60/30/15 desde 01/01/2027.`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

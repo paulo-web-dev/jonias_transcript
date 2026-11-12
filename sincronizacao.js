@@ -192,11 +192,12 @@ async function sincronizarMysql(usuarioId) {
 
   const agora = new Date().toISOString();
   const upsertTurma = db.prepare(
-    `INSERT INTO turmas (id, nome, subtitulo, start_date, end_date, unyflex, sincronizado_em)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO turmas (id, nome, subtitulo, start_date, end_date, unyflex, sincronizado_em, vista_em)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET nome = excluded.nome, subtitulo = excluded.subtitulo,
        start_date = excluded.start_date, end_date = excluded.end_date,
-       unyflex = excluded.unyflex, sincronizado_em = excluded.sincronizado_em`
+       unyflex = excluded.unyflex, sincronizado_em = excluded.sincronizado_em,
+       fora_da_origem_em = NULL`
   );
   // Upsert que NÃO toca oportunidade_id/match_* — o cruzamento é recalculado
   // depois, mas nunca se perde por causa da cópia.
@@ -224,7 +225,16 @@ async function sincronizarMysql(usuarioId) {
     for (const t of turmas) {
       upsertTurma.run(t.id, t.title ?? null, t.subtitle ?? null,
         dataMysqlIso(t.start_date), dataMysqlIso(t.end_date),
-        t.unyflex === null || t.unyflex === undefined ? null : Number(t.unyflex), agora);
+        t.unyflex === null || t.unyflex === undefined ? null : Number(t.unyflex), agora, agora);
+    }
+    // Turma local que NÃO veio no filtro da origem (desativada/cancelada lá):
+    // marcada, nunca apagada — o e-mail marketing a tira das pendências e a
+    // mantém no histórico (migração 39). Se voltar, o upsert acima limpa a marca.
+    const vindas = new Set(turmas.map((t) => Number(t.id)));
+    const marcarFora = db.prepare("UPDATE turmas SET fora_da_origem_em = ? WHERE id = ? AND fora_da_origem_em IS NULL");
+    let turmasForaDaOrigem = 0;
+    for (const { id } of db.prepare("SELECT id FROM turmas").all()) {
+      if (!vindas.has(id)) turmasForaDaOrigem += marcarFora.run(agora, id).changes;
     }
     let novas = 0;
     let atualizadas = 0;
@@ -267,6 +277,8 @@ async function sincronizarMysql(usuarioId) {
     const territorio = cruzarMunicipios();
     // Fase 4 da prospecção: telefones de alunos novos podem casar ligações (classe 'cliente')
     const ligacoes = require("./cruzamento.js").cruzarLigacoes();
+    // E-mail marketing (migração 39): turma futura nova ganha os 3 envios
+    const emails = require("./marketing.js").gerarEnvios();
     if (copiaForcada) {
       db.prepare("DELETE FROM configuracoes WHERE chave = 'sync_completo_pendente'").run();
     }
@@ -314,6 +326,11 @@ async function sincronizarMysql(usuarioId) {
           `oportunidade(s) Conquistada(s) sem matrícula correspondente.`,
         `Casamento cidade → município: ${territorio.apelidosNovos} chave(s) nova(s) classificada(s); ` +
           `pendentes na revisão: ${(territorio.porMetodo.sem_uf || 0) + (territorio.porMetodo.conflito_uf || 0) + (territorio.porMetodo.sem_match || 0)} matrícula(s) — ver /territorio.`,
+        ...(turmasForaDaOrigem
+          ? [`${turmasForaDaOrigem} turma(s) saíram do filtro da origem (desativadas/canceladas): marcadas, mantidas na cópia local.`]
+          : []),
+        `E-mail marketing: ${emails.envios} envio(s) novo(s) para ${emails.turmas} turma(s) futura(s)` +
+          (emails.nascidosAtrasados ? ` — ${emails.nascidosAtrasados} já nasceram com o prazo vencido.` : "."),
       ],
       periodo: { de: periodoDe, ate: periodoAte },
       cruzamento,

@@ -28,6 +28,21 @@
     return a;
   };
   const atual = location.pathname;
+  // Marketing (migração 39): só a área de marketing e a senha
+  if (sessao.papel === "marketing") {
+    for (const a of acoes.querySelectorAll("a[href]")) if (a.getAttribute("href") !== "/marketing") a.remove();
+    if (atual !== "/marketing" && !acoes.querySelector('a[href="/marketing"]')) acoes.insertBefore(link("/marketing", "📣 Marketing"), sair);
+    if (!acoes.querySelector('a[href="/trocar-senha"]')) acoes.insertBefore(link("/trocar-senha", "🔑 Senha"), sair);
+    const quemMkt = document.createElement("span");
+    quemMkt.className = "topo-usuario";
+    quemMkt.textContent = `${sessao.nome} · marketing`;
+    acoes.insertBefore(quemMkt, acoes.firstChild);
+    document.dispatchEvent(new CustomEvent("sessao-pronta", { detail: sessao }));
+    return;
+  }
+  if (sessao.papel === "admin" && atual !== "/marketing" && !acoes.querySelector('a[href="/marketing"]')) {
+    acoes.insertBefore(link("/marketing", "📣 Marketing"), sair);
+  }
   if (sessao.papel === "vendedor") {
     for (const a of acoes.querySelectorAll("a[href]")) if (SO_ADMIN.includes(a.getAttribute("href"))) a.remove();
     if (atual !== "/meu-painel" && !acoes.querySelector('a[href="/meu-painel"]')) acoes.insertBefore(link("/meu-painel", "📈 Meu painel"), sair);

@@ -79,9 +79,12 @@ aula-ai/
 ├── feriados.js      # feriados (migração 33): dia útil = seg–sex fora da tabela — Rota, metas e TV
 ├── fimdeano.js      # ROTA FINALIZAÇÃO DE ANO (migração 36): faixas alfabéticas, plano curso×dia, publicar, contador R$ 500 mil
 ├── fim-de-ano.html  # plano (admin, editável) / "ROTA FINALIZAÇÃO DE ANO" (vendedor)  (rota /fim-de-ano)
+├── marketing.js     # MARKETING (migração 39): e-mail marketing gerado das turmas futuras (3 envios por turma), check, atraso
+├── marketing.html   # área do marketing (rota /marketing; papel marketing e admin) — js/marketing.js
+├── scripts/diagnostico-emails-marketing.js # SÓ LEITURA: turmas futuras e envios de e-mail nas regras 30/15/7 e 60/30/15
 ├── scripts/diagnostico-fim-de-ano.js # SÓ LEITURA: faixas × IBGE, aptos por vendedor/setor, faturamento nov/dez × PDF, dias úteis
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
-├── escopo.js        # papéis (admin | vendedor) e escopo por regional (campanha própria da Rota: prospecção livre) — corte no servidor
+├── escopo.js        # papéis (admin | vendedor | marketing) e escopo por regional (campanha própria da Rota: prospecção livre) — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
 ├── trocar-senha.html # troca de senha (obrigatória no 1º acesso)
 ├── meu-painel.html  # painel do vendedor: métricas próprias × metas
@@ -218,7 +221,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **38**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **39**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -747,6 +750,10 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET/POST /api/feriados`, `DELETE /api/feriados/:data` | admin: feriados (migração 33). POST `{data, nome}` só hoje em diante (passado → 400: mudaria relatórios fechados), descarta as rotas dessa data sem baixa (`descartadas`, `comBaixa`); DELETE de feriado futuro devolve a data a dia útil e roda `garantirRotas`. Ambos emitem SSE `config` (a TV refaz o fetch) |
 | `GET/POST /api/rota/tipos`, `PUT /api/rota/tipos/:id` | admin: tipos de rota + setores disponíveis (uf, aba, linhas, aptas); `turmas: [{curso, data}]` (migração 34; até 12; ausente no PUT = mantém); setor inexistente/cota fora de 1–500/nome repetido/turma sem curso ou data → 400 |
 | `GET /api/fim-de-ano`, `POST …/rascunho`, `PUT …/plano`, `POST …/publicar`, `POST …/orgaos?arquivo=`, `GET/PUT …/contador` | ROTA FINALIZAÇÃO DE ANO (fimdeano.js): GET = plano (admin: tudo, com estoque; vendedor: só a própria linha, só depois de publicado); escritas só admin (403); `orgaos` = .xlsx binário (aba "Lista geral"); contador GET para todos (`{ativo:false}` para vendedor enquanto desligado) |
+| `GET /marketing`, `GET /api/marketing/emails` | área do marketing (admin e papel marketing; vendedor 403): envios de e-mail com situação, prazo, atraso, retroativo/nasceu atrasado, `resumo` (indicador sem os retroativos) e `config` (ativação, virada, regras) |
+| `POST /api/marketing/emails/:id/enviado` | check do envio (carimbo = hora do servidor, trilha em `marketing_eventos`); já enviado ou turma começou/cancelada → 409 |
+| `DELETE /api/marketing/emails/:id/enviado` | só admin: desfaz o check `{observacao}` (fica na trilha); `GET …/:id/eventos` = trilha |
+| `PUT /api/marketing/config` | só admin: `{virada: AAAA-MM-DD}` (hoje em diante) — data da troca 30/15/7 → 60/30/15 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
 Erros que escapam das rotas passam por um tratador final em `server.js`: corpo
@@ -1614,6 +1621,61 @@ Decisões do usuário de 2026-11-10, sobre o plano "Resumo_Rota Final_Unyflex.pd
   fora de todas fica sem dono, sem cair em `pessoas.ramal` (senão a lacuna do
   2004 iria ao Frederico numa reimportação). O log da migração mostra as
   ligações de cada um.
+
+### 🚧 Marketing (2026-11-12, migração 39) — cobrar entrega e prazo
+Duas pessoas: **Kesley Santos** (social media e design: planner de conteúdo) e
+**Gustavo Bueno** (líder: ADS, e-mail, grupos de WhatsApp). O Gustavo é o mesmo
+"Gustavo" da Gerencial: as vendas dele continuam lá, a atribuição comercial
+não muda (ele entra só como usuário de marketing). Três fases, cada uma
+aprovada antes da seguinte:
+- ✅ **Fase 1 — papel marketing e e-mail marketing** (migração 39):
+  - **Papel `marketing`** (`PAPEIS` em escopo.js): ALLOWLIST em `server.js`
+    (`PAGINAS_MARKETING` = `/`, `/trocar-senha`, `/marketing`;
+    `APIS_MARKETING` = `/api/marketing`, sessão, senha, logout). Todo o resto
+    responde 403, então tela ou API nova do comercial nasce fechada para eles.
+    `/api/marketing` e `/marketing` só para admin e marketing. Usuário de
+    marketing não tem consultor ligado (`pessoa_id` NULL). Página inicial
+    `/marketing`; `js/nav.js` mostra só Marketing e Senha (admin ganha o link
+    📣 Marketing).
+  - **Envios** (`marketing.js`, `marketing_envios`): 3 por turma futura
+    (`unyflex = 0`, ainda na origem, data > hoje), "Divulgação inicial",
+    "Intermediário" e "Últimas vagas". Antecedência = a regra do DIA EM QUE O
+    ENVIO NASCE, gravada nele e nunca recalculada (decisão do usuário): 30/15/7
+    até a véspera da virada, 60/30/15 desde ela (`marketing_email_virada`,
+    padrão **01/01/2027** — ⚠ o usuário deixou "[PREENCHER]" e sugeriu essa data;
+    editável pelo admin na tela). Prazo = data da turma − antecedência,
+    derivado na leitura (turma adiada leva o prazo junto); fim de semana ou
+    feriado → dia útil anterior. Gerados no boot, a cada 10 min e ao fim de
+    cada sync; nunca apagados.
+  - **Atraso** em dias corridos: enviar no dia do prazo = 0. Pendente vencido
+    fica vermelho e continua cobrando até ser enviado ou a turma começar.
+    **Retroativo** (decisão do usuário): prazo anterior à ativação
+    (`marketing_ativado_em` = dia da migração). Fica na lista, à parte e
+    tracejado, porque ainda precisa sair, mas fica fora do indicador: o
+    atraso do Gustavo começa limpo. **Nasceu atrasado**: depois da ativação, a
+    turma chegou ao sistema com o prazo vencido. Conta no indicador, mas o
+    atraso conta a partir do dia em que o envio nasceu.
+  - **Check** = carimbo do servidor (`enviado_em`, `enviado_por`) + trilha em
+    `marketing_eventos` (enviado/desfeito). Dois cliques na tela. Desfazer: só
+    admin. Turma que começou ou saiu da origem: sai das pendências e o envio
+    sem check vira "não enviado" no histórico.
+  - **Turmas**: `vista_em` (1º sync que viu a turma) e `fora_da_origem_em`
+    (o sync marca a turma local que não veio no filtro `status = 'able'`;
+    volta a NULL se ela reaparecer). Antes, uma turma cancelada na origem era
+    indistinguível de uma ativa na cópia local.
+  - **Sync diário automático da Unyflex** (decisão do usuário): depois das
+    06:00 de Brasília, se não houver sync concluído hoje depois desse horário
+    (tique de 10 min + boot +1 min). Usa o mesmo caminho do botão e grava a
+    auditoria com o 1º admin ativo, porque `importacoes.usuario_id` é NOT
+    NULL. Falha → nova tentativa em 1 h. Sem MYSQL_* no .env, não faz nada.
+  - Medido no banco local (sync de 09/09) em 12/11: 15 turmas futuras, 45
+    envios, **22 retroativos** e 23 no prazo. O número de produção sai de
+    `scripts/diagnostico-emails-marketing.js` (depois de um sync).
+- ⏳ **Fase 2** — ADS (5 slots fixos por setor, com histórico), check semanal
+  dos grupos de WhatsApp (1º dia útil da semana) e migração do planner de
+  conteúdo da Kesley (o HTML do artifact será colado pelo usuário; cadência
+  semanal a confirmar).
+- ⏳ **Fase 3** — telas de TV do marketing na rotação.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

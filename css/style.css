@@ -1792,3 +1792,47 @@ col.c-rota-tipo { width: 120px; }
 .tv-topo { flex-wrap: wrap; }
 .tv-topo .tv-meta-ano { order: 3; flex: 0 0 100%; padding: 0.3vw 1vw; }
 .tv-topo .tv-ma-det { flex-basis: auto; }
+
+/* ============ Marketing (migração 39) ============ */
+.mk-abas { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+.mk-aba {
+  background: var(--fundo-painel); border: 1px solid var(--borda-painel); color: var(--texto);
+  border-radius: 10px; padding: 0.5rem 0.9rem; font: inherit; font-size: 0.9rem; cursor: pointer;
+}
+.mk-aba.ativa { border-color: var(--acento-2); color: var(--acento-2); font-weight: 700; }
+.mk-aba:disabled { opacity: 0.45; cursor: default; }
+.mk-controles { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; margin: 0.5rem 0 0.8rem; }
+.mk-filtro { display: flex; gap: 0.4rem; }
+.mk-filtro .btn-mini.ativo { border-color: var(--acento-2); color: var(--acento-2); }
+.mk-tabela td { vertical-align: middle; }
+.mk-tabela tbody tr { cursor: default; }
+.mk-l-atrasado td:first-child { box-shadow: inset 4px 0 0 var(--vermelho); }
+.mk-l-vence_hoje td:first-child { box-shadow: inset 4px 0 0 var(--amarelo); }
+.mk-l-retro { opacity: 0.85; }
+.mk-celula { min-width: 170px; }
+.mk-selo {
+  display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.mk-ok { color: var(--verde); border-color: rgba(61, 220, 132, 0.4); background: rgba(61, 220, 132, 0.08); }
+.mk-atraso { color: #ffb3bd; border-color: rgba(255, 92, 114, 0.5); background: rgba(255, 92, 114, 0.12); }
+.mk-hoje { color: var(--amarelo); border-color: rgba(255, 200, 87, 0.5); background: rgba(255, 200, 87, 0.08); }
+.mk-prazo { color: var(--texto-suave); border-color: var(--borda-painel); }
+.mk-retro { color: #c3c9d8; border-color: rgba(195, 201, 216, 0.35); border-style: dashed; }
+.metrica-card.mk-card-vermelho { border-color: rgba(255, 92, 114, 0.55); }
+.metrica-card.mk-card-vermelho .metrica-valor { color: var(--vermelho); }
+.metrica-card.mk-card-verde .metrica-valor { color: var(--verde); }
+.metrica-card.mk-card-amarelo .metrica-valor { color: var(--amarelo); }
+.metrica-card.mk-card-retro { border-style: dashed; }
+.mk-vazio { padding: 1rem; color: var(--verde); }
+@media (max-width: 640px) { .mk-celula { min-width: 140px; } }
+.pagina-lista.mk-pagina { width: min(1280px, 100%); padding-left: 16px; padding-right: 16px; }
+.mk-pagina .btn-mini {
+  background: var(--fundo-painel); border: 1px solid var(--borda-painel); color: var(--texto);
+  font-family: inherit; cursor: pointer; white-space: nowrap;
+}
+.mk-pagina .btn-mini:hover:not(:disabled) { border-color: var(--acento-2); }
+.mk-pagina .btn-mini.btn-primario { background: var(--grad); color: #0b0e17; border-color: transparent; }
+.mk-tabela td:nth-child(2), .mk-tabela th:nth-child(2) { text-align: left; }
+.mk-tabela td:last-child { text-align: left; }
+.mk-historico th:not(:first-child), .mk-historico td:not(:first-child) { text-align: center !important; }
