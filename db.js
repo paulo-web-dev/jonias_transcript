@@ -1967,6 +1967,21 @@ const MIGRACOES = [
     cfg.run("marketing_meta_conversas", "5");
     console.log(`migração 41: planner de conteúdo — indicador a partir de ${hoje} (post anterior = retroativo); meta de 5 conversas por semana.`);
   },
+  // 42 — WhatsApp do marketing: o ADMIN pode registrar uma semana PASSADA
+  // (decisão do usuário, 2026-11-12: ele fez e esqueceu de marcar). `feito_em`
+  // passa a ser a data EM QUE FOI FEITO (informada pelo admin; é ela que conta
+  // para o atraso) e `registrado_em`/`registrado_por` guardam quem marcou e
+  // quando. Check normal: registrado = feito. `informado_admin = 1` marca os
+  // registros feitos depois da semana.
+  () => {
+    db.exec(`
+      ALTER TABLE marketing_whatsapp ADD COLUMN registrado_em TEXT;
+      ALTER TABLE marketing_whatsapp ADD COLUMN registrado_por INTEGER REFERENCES usuarios(id);
+      ALTER TABLE marketing_whatsapp ADD COLUMN informado_admin INTEGER NOT NULL DEFAULT 0;
+      UPDATE marketing_whatsapp SET registrado_em = feito_em, registrado_por = feito_por WHERE registrado_em IS NULL;
+    `);
+    console.log("migração 42: WhatsApp do marketing — admin pode registrar semana passada (data informada + quem marcou e quando).");
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

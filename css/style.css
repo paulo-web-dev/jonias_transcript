@@ -1969,3 +1969,10 @@ body:not(.mk-admin) .so-admin-mk { display: none; }
   .pl-post { grid-template-columns: 1fr; }
   .pl-nums { grid-template-columns: 1fr 1fr; }
 }
+/* Marketing — migração 42: slot de ADS com curso já ocorrido (laranja, ≠ vazio) e registro de semana passada do WhatsApp */
+.mk-passou { color: #ffb37a; border-color: rgba(255, 143, 92, 0.55); background: rgba(255, 143, 92, 0.12); }
+.mk-ads-passou { border-color: rgba(255, 143, 92, 0.6); box-shadow: inset 0 0 0 1px rgba(255, 143, 92, 0.25); }
+.mk-ads-aviso-passou { color: #ffb37a; font-size: 0.85rem; font-weight: 600; }
+.mk-ads-quebra { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.mk-wa-retro { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; color: var(--texto); }
+.mk-wa-retro input[name="obs"] { min-width: 180px; }

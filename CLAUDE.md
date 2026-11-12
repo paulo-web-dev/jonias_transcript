@@ -223,7 +223,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **41**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **42**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -757,7 +757,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `DELETE /api/marketing/emails/:id/enviado` | só admin: desfaz o check `{observacao}` (fica na trilha); `GET …/:id/eventos` = trilha |
 | `POST/DELETE /api/marketing/turmas/:id/excluir` | só admin: exclui `{motivo}` / reinclui a turma no e-mail marketing (reincluir gera os envios que faltam, com a regra de hoje) |
 | `GET /api/marketing/ads`, `PUT /api/marketing/ads/:setor`, `PATCH /api/marketing/ads/:setor`, `POST …/:setor/encerrar` | ADS (admin e marketing): painel dos 5 slots (`ativos`, `orcamentoDiarioTotalCentavos`, `turmas` futuras para escolher, histórico por setor); PUT `{turmaId, inicio, dataCurso?, orcamentoDiario}` = nova campanha (encerra a ativa hoje, "troca de curso"); PATCH = ajuste da ativa sem trocar o curso; encerrar `{motivo}` deixa o slot vazio. Setor: `licitacao comunicacao reforma_tributaria financas portal` |
-| `GET/POST /api/marketing/whatsapp`, `DELETE /api/marketing/whatsapp/:semana` | check semanal dos grupos: GET = semanas cobradas e resumo; POST `{observacao}` = check da semana CORRENTE (outra semana nunca); DELETE só admin |
+| `GET/POST /api/marketing/whatsapp`, `DELETE /api/marketing/whatsapp/:semana` | check semanal dos grupos: GET = semanas cobradas e resumo; POST `{observacao}` = check da semana CORRENTE; POST `{semana, feitoEm, observacao}` = semana PASSADA, só admin (marketing 403; `feitoEm` fora da semana..hoje → 400); DELETE só admin |
 | `GET /api/marketing/planner` | planner (admin e marketing): `posts` classificados (situação, atraso, retroativo, turmas), `extras`, `rotina` (checks por semana), `vinculos` (pendentes e manuais), `turmasParaVinculo`, `indicadores` (semana e mês, Kesley e Gustavo), `feriados`, `fontes`, `metaConversas` |
 | `POST /api/marketing/planner/importar?arquivo=` | só admin: .xlsx binário do planner; relatório (novos, atualizados, saíram do plano, mantidos, vínculos, status migrados, sem responsável); arquivo ilegível/sem colunas → 422 |
 | `POST …/planner/posts/:id/estado`, `PATCH …/posts/:id`, `POST …/posts/:id/nao-vai-sair` | estado `{estado, link}` (publicado exige link http(s); voltar de publicado só admin → 403); métricas/link/fechamento `{alcance, engajamento, conversas, link, motivo, proxima}`; não vai sair `{motivo}` obrigatório |
@@ -1699,18 +1699,29 @@ aprovada antes da seguinte:
     e orçamento diário. Ativa = `encerrada_em NULL`, uma por setor (índice
     parcial). "Trocar curso" encerra a anterior HOJE com motivo "troca de
     curso". "Editar" ajusta a ativa sem trocar o curso (fica na trilha).
-    "Encerrar" deixa o slot vazio. **Alerta vermelho**: slot vazio, curso já
-    realizado (data do curso < hoje) ou turma cancelada na origem. Os dois
-    últimos NÃO contam como ativos no "N de 5". Mostra o orçamento diário
-    total dos slots com campanha. Admin e marketing editam.
+    "Encerrar" deixa o slot vazio. **Dois problemas diferentes, com avisos
+    diferentes** (decisão do usuário, 2026-11-12: a cobrança é ter 5
+    campanhas VIVAS, não 5 preenchidas): slot VAZIO (vermelho, "SLOT VAZIO")
+    e slot com o curso JÁ OCORRIDO (laranja, "curso já ocorreu em dd/mm" e
+    "a campanha ainda está no ar para um curso que já ocorreu"; turma
+    cancelada na origem também em laranja). Nenhum dos dois conta no "N de 5
+    campanhas vivas"; o topo mostra a quebra (N vazios · N com curso já
+    ocorrido). Mostra o orçamento diário total dos slots com campanha. Admin
+    e marketing editam.
   - ✅ **WhatsApp — check semanal** (`marketing_whatsapp`): um check por
     semana (segunda ISO), devido no 1º dia útil da semana (feriado na segunda
     → terça; Finados de 2026 caiu em 03/11). **Só a semana corrente pode ser
-    marcada** (decisão de implementação): semana que passou sem check fica
-    "NÃO FEITO" para sempre. Atraso = dias corridos do devido ao check.
+    marcada** (confirmado pelo usuário): semana que passou sem check fica
+    "NÃO FEITO". Atraso = dias corridos do devido ao dia em que foi feito.
     Cobrança a partir de `marketing_whatsapp_desde` (dia da migração): a
     primeira semana cobrada é a primeira com dia devido ≥ essa data.
-    Desfazer só admin.
+    Desfazer só admin. **Exceção do admin (migração 42, decisão do
+    usuário):** numa semana passada "NÃO FEITO", o admin registra como feita
+    (ele fez e esqueceu de marcar), informando a data em que foi feito
+    (padrão = o dia devido; entre a segunda da semana e hoje). Essa data
+    conta para o atraso; `registrado_em`/`registrado_por` guardam quem marcou
+    e quando (`informado_admin = 1`), e a tela mostra os dois. No check
+    normal, registrado = feito.
   - Trilha comum em `marketing_log` (ADS, WhatsApp, exclusões).
   - ✅ **Planner da Kesley** (migração 41, `planner.js` + `js/planner.js`,
     aba "Planner de conteúdo" em `/marketing`): migra o artifact "Funil de

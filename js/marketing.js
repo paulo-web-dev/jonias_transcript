@@ -246,11 +246,17 @@ document.getElementById("mk-virada-salvar").addEventListener("click", async () =
 
 // =============================== ADS ===============================
 
+// Slot vazio e slot com curso já ocorrido são problemas DIFERENTES (decisão do
+// usuário, 2026-11-12): vazio = falta campanha (vermelho); curso já ocorrido =
+// campanha no ar anunciando o que já passou (laranja). Nenhum dos dois conta
+// como ativo — a cobrança é ter 5 campanhas VIVAS, não 5 preenchidas.
 const SITUACAO_ADS = {
-  ok: ["mk-ok", "✓ ativa"],
-  vazio: ["mk-atraso", "SLOT VAZIO"],
-  curso_passou: ["mk-atraso", "curso já aconteceu — troque"],
-  turma_cancelada: ["mk-atraso", "turma cancelada na origem — troque"],
+  ok: { classe: "mk-ok", card: "", rotulo: () => "✓ ativa" },
+  vazio: { classe: "mk-atraso", card: "mk-ads-alerta", rotulo: () => "SLOT VAZIO", texto: () => "Nenhuma campanha neste setor." },
+  curso_passou: { classe: "mk-passou", card: "mk-ads-passou", rotulo: (a) => `curso já ocorreu em ${ddmm(a.dataCurso)}`,
+    texto: (a) => `A campanha ainda está no ar para um curso que já ocorreu em ${dataBr(a.dataCurso)}. Troque o curso.` },
+  turma_cancelada: { classe: "mk-passou", card: "mk-ads-passou", rotulo: () => "turma cancelada na origem",
+    texto: () => "A turma desta campanha saiu da origem (cancelada). Troque o curso." },
 };
 
 function formAds(s) {
@@ -273,21 +279,25 @@ function renderAds() {
   const d = estado.ads;
   if (!d) return;
   const todosOk = d.ativos === d.totalSlots;
+  const vazios = d.setores.filter((s) => s.situacao === "vazio").length;
+  const passados = d.setores.filter((s) => s.situacao === "curso_passou" || s.situacao === "turma_cancelada").length;
   document.getElementById("ads-topo").innerHTML = `
-    <div class="mk-ads-placar ${todosOk ? "mk-ok-texto" : "mk-vermelho-texto"}"><strong>${d.ativos}</strong> de ${d.totalSlots} slots ativos</div>
+    <div class="mk-ads-placar ${todosOk ? "mk-ok-texto" : "mk-vermelho-texto"}"><strong>${d.ativos}</strong> de ${d.totalSlots} campanhas vivas</div>
+    ${vazios || passados ? `<div class="mk-ads-quebra">${vazios ? `<span class="mk-selo mk-atraso">${plural(vazios, "slot vazio", "slots vazios")}</span>` : ""}
+      ${passados ? `<span class="mk-selo mk-passou">${plural(passados, "com curso já ocorrido", "com curso já ocorrido")}</span>` : ""}</div>` : ""}
     <div class="mk-ads-total">Orçamento diário total: <strong>${reais(d.orcamentoDiarioTotalCentavos)}</strong></div>
-    <div class="texto-suave">Sempre 5 campanhas ativas, uma por setor. Slot vazio ou com o curso já realizado é alerta vermelho.</div>`;
+    <div class="texto-suave">Sempre 5 campanhas vivas, uma por setor. Slot vazio (vermelho) e slot com o curso já ocorrido (laranja) não contam como ativos.</div>`;
   document.getElementById("ads-slots").innerHTML = d.setores.map((s) => {
-    const [classe, rotulo] = SITUACAO_ADS[s.situacao];
+    const sit = SITUACAO_ADS[s.situacao];
     const a = s.ativa;
     const aberto = estado.adsForm?.setor === s.setor;
     const k = `encerrar:${s.setor}`;
-    return `<article class="mk-ads-slot ${s.situacao === "ok" ? "" : "mk-ads-alerta"}">
-      <header><h3>${escapeHtml(s.nome)}</h3><span class="mk-selo ${classe}">${rotulo}</span></header>
-      ${a ? `<div class="mk-ads-turma">${linhaTurma(a)}</div>
+    return `<article class="mk-ads-slot ${sit.card}">
+      <header><h3>${escapeHtml(s.nome)}</h3><span class="mk-selo ${sit.classe}">${sit.rotulo(a)}</span></header>
+      ${a ? `${sit.texto ? `<p class="mk-ads-aviso-passou">${sit.texto(a)}</p>` : ""}<div class="mk-ads-turma">${linhaTurma(a)}</div>
         <dl class="mk-ads-dados"><dt>Campanha desde</dt><dd>${dataBr(a.inicio)} (${plural(a.dias, "dia", "dias")})</dd>
           <dt>Curso em</dt><dd>${dataBr(a.dataCurso)}</dd><dt>Orçamento/dia</dt><dd>${reais(a.orcamentoDiarioCentavos)}</dd></dl>`
-        : `<p class="mk-ads-vazio">Nenhuma campanha neste setor.</p>`}
+        : `<p class="mk-ads-vazio">${sit.texto()}</p>`}
       ${aberto ? formAds(s) : `<div class="mk-controles">
         <button type="button" class="btn-mini ${a ? "" : "btn-primario"}" data-ads-nova="${s.setor}">${a ? "trocar curso" : "+ nova campanha"}</button>
         ${a ? `<button type="button" class="btn-mini" data-ads-editar="${s.setor}">editar</button>
@@ -360,6 +370,29 @@ function seloWa(w) {
   return `<span class="mk-selo mk-prazo">vence ${diaSemana(w.devido)} ${ddmm(w.devido)}</span>`;
 }
 
+// Coluna "Check" do histórico. Registro do admin (semana passada) mostra a
+// data informada e, à parte, quem marcou e quando. Semana NÃO FEITA: o admin
+// pode registrar (ele fez e esqueceu de marcar) — data em que foi feito
+// (padrão: o dia devido) e observação; dois cliques.
+function celulaCheckWa(w) {
+  if (w.feitoEm) {
+    const obs = w.observacao ? ` — ${escapeHtml(w.observacao)}` : "";
+    if (w.informadoAdmin) {
+      return `feito em ${dataBr(new Date(w.feitoEm).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }))} (data informada)${obs}<br>` +
+        `<small>registrado depois por ${escapeHtml(w.registradoPor || "admin")} em ${escapeHtml(dataHoraBr(w.registradoEm))}</small>` +
+        (estado.admin && !w.atual ? ` <button type="button" class="btn-mini mk-link" data-wa-desfazer="${w.semana}">${armado("wa:desfazer") ? "confirmar desfazer" : "desfazer"}</button>` : "");
+    }
+    return `${escapeHtml(dataHoraBr(w.feitoEm))}${w.feitoPor ? ` · ${escapeHtml(w.feitoPor)}` : ""}${obs}`;
+  }
+  if (w.situacao !== "nao_feito" || !estado.admin) return "";
+  const k = `wa:retro:${w.semana}`;
+  return `<div class="mk-wa-retro" data-semana="${w.semana}">
+    <label>feito em <input type="date" class="campo-select" name="feitoEm" value="${w.devido}" min="${w.semana}" max="${estado.wa.hoje}" /></label>
+    <input type="text" class="campo-select" name="obs" placeholder="observação (opcional)" maxlength="300" />
+    <button type="button" class="btn-mini ${armado(k) ? "btn-primario" : ""}" data-wa-retro="${w.semana}">${armado(k) ? "confirmar registro" : "registrar como feito (admin)"}</button>
+  </div>`;
+}
+
 function renderWhatsapp() {
   const d = estado.wa;
   if (!d) return;
@@ -394,7 +427,7 @@ function renderWhatsapp() {
     ? `<div class="tabela-scroll"><table class="tabela-metricas mk-tabela"><thead><tr><th style="text-align:left">Semana</th><th>Devido</th><th>Situação</th><th style="text-align:left">Check</th></tr></thead><tbody>` +
       d.semanas.map((w) => `<tr class="sem-clique mk-l-${w.situacao === "nao_feito" ? "atrasado" : w.situacao}"><td style="text-align:left">${dataBr(w.semana)}${w.atual ? " <small class=\"texto-suave\">(esta semana)</small>" : ""}</td>
         <td>${diaSemana(w.devido)} ${ddmm(w.devido)}</td><td>${seloWa(w)}</td>
-        <td style="text-align:left" class="texto-suave">${w.feitoEm ? `${escapeHtml(dataHoraBr(w.feitoEm))}${w.feitoPor ? ` · ${escapeHtml(w.feitoPor)}` : ""}${w.observacao ? ` — ${escapeHtml(w.observacao)}` : ""}` : ""}</td></tr>`).join("") +
+        <td style="text-align:left" class="texto-suave">${celulaCheckWa(w)}</td></tr>`).join("") +
       `</tbody></table></div>`
     : `<p class="texto-suave">Nenhuma semana cobrada ainda.</p>`;
 }
@@ -414,6 +447,24 @@ document.getElementById("aba-whatsapp").addEventListener("click", async (ev) => 
       estado.wa = await chamarApi("/api/marketing/whatsapp", json("POST", { observacao: document.getElementById("wa-obs")?.value }));
       const a = estado.wa.atual;
       avisar("✓ Check da semana registrado" + (a?.atrasoDias ? ` — ${plural(a.atrasoDias, "dia", "dias")} de atraso.` : " no dia."));
+    } catch (e) { avisar("⚠ " + e.message, true); }
+    await carregarWhatsapp(); renderWhatsapp();
+    return;
+  }
+  const r = ev.target.closest("[data-wa-retro]");
+  if (r) {
+    const semana = r.dataset.waRetro;
+    const caixa = r.closest(".mk-wa-retro");
+    const corpo = { semana, feitoEm: caixa.querySelector('[name="feitoEm"]').value, observacao: caixa.querySelector('[name="obs"]').value };
+    if (!armar(`wa:retro:${semana}`)) {
+      const nova = document.querySelector(`.mk-wa-retro[data-semana="${semana}"]`); // re-render: devolve o que foi digitado
+      if (nova) { nova.querySelector('[name="feitoEm"]').value = corpo.feitoEm; nova.querySelector('[name="obs"]').value = corpo.observacao; }
+      return;
+    }
+    try {
+      estado.wa = await chamarApi("/api/marketing/whatsapp", json("POST", corpo));
+      const w = estado.wa.semanas.find((x) => x.semana === semana);
+      avisar(`Semana de ${dataBr(semana)} registrada como feita em ${dataBr(corpo.feitoEm)}` + (w?.atrasoDias ? ` — ${plural(w.atrasoDias, "dia", "dias")} de atraso.` : " — no dia."));
     } catch (e) { avisar("⚠ " + e.message, true); }
     await carregarWhatsapp(); renderWhatsapp();
     return;

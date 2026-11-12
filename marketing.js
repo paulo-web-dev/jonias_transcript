@@ -371,7 +371,10 @@ function encerrarCampanhaAds(setor, motivo, usuarioId) {
 // ---------- Grupos de WhatsApp: check semanal (migração 40) ----------
 // Um check por semana, devido no 1º dia útil (segunda; feriado → o seguinte).
 // Só a semana CORRENTE pode ser marcada: semana que passou sem check fica
-// vermelha no histórico para sempre. Atraso = dias corridos do devido ao check.
+// vermelha no histórico. EXCEÇÃO (migração 42): o ADMIN registra uma semana
+// passada, informando a data em que foi feito (é ela que conta para o atraso);
+// quem marcou e quando ficam em registrado_por/registrado_em.
+// Atraso = dias corridos do devido ao dia em que foi feito.
 // Semana sem dia útil não é cobrada; semana com devido antes de
 // marketing_whatsapp_desde também não (o controle começa limpo).
 const segundaDe = (d) => { const w = new Date(`${d}T12:00:00Z`).getUTCDay(); return somarDias(d, -((w + 6) % 7)); };
@@ -384,7 +387,8 @@ function painelWhatsapp() {
   const hoje = hojeBrasilia();
   const desde = lerConfig("marketing_whatsapp_desde") || hoje;
   const checks = new Map(db.prepare(
-    "SELECT w.*, u.nome feito_por_nome FROM marketing_whatsapp w LEFT JOIN usuarios u ON u.id = w.feito_por"
+    `SELECT w.*, u.nome feito_por_nome, r.nome registrado_por_nome FROM marketing_whatsapp w
+       LEFT JOIN usuarios u ON u.id = w.feito_por LEFT JOIN usuarios r ON r.id = w.registrado_por`
   ).all().map((c) => [c.semana, c]));
   const semanas = [];
   for (let s = segundaDe(desde); s <= segundaDe(hoje); s = somarDias(s, 7)) {
@@ -398,7 +402,10 @@ function painelWhatsapp() {
     else if (hoje < devido) situacao = "aguardando";
     else if (hoje === devido) situacao = "hoje";
     else { situacao = "atrasado"; atrasoDias = diasEntre(devido, hoje); }
-    semanas.push({ semana: s, devido, atual, situacao, atrasoDias, feitoEm: c?.feito_em || null, feitoPor: c?.feito_por_nome || null, observacao: c?.observacao || null });
+    semanas.push({
+      semana: s, devido, atual, situacao, atrasoDias, feitoEm: c?.feito_em || null, feitoPor: c?.feito_por_nome || null, observacao: c?.observacao || null,
+      informadoAdmin: !!c?.informado_admin, registradoEm: c?.registrado_em || null, registradoPor: c?.registrado_por_nome || null,
+    });
   }
   semanas.reverse();
   const fechadas = semanas.filter((x) => x.situacao === "feito" || x.situacao === "nao_feito");
@@ -419,16 +426,30 @@ function painelWhatsapp() {
   };
 }
 
-function marcarWhatsapp(usuarioId, observacao) {
+// corpo: { observacao, semana?, feitoEm? }. Sem `semana` (ou a corrente) = o
+// check normal, carimbado agora. Semana PASSADA = só admin, com `feitoEm`
+// (AAAA-MM-DD, entre a segunda da semana e hoje; padrão = o dia devido).
+function marcarWhatsapp(usuario, corpo = {}) {
   const p = painelWhatsapp();
-  if (!p.atual) throw erro("Esta semana não é cobrada (o controle começa na próxima semana, ou não há dia útil).", 409);
-  if (p.atual.situacao === "feito") throw erro("O check desta semana já foi dado.", 409);
+  const observacao = String(corpo.observacao || "").trim().slice(0, 300) || null;
   const agora = new Date().toISOString();
-  observacao = String(observacao || "").trim().slice(0, 300) || null;
+  const semana = corpo.semana ? String(corpo.semana) : p.atual?.semana;
+  const alvo = p.semanas.find((s) => s.semana === semana);
+  if (!alvo) throw erro(corpo.semana ? "Essa semana não é cobrada." : "Esta semana não é cobrada (o controle começa na próxima semana, ou não há dia útil).", 409);
+  if (alvo.situacao === "feito") throw erro("O check dessa semana já foi dado.", 409);
+  let feitoEm = agora, informado = 0;
+  if (!alvo.atual) {
+    if (usuario.papel !== "admin") throw erro("Semana passada só o administrador registra.", 403);
+    const data = String(corpo.feitoEm || alvo.devido);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || isNaN(new Date(`${data}T12:00:00Z`))) throw erro("Data em que foi feito inválida — use AAAA-MM-DD.");
+    if (data < alvo.semana || data > p.hoje) throw erro("A data em que foi feito precisa estar entre a segunda dessa semana e hoje.");
+    feitoEm = new Date(`${data}T12:00:00-03:00`).toISOString(); // meio-dia de Brasília: o dia não muda com o fuso
+    informado = 1;
+  }
   db.transaction(() => {
-    db.prepare("INSERT INTO marketing_whatsapp (semana, devido_em, feito_em, feito_por, observacao) VALUES (?, ?, ?, ?, ?)")
-      .run(p.atual.semana, p.atual.devido, agora, usuarioId, observacao);
-    registrar("whatsapp", p.atual.semana, "feito", { observacao }, usuarioId);
+    db.prepare(`INSERT INTO marketing_whatsapp (semana, devido_em, feito_em, feito_por, observacao, registrado_em, registrado_por, informado_admin)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(alvo.semana, alvo.devido, feitoEm, informado ? null : usuario.id, observacao, agora, usuario.id, informado);
+    registrar("whatsapp", alvo.semana, informado ? "feito_registrado_admin" : "feito", { observacao, feitoEm: informado ? feitoEm.slice(0, 10) : undefined }, usuario.id);
   })();
   return painelWhatsapp();
 }

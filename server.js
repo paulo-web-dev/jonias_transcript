@@ -1606,7 +1606,8 @@ app.patch("/api/marketing/ads/:setor", rotaMkt("ads/editar", (req) => marketing.
 app.post("/api/marketing/ads/:setor/encerrar", rotaMkt("ads/encerrar", (req) => marketing.encerrarCampanhaAds(req.params.setor, req.body?.motivo, req.usuario.id)));
 // Grupos de WhatsApp: check semanal
 app.get("/api/marketing/whatsapp", rotaMkt("whatsapp", () => marketing.painelWhatsapp()));
-app.post("/api/marketing/whatsapp", rotaMkt("whatsapp/check", (req) => marketing.marcarWhatsapp(req.usuario.id, req.body?.observacao)));
+// Semana corrente: admin e marketing. Semana passada (`semana` + `feitoEm`): só admin (marketing.js confere)
+app.post("/api/marketing/whatsapp", rotaMkt("whatsapp/check", (req) => marketing.marcarWhatsapp(req.usuario, req.body || {})));
 app.delete("/api/marketing/whatsapp/:semana", rotaMkt("whatsapp/desfazer", (req) => marketing.desfazerWhatsapp(req.params.semana, req.usuario.id), true));
 
 // Planner de conteúdo (migração 41; planner.js). Importar, replanejar e ligar
