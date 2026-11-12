@@ -1976,3 +1976,44 @@ body:not(.mk-admin) .so-admin-mk { display: none; }
 .mk-ads-quebra { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .mk-wa-retro { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; color: var(--texto); }
 .mk-wa-retro input[name="obs"] { min-width: 180px; }
+
+/* ============ TV — tela MARKETING (Fase 3; js/tv.js renderMarketing) ============
+   Kesley × Gustavo lado a lado. Zero positivo: coluna em dia ganha borda e
+   placar verdes ("✓ TUDO EM DIA"); atrasado = vermelho com os dias; ADS com
+   curso já ocorrido = laranja (problema diferente de slot vazio). */
+.tv-mk-colunas { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6vw; flex: 1; min-height: 0; }
+.tv-mk-coluna {
+  background: var(--fundo-painel); border: 2px solid var(--borda-painel); border-radius: 1.2vw;
+  padding: 1.3vw 1.6vw; display: flex; flex-direction: column; gap: 0.9vw; min-height: 0; overflow: hidden;
+}
+.tv-mk-coluna.tv-mk-coluna-ok { border-color: rgba(61, 220, 132, 0.7); box-shadow: inset 0 0 0 1px rgba(61, 220, 132, 0.25), 0 0 2vw rgba(61, 220, 132, 0.12); }
+.tv-mk-nome { font-size: 2.6vw; font-weight: 800; }
+.tv-mk-nome small { font-size: 1.1vw; font-weight: 500; color: var(--texto-suave); margin-left: 0.6vw; }
+.tv-mk-placar { display: flex; align-items: center; gap: 1.2vw; border-radius: 1vw; padding: 0.7vw 1.2vw; }
+.tv-mk-placar b { font-size: 4.6vw; line-height: 1; font-weight: 900; }
+.tv-mk-placar span { font-size: 1.7vw; font-weight: 800; letter-spacing: 1px; display: flex; flex-direction: column; }
+.tv-mk-placar small { font-size: 1.1vw; font-weight: 600; letter-spacing: 0; opacity: 0.9; }
+.tv-mk-ok { background: rgba(61, 220, 132, 0.12); color: var(--verde); }
+.tv-mk-atraso { background: rgba(255, 92, 114, 0.12); color: var(--vermelho); }
+.tv-mk-linha { font-size: 1.5vw; display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.3vw 0.7vw; }
+.tv-mk-linha b { font-size: 2vw; }
+.tv-mk-linha small { font-size: 1.05vw; color: var(--texto-suave); }
+.tv-mk-rot { font-size: 1vw; letter-spacing: 2px; color: var(--texto-suave); min-width: 7.5vw; font-weight: 700; }
+.tv-mk-verde { color: var(--verde); }
+.tv-mk-vermelho { color: var(--vermelho) !important; }
+.tv-mk-amarelo { color: var(--amarelo); }
+.tv-mk-cinza { color: var(--texto-suave); }
+.tv-mk-pendentes { list-style: none; display: flex; flex-direction: column; gap: 0.4vw; font-size: 1.25vw; }
+.tv-mk-pendentes li { display: flex; justify-content: space-between; gap: 1vw; border-left: 0.35vw solid var(--vermelho); padding: 0.25vw 0.7vw; background: rgba(255, 92, 114, 0.06); border-radius: 0.4vw; }
+.tv-mk-pendentes li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-mk-pendentes li b { color: var(--vermelho); white-space: nowrap; }
+.tv-mk-pendentes li.tv-mk-mais { border-left-color: var(--borda-painel); background: none; color: var(--texto-suave); }
+.tv-mk-chips { display: flex; flex-wrap: wrap; gap: 0.5vw; margin-left: 8.2vw; }
+.tv-mk-chip { font-size: 1.05vw; font-weight: 700; border-radius: 999px; padding: 0.2vw 0.8vw; border: 2px solid; }
+.tv-mk-chip-vazio { color: var(--vermelho); border-color: rgba(255, 92, 114, 0.6); background: rgba(255, 92, 114, 0.1); }
+.tv-mk-chip-passou { color: #ffb37a; border-color: rgba(255, 143, 92, 0.6); background: rgba(255, 143, 92, 0.1); }
+
+/* /marketing — interruptor da tela na TV (admin) */
+.mk-tv-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; font-size: 0.85rem; color: var(--texto-suave); margin: -0.4rem 0 1rem; }
+.mk-tv-barra b.ligada { color: var(--verde); }
+.mk-tv-barra code { font-size: 0.8rem; }

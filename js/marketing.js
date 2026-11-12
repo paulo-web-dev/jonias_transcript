@@ -496,9 +496,36 @@ document.querySelector(".mk-abas").addEventListener("click", (ev) => {
   if (b && !b.disabled) mostrarAba(b.dataset.aba);
 });
 
+// =============================== TV (admin) ===============================
+// Interruptor da tela MARKETING na TV (Fase 3). Nasce desligado: o usuário
+// quer uma semana de uso real antes de pôr o desempenho na parede.
+async function carregarTv() {
+  if (!estado.admin) return;
+  try {
+    const { ativo } = await chamarApi("/api/marketing/tv");
+    const k = "tv:alternar";
+    document.getElementById("mk-tv").innerHTML =
+      `📺 Tela do marketing na TV: <b class="${ativo ? "ligada" : ""}">${ativo ? "LIGADA" : "desligada"}</b>
+       <button type="button" class="btn-mini ${armado(k) ? "btn-primario" : ""}" data-tv-alternar="${ativo ? "0" : "1"}">${armado(k) ? `confirmar: ${ativo ? "desligar" : "ligar"}` : ativo ? "desligar" : "ligar na TV"}</button>
+       <span>Prévia sem ligar (só você, logado): <code>/tv?token=…&amp;fixo=marketing&amp;previa=1</code></span>`;
+  } catch (e) { document.getElementById("mk-tv").textContent = "⚠ " + e.message; }
+}
+document.getElementById("mk-tv").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-tv-alternar]");
+  if (!b) return;
+  if (estado.confirmando !== "tv:alternar") { estado.confirmando = "tv:alternar"; carregarTv(); clearTimeout(estado.tConf); estado.tConf = setTimeout(() => { estado.confirmando = null; carregarTv(); }, 5000); return; }
+  estado.confirmando = null;
+  try {
+    const r = await chamarApi("/api/marketing/tv", json("PUT", { ativo: b.dataset.tvAlternar === "1" }));
+    avisar(r.ativo ? "Tela do marketing LIGADA na TV — entra na rotação depois do MÊS." : "Tela do marketing desligada na TV.");
+  } catch (e) { avisar("⚠ " + e.message, true); }
+  carregarTv();
+});
+
 function aplicarSessao(sessao) {
   estado.admin = sessao.papel === "admin";
   document.body.classList.toggle("mk-admin", estado.admin);
+  carregarTv();
   renderAba();
 }
 document.addEventListener("sessao-pronta", (ev) => aplicarSessao(ev.detail));

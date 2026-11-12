@@ -15,7 +15,9 @@ const GIRO_MS = Math.max(6, Number(params.get("giro")) || 20) * 1000;
 // Cartão de destaque (falta para a meta da semana): entra ENTRE cada tela da
 // rotação, com duração própria — ?destaque=N segundos (padrão 12, mín. 4)
 const DESTAQUE_MS = Math.max(4, Number(params.get("destaque")) || 12) * 1000;
-const FIXO = params.get("fixo"); // status | ranking | semana | receita | mes | parados3 | parados10 | destaque
+const FIXO = params.get("fixo"); // status | ranking | semana | receita | mes | marketing | parados3 | parados10 | destaque
+// ?previa=1: mostra a tela MARKETING desligada — o servidor só atende admin logado neste navegador
+const PREVIA = params.get("previa") === "1";
 // Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
 // ?som=1 / ?som=0 é override por dispositivo. Silêncio é o padrão, não falha.
 const SOM_OVERRIDE = params.has("som") ? params.get("som") !== "0" : null;
@@ -305,7 +307,7 @@ function proximaCelebracao() {
 
 // ---------- Rotação entre visões ----------
 
-const VISOES = ["status", "ranking", "destaque", "semana", "receita", "mes", "parados3", "parados10"];
+const VISOES = ["status", "ranking", "destaque", "semana", "receita", "mes", "marketing", "parados3", "parados10"];
 let receitaAvisada = false;
 let visoesAtivas = [];
 let visaoAtual = 0;
@@ -341,6 +343,9 @@ function aplicarVisoes(d) {
   telas.push("semana");
   if (temReceita) telas.push("receita");
   telas.push("mes");
+  // MARKETING (Fase 3): só com o interruptor da /marketing ligado (o payload vem vazio desligado)
+  if (d.marketing?.ativo) { telas.push("marketing"); foraAvisadas.delete("marketing"); }
+  else avisarFora("marketing", "tela do marketing desligada em /marketing");
   // Leads parados: cada faixa só entra com alguém nela (tela vazia sai da rotação)
   for (const [visao, faixa] of [["parados3", "amarela"], ["parados10", "vermelha"]]) {
     if (d.parados?.faixas[faixa]?.total) { telas.push(visao); foraAvisadas.delete(visao); }
@@ -359,7 +364,7 @@ function aplicarVisoes(d) {
   mostrarVisao(visoesAtivas[visaoAtual]);
 }
 
-const NOMES_VISAO = { status: "STATUS", ranking: "RANKING DE VENDAS", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
+const NOMES_VISAO = { status: "STATUS", ranking: "RANKING DE VENDAS", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", marketing: "MARKETING", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
 
 function mostrarVisao(nome) {
   if (nome === "parados3" || nome === "parados10") ajustarCards(nome);
@@ -816,6 +821,7 @@ function renderizar(d, origem) {
     : `Equipe no mês: ${reais(eqMes.receitaCentavos)}` + (eqMes.incluiGerencial ? " · inclui Gerencial" : "");
 
   renderParados(d.parados);
+  renderMarketing(d.marketing);
 
   // ---- DESTAQUE: falta para a meta da SEMANA (equipe, R$) ----
   const eq = d.semana.equipe.receita;
@@ -925,6 +931,72 @@ function renderParados(p) {
   }
 }
 
+// ---------- MARKETING (Fase 3; marketing.js → painelTvMarketing) ----------
+// Kesley × Gustavo. Só entra o que venceu depois do início do controle (sem
+// retroativos — decisão do usuário). ZERO POSITIVO: quem está em dia aparece
+// em verde, com destaque, nunca uma tela vazia. Vermelho = atrasado, com os
+// dias; laranja = ADS com curso já ocorrido (problema diferente de vazio).
+let marketingAnterior = null; // diasTxt já existe (bloco do STATUS)
+
+function blocoEmDia(emDia, atrasados, maior, [um, varios] = []) {
+  return emDia
+    ? `<div class="tv-mk-placar tv-mk-ok"><b>✓</b><span>TUDO EM DIA</span></div>`
+    : `<div class="tv-mk-placar tv-mk-atraso"><b>${num(atrasados)}</b><span>${atrasados === 1 ? um : varios}<small>maior atraso: ${diasTxt(maior)}</small></span></div>`;
+}
+
+function colunaKesley(k) {
+  const pct = k.pctNoPrazo == null ? "—" : `${k.pctNoPrazo}%`;
+  const pend = k.pendentes.map((p) => `<li><span>${esc(p.titulo)}</span><b>${diasTxt(p.dias)}</b></li>`).join("") +
+    (k.atrasados > k.pendentes.length ? `<li class="tv-mk-mais">+ ${num(k.atrasados - k.pendentes.length)} outro(s)</li>` : "");
+  const conv = k.conversas >= k.metaConversas;
+  return `<div class="tv-mk-nome">${esc(k.nome)} <small>posts da semana</small></div>
+    ${blocoEmDia(k.emDia, k.atrasados, k.maiorAtraso, ["post atrasado", "posts atrasados"])}
+    <div class="tv-mk-linha"><b class="${k.pctNoPrazo === 100 ? "tv-mk-verde" : ""}">${pct}</b> no prazo nesta semana
+      <small>${k.devidos ? `${num(k.noPrazo)} de ${num(k.devidos)} vencidos · atraso médio ${k.atrasoMedio == null ? "—" : String(k.atrasoMedio).replace(".", ",") + " d"}` : "nenhum post vencido ainda"}</small></div>
+    <div class="tv-mk-linha"><b>${num(k.publicados)}</b> de ${num(k.planejados)} publicados${k.extras ? ` <small>+${num(k.extras)} extra(s)</small>` : ""}${k.naoVaiSair ? ` <small class="tv-mk-vermelho">${num(k.naoVaiSair)} não vai sair</small>` : ""}</div>
+    ${k.atrasados ? `<ul class="tv-mk-pendentes">${pend}</ul>` : ""}
+    <div class="tv-mk-linha"><b class="${conv ? "tv-mk-verde" : ""}">💬 ${num(k.conversas)}</b> / ${num(k.metaConversas)} conversas${conv ? " ✓" : ""}</div>`;
+}
+
+function colunaGustavo(g) {
+  const ads = g.ads;
+  const chips = ads.problemas.map((p) => p.situacao === "vazio"
+    ? `<span class="tv-mk-chip tv-mk-chip-vazio">${esc(p.setor)}: vazio</span>`
+    : `<span class="tv-mk-chip tv-mk-chip-passou">${esc(p.setor)}: ${p.situacao === "curso_passou" ? `curso já ocorreu ${dataBr(p.dataCurso)}` : "turma cancelada"}</span>`).join("");
+  const e = g.email;
+  const w = g.whatsapp;
+  const wa = !w ? `<span class="tv-mk-cinza">começa na próxima semana</span>`
+    : w.situacao === "feito" ? `<b class="tv-mk-verde">✓ feito</b>${w.atrasoDias ? ` <small class="tv-mk-vermelho">com ${diasTxt(w.atrasoDias)} de atraso</small>` : ""}`
+    : w.situacao === "atrasado" ? `<b class="tv-mk-vermelho">${diasTxt(w.atrasoDias)} de atraso</b>`
+    : w.situacao === "hoje" ? `<b class="tv-mk-amarelo">é hoje</b>`
+    : `<span class="tv-mk-cinza">vence ${dataBr(w.devido)}</span>`;
+  const atrasadosTotal = e.atrasados + (g.posts.atrasados || 0) + (w?.situacao === "atrasado" ? 1 : 0);
+  return `<div class="tv-mk-nome">${esc(g.nome)} <small>ADS · e-mail · WhatsApp</small></div>
+    ${g.emDia ? blocoEmDia(true) : `<div class="tv-mk-placar tv-mk-atraso"><b>${num(atrasadosTotal + (ads.total - ads.vivas))}</b><span>pendência${atrasadosTotal + ads.total - ads.vivas === 1 ? "" : "s"}<small>veja abaixo</small></span></div>`}
+    <div class="tv-mk-linha"><span class="tv-mk-rot">ADS</span><b class="${ads.vivas === ads.total ? "tv-mk-verde" : "tv-mk-vermelho"}">${num(ads.vivas)} de ${num(ads.total)}</b> campanhas vivas</div>
+    ${chips ? `<div class="tv-mk-chips">${chips}</div>` : ""}
+    <div class="tv-mk-linha"><span class="tv-mk-rot">E-MAIL</span>${e.atrasados
+      ? `<b class="tv-mk-vermelho">${num(e.atrasados)} ATRASADO${e.atrasados === 1 ? "" : "S"}</b> <small class="tv-mk-vermelho">máx ${diasTxt(e.maiorAtraso)}</small>`
+      : `<b class="tv-mk-verde">0 atrasados ✓</b>`}
+      <small>semana: ${num(e.semana.enviados)} enviado(s) · ${num(e.semana.pendentes)} pendente(s)</small></div>
+    <div class="tv-mk-linha"><span class="tv-mk-rot">WHATSAPP</span>${wa}</div>
+    ${g.posts.planejados ? `<div class="tv-mk-linha"><span class="tv-mk-rot">STATUS</span>${g.posts.atrasados ? `<b class="tv-mk-vermelho">${num(g.posts.atrasados)} post(s) atrasado(s)</b>` : `<b>${num(g.posts.publicados)}</b>`} <small>de ${num(g.posts.planejados)} no Status do WhatsApp</small></div>` : ""}`;
+}
+
+function renderMarketing(m) {
+  if (!m?.ativo) return;
+  el("marketing-titulo").textContent = `MARKETING · semana de ${dataBr(m.semana.de)} a ${dataBr(m.semana.ate)}${m.previa ? " · PRÉVIA (desligada na TV)" : ""}`;
+  for (const [chave, montarColuna] of [["kesley", colunaKesley], ["gustavo", colunaGustavo]]) {
+    const alvo = el(`marketing-${chave}`);
+    const html = montarColuna(m[chave]);
+    alvo.classList.toggle("tv-mk-coluna-ok", !!m[chave].emDia);
+    if (alvo.dataset.h !== html) { alvo.innerHTML = html; alvo.dataset.h = html; }
+    // brilho discreto quando alguém FICA em dia (nada de festa/som — plano aprovado)
+    if (marketingAnterior && marketingAnterior[chave] === false && m[chave].emDia) brilhar(alvo, "tv-glow-meta");
+  }
+  marketingAnterior = { kesley: m.kesley.emDia, gustavo: m.gustavo.emDia };
+}
+
 // ---------- Relógio / status ----------
 
 function relogio(erro) {
@@ -945,7 +1017,7 @@ async function atualizar(origem) {
   const controle = new AbortController();
   const timer = setTimeout(() => controle.abort(), 15000);
   try {
-    const r = await fetch(`/api/tv/dados?token=${encodeURIComponent(token)}`, { signal: controle.signal });
+    const r = await fetch(`/api/tv/dados?token=${encodeURIComponent(token)}${PREVIA ? "&previa=1" : ""}`, { signal: controle.signal });
     if (!r.ok) { relogio(r.status === 401 ? "token inválido" : "painel indisponível"); return; }
     renderizar(await r.json(), origem);
   } catch (_) {

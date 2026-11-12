@@ -465,9 +465,82 @@ function desfazerWhatsapp(semana, usuarioId) {
   return painelWhatsapp();
 }
 
+// ---------- TV do marketing (Fase 3; decisões do usuário, 2026-11-12) ----------
+// Uma tela "MARKETING" na rotação da TV, Kesley × Gustavo (nomes curtos).
+// - Interruptor `marketing_tv` (admin, na /marketing), nasce DESLIGADO: o
+//   usuário quer uma semana de uso real antes de pôr o desempenho na parede.
+//   Desligado, o payload público da TV não leva NADA do marketing.
+// - RETROATIVOS FORA DA TV (e de todo contador): só entra o que venceu depois
+//   do início do controle — "dívida do sistema não vai para a parede". Turma
+//   excluída do e-mail e post que saiu do plano também ficam fora.
+// - ZERO POSITIVO: `emDia` = nada atrasado; a tela mostra em verde, com
+//   destaque (mesma lógica do "0 ✓" das rotas).
+// - O payload é público na sala: nomes, números e o título curto do post
+//   pendente; nunca link, motivo ou observação.
+const tvLigada = () => lerConfig("marketing_tv") === "1";
+function definirTv(ativo) {
+  db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('marketing_tv', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").run(ativo ? "1" : "0");
+  return { ativo: tvLigada() };
+}
+
+function painelTvMarketing({ previa = false } = {}) {
+  if (!tvLigada() && !previa) return { ativo: false };
+  const planner = require("./planner.js"); // planner.js não depende deste módulo
+  const hoje = hojeBrasilia();
+  const seg = segundaDe(hoje), dom = somarDias(seg, 6);
+  const naSemana = (d) => d >= seg && d <= dom;
+  const curto = (s, n = 70) => { s = String(s || "").replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
+
+  // ---- Kesley: planner ----
+  const posts = planner.listarPosts().filter((p) => !p.retroativo && !p.foraDoPlano);
+  const deQuem = (r) => posts.filter((p) => p.responsavel === r);
+  const indK = planner.indicador(posts, "kesley", seg, dom);
+  const atrasadosK = deQuem("kesley").filter((p) => p.situacao === "atrasado").sort((a, b) => b.atrasoDias - a.atrasoDias);
+  const semanaK = deQuem("kesley").filter((p) => naSemana(p.data));
+  const extras = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(conversas), 0) c FROM planner_extras WHERE data BETWEEN ? AND ?").get(seg, dom);
+  const conversas = posts.filter((p) => naSemana(p.data)).reduce((s, p) => s + (p.conversas || 0), 0) + extras.c;
+  const kesley = {
+    nome: "Kesley",
+    planejados: semanaK.length,
+    publicados: semanaK.filter((p) => p.situacao === "publicado").length,
+    devidos: indK.devidos, noPrazo: indK.noPrazo, pctNoPrazo: indK.pctNoPrazo, atrasoMedio: indK.atrasoMedio, naoVaiSair: indK.naoVaiSair,
+    atrasados: atrasadosK.length, maiorAtraso: atrasadosK[0]?.atrasoDias || 0,
+    pendentes: atrasadosK.slice(0, 4).map((p) => ({ titulo: curto(p.gancho || p.cursoTexto), canal: p.canal, dias: p.atrasoDias })),
+    conversas, metaConversas: Number(lerConfig("marketing_meta_conversas") || 5), extras: extras.n,
+  };
+  kesley.emDia = kesley.atrasados === 0;
+
+  // ---- Gustavo: ADS, e-mail, WhatsApp e os posts dele no planner ----
+  const ads = painelAds();
+  const envios = listarEmails().envios.filter((e) => !e.retroativo && e.situacao !== "excluida");
+  const atrasadosE = envios.filter((e) => e.situacao === "atrasado").sort((a, b) => b.atrasoDias - a.atrasoDias);
+  const semanaE = envios.filter((e) => naSemana(e.prazo));
+  const wa = painelWhatsapp();
+  const indG = planner.indicador(posts, "gustavo", seg, dom);
+  const atrasadosPostsG = deQuem("gustavo").filter((p) => p.situacao === "atrasado").length;
+  const gustavo = {
+    nome: "Gustavo",
+    ads: {
+      vivas: ads.ativos, total: ads.totalSlots,
+      problemas: ads.setores.filter((s) => s.situacao !== "ok").map((s) => ({ setor: s.nome, situacao: s.situacao, dataCurso: s.ativa?.dataCurso || null })),
+    },
+    email: {
+      semana: { enviados: semanaE.filter((e) => e.situacao === "enviado").length, pendentes: semanaE.filter((e) => ["no_prazo", "vence_hoje", "atrasado"].includes(e.situacao)).length },
+      atrasados: atrasadosE.length, maiorAtraso: atrasadosE[0]?.atrasoDias || 0,
+    },
+    whatsapp: wa.atual ? { situacao: wa.atual.situacao, atrasoDias: wa.atual.atrasoDias, devido: wa.atual.devido } : null,
+    posts: { planejados: indG.planejados, publicados: deQuem("gustavo").filter((p) => naSemana(p.data) && p.situacao === "publicado").length, atrasados: atrasadosPostsG },
+  };
+  gustavo.emDia = gustavo.ads.vivas === gustavo.ads.total && gustavo.email.atrasados === 0 &&
+    !["atrasado"].includes(gustavo.whatsapp?.situacao) && atrasadosPostsG === 0;
+
+  return { ativo: true, previa: !tvLigada(), semana: { de: seg, ate: dom }, hoje, kesley, gustavo };
+}
+
 module.exports = {
   gerarEnvios, listarEmails, marcarEnviado, desfazerEnviado, eventosDoEnvio, definirVirada, config, prazoDe, NOMES,
   excluirTurma, reincluirTurma,
   SETORES_ADS, painelAds, definirCampanhaAds, editarCampanhaAds, encerrarCampanhaAds,
   painelWhatsapp, marcarWhatsapp, desfazerWhatsapp, segundaDe, devidoDaSemana,
+  painelTvMarketing, definirTv, tvLigada,
 };

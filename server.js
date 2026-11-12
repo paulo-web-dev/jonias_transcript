@@ -207,7 +207,13 @@ app.get("/api/tv/dados", (req, res) => {
   const ok = tokenTvValido(req);
   if (ok === null) return res.status(503).json({ error: "Modo TV desabilitado." });
   if (!ok) return res.status(401).json({ error: "Token inválido." });
-  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador({ tv: true }) });
+  // Marketing (Fase 3): só com o interruptor ligado. `?previa=1` mostra a tela
+  // desligada SÓ para admin logado neste navegador — a sala nunca recebe.
+  const previaMarketing = req.query.previa === "1" && usuarioDaSessao(req)?.papel === "admin";
+  let dadosMarketing = { ativo: false };
+  try { dadosMarketing = marketing.painelTvMarketing({ previa: previaMarketing }); }
+  catch (err) { console.error("[tv] marketing:", err.message || err); }
+  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador({ tv: true }), marketing: dadosMarketing });
 });
 
 // SSE: empurra "dados atualizados" para as TVs quando uma ingestão termina.
@@ -1553,6 +1559,24 @@ app.put("/api/territorio/municipios/:codigo/principal", (req, res) => {
 // ---------- Erros ----------
 
 // ---------- Marketing (migração 39; marketing.js) ----------
+
+// TV do marketing (Fase 3): toda escrita bem-sucedida na área de marketing
+// avisa as TVs por SSE (tipo "config" = refaz o fetch em silêncio, sem pulso),
+// só com a tela ligada
+app.use("/api/marketing", (req, res, next) => {
+  if (req.method !== "GET") {
+    res.on("finish", () => { if (res.statusCode < 400 && marketing.tvLigada()) emitirEventoTv("marketing", "config"); });
+  }
+  next();
+});
+app.get("/api/marketing/tv", (req, res) => res.json({ ativo: marketing.tvLigada() }));
+app.put("/api/marketing/tv", (req, res) => {
+  if (req.usuario.papel !== "admin") return res.status(403).json({ error: "Só o administrador liga a tela na TV." });
+  if (typeof req.body?.ativo !== "boolean") return res.status(400).json({ error: "Informe { ativo: true|false }." });
+  const r = marketing.definirTv(req.body.ativo);
+  emitirEventoTv("marketing", "config"); // ligar/desligar entra ou sai da rotação na hora
+  res.json(r);
+});
 
 app.get("/api/marketing/emails", (req, res) => res.json(marketing.listarEmails()));
 

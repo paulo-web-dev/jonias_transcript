@@ -79,7 +79,7 @@ aula-ai/
 ├── feriados.js      # feriados (migração 33): dia útil = seg–sex fora da tabela — Rota, metas e TV
 ├── fimdeano.js      # ROTA FINALIZAÇÃO DE ANO (migração 36): faixas alfabéticas, plano curso×dia, publicar, contador R$ 500 mil
 ├── fim-de-ano.html  # plano (admin, editável) / "ROTA FINALIZAÇÃO DE ANO" (vendedor)  (rota /fim-de-ano)
-├── marketing.js     # MARKETING (migrações 39–40): e-mail por turma (check, atraso, exclusão de turma), ADS em 5 slots, check semanal de WhatsApp
+├── marketing.js     # MARKETING (migrações 39–42): e-mail por turma (check, atraso, exclusão de turma), ADS em 5 slots, check semanal de WhatsApp, payload da tela MARKETING da TV
 ├── marketing.html   # área do marketing (rota /marketing; papel marketing e admin) — js/marketing.js + js/planner.js
 ├── planner.js       # PLANNER DE CONTEÚDO (migração 41): importa as planilhas do planner (XML via jszip), estados com carimbo, atraso, turmas
 ├── dados/planner_status_migrados.json # os 12 status de novembro tirados do artifact antigo (aplicados na importação, sem carimbo)
@@ -1772,7 +1772,37 @@ aprovada antes da seguinte:
       checks carimbados (texto do cronograma do Bruno), fechamento de sexta
       (motivo e próxima ação), padrão de captação + checklist, desempenho por
       formato ("poucos dados" < 5), turmas dos posts e importação (admin).
-- ⏳ **Fase 3** — telas de TV do marketing na rotação.
+- ✅ **Fase 3 — TV do marketing** (2026-11-12, sem migração;
+  `painelTvMarketing()` em marketing.js, `renderMarketing()` em js/tv.js).
+  ⚠ **Interruptor nasce DESLIGADO** (`configuracoes.marketing_tv`, admin na
+  barra "📺 Tela do marketing na TV" da `/marketing`; `GET/PUT
+  /api/marketing/tv`): o usuário quer uma semana de uso real da Kesley e do
+  Gustavo antes de pôr o desempenho deles na parede. Desligado, o payload
+  público da TV não leva nada do marketing. **Prévia**: `/tv?token=…&fixo=
+  marketing&previa=1` mostra a tela desligada só para ADMIN logado no mesmo
+  navegador (o servidor confere a sessão; a sala nunca recebe).
+  - Uma tela "MARKETING" na rotação, depois do MÊS e antes dos parados (cartão
+    da meta depois dela, `?fixo=marketing`, navegação manual), Kesley ×
+    Gustavo lado a lado, nomes curtos.
+  - **Retroativos FORA da TV** (decisão do usuário: "dívida do sistema não vai
+    para a parede"): só entra o que venceu depois do início do controle; nada
+    de nota sobre retroativos. Turma excluída do e-mail e post que saiu do
+    plano também ficam fora. Post "publicado" migrado do artifact sem
+    carimbo conta como retroativo (atraso desconhecido).
+  - **Zero positivo**: quem não tem nada atrasado aparece com borda verde e
+    placar "✓ TUDO EM DIA" (mesma lógica do "0 ✓" das rotas). Ficar em dia
+    dá um brilho discreto (sem festa nem som).
+  - Kesley: placar de posts atrasados (todos os vencidos agora, com o maior
+    atraso), % no prazo NESTA SEMANA e atraso médio (`indicador()` do
+    planner), N de M publicados, até 4 pendentes com o título curto e os dias
+    ("+ N outro(s)"), conversas × meta. Gustavo: pendências (atrasados +
+    slots não vivos), ADS "N de 5 campanhas vivas" com chips (vazio vermelho,
+    curso já ocorrido laranja), e-mail (atrasados de agora em vermelho com o
+    máximo; enviados × pendentes da semana), WhatsApp da semana, posts dele
+    no Status do WhatsApp.
+  - Payload público: nomes, números e títulos curtos — nunca link, motivo ou
+    observação (conferido). Toda escrita bem-sucedida em `/api/marketing`
+    emite SSE `config` (refetch silencioso) com a tela ligada.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

@@ -282,7 +282,9 @@ const SQL_POSTS = `
     LEFT JOIN usuarios u3 ON u3.id = p.nao_sai_por`;
 
 function classificar(p, hoje, inicio, turmas) {
-  const retroativo = p.data < inicio;
+  // Retroativo = anterior ao controle, ou estado trazido do artifact sem carimbo
+  // (publicado/produzido "migrado": sem data de publicação, o atraso é desconhecido)
+  const retroativo = p.data < inicio || (!!p.migrado && !p.publicado_em && p.estado === "publicado");
   let situacao, atrasoDias = null, venceEmDias = null;
   if (p.estado === "publicado") {
     situacao = "publicado";
