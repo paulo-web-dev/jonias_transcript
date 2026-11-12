@@ -429,7 +429,7 @@ document.getElementById("aba-whatsapp").addEventListener("click", async (ev) => 
 
 // =============================== ABAS ===============================
 
-const RENDER = { emails: renderEmails, ads: renderAds, whatsapp: renderWhatsapp };
+const RENDER = { emails: renderEmails, ads: renderAds, whatsapp: renderWhatsapp, planner: () => window.PLANNER?.render() };
 function renderAba() { RENDER[estado.aba]?.(); }
 
 function mostrarAba(aba) {
@@ -447,6 +447,7 @@ document.querySelector(".mk-abas").addEventListener("click", (ev) => {
 
 function aplicarSessao(sessao) {
   estado.admin = sessao.papel === "admin";
+  document.body.classList.toggle("mk-admin", estado.admin);
   renderAba();
 }
 document.addEventListener("sessao-pronta", (ev) => aplicarSessao(ev.detail));

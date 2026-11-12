@@ -80,7 +80,9 @@ aula-ai/
 ├── fimdeano.js      # ROTA FINALIZAÇÃO DE ANO (migração 36): faixas alfabéticas, plano curso×dia, publicar, contador R$ 500 mil
 ├── fim-de-ano.html  # plano (admin, editável) / "ROTA FINALIZAÇÃO DE ANO" (vendedor)  (rota /fim-de-ano)
 ├── marketing.js     # MARKETING (migrações 39–40): e-mail por turma (check, atraso, exclusão de turma), ADS em 5 slots, check semanal de WhatsApp
-├── marketing.html   # área do marketing (rota /marketing; papel marketing e admin) — js/marketing.js
+├── marketing.html   # área do marketing (rota /marketing; papel marketing e admin) — js/marketing.js + js/planner.js
+├── planner.js       # PLANNER DE CONTEÚDO (migração 41): importa as planilhas do planner (XML via jszip), estados com carimbo, atraso, turmas
+├── dados/planner_status_migrados.json # os 12 status de novembro tirados do artifact antigo (aplicados na importação, sem carimbo)
 ├── scripts/diagnostico-emails-marketing.js # SÓ LEITURA: turmas futuras e envios de e-mail nas regras 30/15/7 e 60/30/15
 ├── scripts/diagnostico-fim-de-ano.js # SÓ LEITURA: faixas × IBGE, aptos por vendedor/setor, faturamento nov/dez × PDF, dias úteis
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
@@ -221,7 +223,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **40**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **41**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -756,6 +758,11 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `POST/DELETE /api/marketing/turmas/:id/excluir` | só admin: exclui `{motivo}` / reinclui a turma no e-mail marketing (reincluir gera os envios que faltam, com a regra de hoje) |
 | `GET /api/marketing/ads`, `PUT /api/marketing/ads/:setor`, `PATCH /api/marketing/ads/:setor`, `POST …/:setor/encerrar` | ADS (admin e marketing): painel dos 5 slots (`ativos`, `orcamentoDiarioTotalCentavos`, `turmas` futuras para escolher, histórico por setor); PUT `{turmaId, inicio, dataCurso?, orcamentoDiario}` = nova campanha (encerra a ativa hoje, "troca de curso"); PATCH = ajuste da ativa sem trocar o curso; encerrar `{motivo}` deixa o slot vazio. Setor: `licitacao comunicacao reforma_tributaria financas portal` |
 | `GET/POST /api/marketing/whatsapp`, `DELETE /api/marketing/whatsapp/:semana` | check semanal dos grupos: GET = semanas cobradas e resumo; POST `{observacao}` = check da semana CORRENTE (outra semana nunca); DELETE só admin |
+| `GET /api/marketing/planner` | planner (admin e marketing): `posts` classificados (situação, atraso, retroativo, turmas), `extras`, `rotina` (checks por semana), `vinculos` (pendentes e manuais), `turmasParaVinculo`, `indicadores` (semana e mês, Kesley e Gustavo), `feriados`, `fontes`, `metaConversas` |
+| `POST /api/marketing/planner/importar?arquivo=` | só admin: .xlsx binário do planner; relatório (novos, atualizados, saíram do plano, mantidos, vínculos, status migrados, sem responsável); arquivo ilegível/sem colunas → 422 |
+| `POST …/planner/posts/:id/estado`, `PATCH …/posts/:id`, `POST …/posts/:id/nao-vai-sair` | estado `{estado, link}` (publicado exige link http(s); voltar de publicado só admin → 403); métricas/link/fechamento `{alcance, engajamento, conversas, link, motivo, proxima}`; não vai sair `{motivo}` obrigatório |
+| `POST …/posts/:id/replanejar`, `PUT …/planner/vinculos`, `PUT …/planner/meta` | só admin: replanejar `{data, motivo}`; ligar texto de curso `{texto, vinculo: turmas\|institucional\|setor\|livre, setor?, turmas?}` (vale para todos os posts com o texto); meta de conversas `{conversas}` |
+| `POST/PUT/DELETE …/planner/extras[/:id]`, `PUT …/planner/rotina`, `GET …/posts/:id/historico` | feito extra (link obrigatório); check da rotina `{semana (segunda), item dNiM, marcado}`; trilha do post |
 | `PUT /api/marketing/config` | só admin: `{virada: AAAA-MM-DD}` (hoje em diante) — data da troca 30/15/7 → 60/30/15 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
@@ -1705,8 +1712,55 @@ aprovada antes da seguinte:
     primeira semana cobrada é a primeira com dia devido ≥ essa data.
     Desfazer só admin.
   - Trilha comum em `marketing_log` (ADS, WhatsApp, exclusões).
-  - ⏳ **Planner da Kesley** — aguarda o HTML do artifact, colado pelo
-    usuário; a cadência semanal será confirmada depois de ler o código.
+  - ✅ **Planner da Kesley** (migração 41, `planner.js` + `js/planner.js`,
+    aba "Planner de conteúdo" em `/marketing`): migra o artifact "Funil de
+    Conteúdo Unyflex" (HTML salvo em `dados/`, fora do git; o banco do
+    artifact é de outra organização e NÃO é legível pelo Claude).
+    - **Origem do plano**: as planilhas mensais (.xlsx, aba "Planner…" ou a
+      1ª; cabeçalho com data e canal), importadas pelo ADMIN na própria aba.
+      O exceljs falha nelas (comentários de célula: "reading 'comments'"),
+      então a leitura é do XML com jszip, com entidades decodificadas. Chave
+      do post = a MESMA do artifact (`AAAAMMDD-canal-curso`, slug ASCII), o
+      que casou os 12 status de novembro (`dados/planner_status_migrados.json`,
+      tirados da tela salva) — entram como "migrado", SEM carimbo.
+    - **Decisões do usuário (2026-11-12)**: META 5 é de CONVERSAS por semana
+      (não é cadência de posts; o ritmo é o próprio plano). Indicador da
+      Kesley = % publicado no prazo + atraso médio sobre o planejado da
+      semana. O atraso conta da data do post, que reimportar NUNCA muda; só o
+      admin replaneja, com motivo (`planner_replanejamentos`). "Não vai
+      sair" exige motivo e conta como não feito. Link obrigatório (http/https)
+      ao publicar e no feito extra. Atraso de QUEM PUBLICA, lido do "Dono":
+      Kesley 87 posts (inclui os 5 "Gustavo (design) · Kesley publica" —
+      opção (a): atraso do design vai no motivo do fechamento de sexta) e
+      Gustavo 3 (Status do WhatsApp, junto com o e-mail dele). Coluna
+      "status" da planilha = "situação na planilha", só informativa.
+    - **Turmas**: 0, 1 ou várias por post (`planner_post_turmas`) ou tipo
+      explícito institucional | setor (com o setor) | livre. Automático: data
+      de INÍCIO citada no texto ("24–27/11" → 24/11; "19–22/01/27"; mês bem
+      antes do post = ano seguinte) + palavra em comum no nome (≥ 4 letras,
+      sem palavras genéricas); toda data citada precisa casar, senão
+      pendente. Manual (admin, "Turmas dos posts"): por TEXTO, vale para
+      todos os posts com o texto e é reaplicado a cada importação
+      (`planner_vinculos_texto`). A tela lista também os automáticos para
+      conferir. Medido nas planilhas de 12/11 (v3_4 e v5), banco local:
+      35 com turma, 29 com tipo, 26 pendentes (9 textos — turmas de jan/27
+      ainda não sincronizadas, "Semana", "Ex-alunos…", e "Portal, LGPD e
+      Ouvidoria · 01/12", que no banco local começa 16/11).
+    - **Indicador** (`indicador()`): posts do responsável no período, sem
+      retroativos (data < `marketing_planner_desde`) e sem os que saíram do
+      plano. Devidos = data passada, ou hoje já resolvido (o de hoje pendente
+      não reprova antes do fim do dia). Atraso médio = publicados (carimbo) +
+      pendentes vencidos (dias até hoje); "não vai sair" fora da média.
+    - **Reimportar**: atualiza os textos; post que sumiu da planilha só sai
+      do plano (`fora_do_plano_em`) se ainda estava planejado e a data é
+      FUTURA — vencido e pendente continua cobrando.
+    - Tela: calendário mensal (formas por formato, cores por etapa, ponto de
+      estado, vermelho = atrasado, feriados da tabela, anel de conversas ×
+      meta por semana, filtros), janela do post (estado, link, métricas,
+      carimbos, não vai sair, replanejar, histórico), rotina semanal com
+      checks carimbados (texto do cronograma do Bruno), fechamento de sexta
+      (motivo e próxima ação), padrão de captação + checklist, desempenho por
+      formato ("poucos dados" < 5), turmas dos posts e importação (admin).
 - ⏳ **Fase 3** — telas de TV do marketing na rotação.
 
 ### Etapa 4 — Ideias futuras (a priorizar)

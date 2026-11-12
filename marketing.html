@@ -25,7 +25,7 @@
       <button type="button" class="mk-aba" data-aba="emails">✉ E-mail marketing <span class="mk-aba-alerta" id="alerta-emails"></span></button>
       <button type="button" class="mk-aba" data-aba="ads">📢 Campanhas de ADS <span class="mk-aba-alerta" id="alerta-ads"></span></button>
       <button type="button" class="mk-aba" data-aba="whatsapp">💬 Grupos de WhatsApp <span class="mk-aba-alerta" id="alerta-whatsapp"></span></button>
-      <button type="button" class="mk-aba" disabled title="em breve">🗓 Planner de conteúdo</button>
+      <button type="button" class="mk-aba" data-aba="planner">🗓 Planner de conteúdo <span class="mk-aba-alerta" id="alerta-planner"></span></button>
     </nav>
 
     <!-- ================= E-MAIL ================= -->
@@ -69,10 +69,25 @@
       <h3 class="secao-titulo">Semanas</h3>
       <div id="wa-historico"></div>
     </section>
+    <!-- ================= PLANNER (migração 41; js/planner.js) ================= -->
+    <section id="aba-planner" class="mk-secao oculto">
+      <div class="grade-metricas" id="pl-kpis">carregando…</div>
+      <nav class="mk-filtro pl-visoes" id="pl-visoes">
+        <button type="button" class="btn-mini ativo" data-pl-visao="calendario">Calendário</button>
+        <button type="button" class="btn-mini" data-pl-visao="semana">Rotina e fechamento</button>
+        <button type="button" class="btn-mini" data-pl-visao="desempenho">Desempenho por formato</button>
+        <button type="button" class="btn-mini so-admin-mk" data-pl-visao="vinculos">Turmas dos posts <span class="mk-aba-alerta" id="pl-alerta-vinculos"></span></button>
+        <button type="button" class="btn-mini so-admin-mk" data-pl-visao="importar">Importar planilha</button>
+      </nav>
+      <div id="pl-conteudo"></div>
+    </section>
   </main>
+
+  <dialog id="pl-dlg" class="pl-dlg" aria-labelledby="pl-dlg-titulo"></dialog>
 
   <div id="aviso" class="aviso" role="status"></div>
   <script src="/js/nav.js"></script>
   <script src="/js/marketing.js"></script>
+  <script src="/js/planner.js"></script>
 </body>
 </html>

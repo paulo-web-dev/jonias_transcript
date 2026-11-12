@@ -34,6 +34,7 @@ const cruzamento = require("./cruzamento.js");
 const rota = require("./rota.js");
 const fimDeAno = require("./fimdeano.js"); // ROTA FINALIZAÇÃO DE ANO (migração 36)
 const marketing = require("./marketing.js"); // MARKETING (migração 39)
+const planner = require("./planner.js"); // planner de conteúdo (migração 41)
 const feriados = require("./feriados.js");
 const backup = require("./backup.js");
 const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
@@ -1607,6 +1608,31 @@ app.post("/api/marketing/ads/:setor/encerrar", rotaMkt("ads/encerrar", (req) => 
 app.get("/api/marketing/whatsapp", rotaMkt("whatsapp", () => marketing.painelWhatsapp()));
 app.post("/api/marketing/whatsapp", rotaMkt("whatsapp/check", (req) => marketing.marcarWhatsapp(req.usuario.id, req.body?.observacao)));
 app.delete("/api/marketing/whatsapp/:semana", rotaMkt("whatsapp/desfazer", (req) => marketing.desfazerWhatsapp(req.params.semana, req.usuario.id), true));
+
+// Planner de conteúdo (migração 41; planner.js). Importar, replanejar e ligar
+// turma por texto são só do admin; o resto, admin e marketing.
+app.get("/api/marketing/planner", rotaMkt("planner", () => planner.payload()));
+app.post("/api/marketing/planner/importar", corpoXlsx, async (req, res) => {
+  if (req.usuario.papel !== "admin") return res.status(403).json({ error: "Só o administrador importa o plano." });
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: "Corpo vazio — envie o .xlsx do planner." });
+  try {
+    res.json(await planner.importar(req.body, String(req.query.arquivo || "planner.xlsx").slice(0, 200), req.usuario.id));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("marketing/planner/importar", err, res);
+  }
+});
+app.post("/api/marketing/planner/posts/:id/estado", rotaMkt("planner/estado", (req) => ({ post: planner.definirEstado(req.params.id, req.body || {}, req.usuario) })));
+app.patch("/api/marketing/planner/posts/:id", rotaMkt("planner/post", (req) => ({ post: planner.salvarPost(req.params.id, req.body, req.usuario) })));
+app.post("/api/marketing/planner/posts/:id/nao-vai-sair", rotaMkt("planner/nao-vai-sair", (req) => ({ post: planner.naoVaiSair(req.params.id, req.body?.motivo, req.usuario) })));
+app.post("/api/marketing/planner/posts/:id/replanejar", rotaMkt("planner/replanejar", (req) => ({ post: planner.replanejar(req.params.id, req.body || {}, req.usuario.id) }), true));
+app.get("/api/marketing/planner/posts/:id/historico", rotaMkt("planner/historico", (req) => planner.historicoDoPost(req.params.id)));
+app.put("/api/marketing/planner/vinculos", rotaMkt("planner/vinculos", (req) => planner.definirVinculo(req.body || {}, req.usuario.id), true));
+app.post("/api/marketing/planner/extras", rotaMkt("planner/extras", (req) => ({ extra: planner.criarExtra(req.body, req.usuario.id) })));
+app.put("/api/marketing/planner/extras/:id", rotaMkt("planner/extras/editar", (req) => ({ extra: planner.editarExtra(req.params.id, req.body, req.usuario.id) })));
+app.delete("/api/marketing/planner/extras/:id", rotaMkt("planner/extras/excluir", (req) => planner.excluirExtra(req.params.id, req.usuario.id)));
+app.put("/api/marketing/planner/rotina", rotaMkt("planner/rotina", (req) => ({ checks: planner.marcarRotina(req.body || {}, req.usuario.id) })));
+app.put("/api/marketing/planner/meta", rotaMkt("planner/meta", (req) => planner.definirMetaConversas(req.body?.conversas), true));
 
 app.put("/api/marketing/config", (req, res) => {
   if (req.usuario.papel !== "admin") return res.status(403).json({ error: "Só o administrador." });

@@ -1857,6 +1857,116 @@ const MIGRACOES = [
     db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('marketing_whatsapp_desde', ?) ON CONFLICT(chave) DO NOTHING").run(hoje);
     console.log(`migração 40: marketing — exclusão de turma do e-mail, ADS (5 slots), check semanal de WhatsApp cobrado a partir de ${hoje}.`);
   },
+  // 41 — MARKETING, Fase 2: PLANNER DE CONTEÚDO (decisões do usuário,
+  // 2026-11-12; planner.js). Migra o artifact "Funil de Conteúdo Unyflex".
+  // - planner_posts: 1 linha por post da planilha (chave = a mesma do artifact:
+  //   AAAAMMDD-canal-curso). `data` = data de referência do atraso, que só o
+  //   ADMIN muda (replanejar, com motivo, em planner_replanejamentos);
+  //   reimportar NUNCA muda a data. `responsavel` = quem PUBLICA, lido do
+  //   "Dono" (kesley | gustavo). Estados planejado → produzido → publicado,
+  //   com carimbo; publicado exige link; "não vai sair" exige motivo.
+  //   `migrado` = estado vindo do artifact sem carimbo (retroativo).
+  // - vínculo com turmas: 0, 1 ou várias (planner_post_turmas) ou um tipo
+  //   explícito (institucional | setor | livre); `pendente` = o texto não
+  //   casou e espera a ligação manual (planner_vinculos_texto guarda a decisão
+  //   por texto, reaplicada a cada importação).
+  // - planner_extras (feito extra, link obrigatório), planner_rotina (checks
+  //   da rotina semanal, por item, com carimbo).
+  // - configuracoes: marketing_planner_desde (post com data anterior =
+  //   retroativo, fora do indicador) e marketing_meta_conversas (5/semana).
+  () => {
+    const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+    db.exec(`
+      CREATE TABLE planner_posts (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        chave             TEXT    NOT NULL UNIQUE,
+        data_original     TEXT    NOT NULL,
+        data              TEXT    NOT NULL,
+        canal             TEXT    NOT NULL,
+        etapa             TEXT,
+        curso_texto       TEXT,
+        gancho            TEXT,
+        formato           TEXT,
+        peca_mae          TEXT,
+        dono_texto        TEXT,
+        responsavel       TEXT CHECK (responsavel IN ('kesley', 'gustavo')),
+        situacao_planilha TEXT,
+        observacao        TEXT,
+        vinculo           TEXT    NOT NULL DEFAULT 'pendente' CHECK (vinculo IN ('turmas', 'institucional', 'setor', 'livre', 'pendente')),
+        setor             TEXT,
+        estado            TEXT    NOT NULL DEFAULT 'planejado' CHECK (estado IN ('planejado', 'produzido', 'publicado', 'nao_vai_sair')),
+        produzido_em      TEXT,
+        produzido_por     INTEGER REFERENCES usuarios(id),
+        publicado_em      TEXT,
+        publicado_por     INTEGER REFERENCES usuarios(id),
+        link              TEXT,
+        alcance           INTEGER,
+        engajamento       INTEGER,
+        conversas         INTEGER,
+        motivo            TEXT,
+        proxima           TEXT,
+        nao_sai_motivo    TEXT,
+        nao_sai_em        TEXT,
+        nao_sai_por       INTEGER REFERENCES usuarios(id),
+        migrado           INTEGER NOT NULL DEFAULT 0,
+        fora_do_plano_em  TEXT,
+        fonte             TEXT,
+        importacao_id     INTEGER,
+        criado_em         TEXT    NOT NULL,
+        atualizado_em     TEXT    NOT NULL
+      );
+      CREATE INDEX idx_planner_posts_data ON planner_posts(data);
+      CREATE TABLE planner_post_turmas (
+        post_id  INTEGER NOT NULL REFERENCES planner_posts(id),
+        turma_id INTEGER NOT NULL REFERENCES turmas(id),
+        metodo   TEXT    NOT NULL CHECK (metodo IN ('auto', 'manual')),
+        PRIMARY KEY (post_id, turma_id)
+      );
+      CREATE TABLE planner_vinculos_texto (
+        curso_texto TEXT PRIMARY KEY,
+        vinculo     TEXT NOT NULL CHECK (vinculo IN ('turmas', 'institucional', 'setor', 'livre')),
+        setor       TEXT,
+        turmas_json TEXT,
+        usuario_id  INTEGER REFERENCES usuarios(id),
+        em          TEXT NOT NULL
+      );
+      CREATE TABLE planner_replanejamentos (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id    INTEGER NOT NULL REFERENCES planner_posts(id),
+        de         TEXT NOT NULL,
+        para       TEXT NOT NULL,
+        motivo     TEXT NOT NULL,
+        usuario_id INTEGER REFERENCES usuarios(id),
+        em         TEXT NOT NULL
+      );
+      CREATE TABLE planner_extras (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        data        TEXT    NOT NULL,
+        formato     TEXT    NOT NULL,
+        canal       TEXT    NOT NULL,
+        titulo      TEXT    NOT NULL,
+        link        TEXT    NOT NULL,
+        alcance     INTEGER,
+        engajamento INTEGER,
+        conversas   INTEGER,
+        obs         TEXT,
+        criado_em   TEXT    NOT NULL,
+        criado_por  INTEGER REFERENCES usuarios(id),
+        atualizado_em TEXT  NOT NULL
+      );
+      CREATE TABLE planner_rotina (
+        semana     TEXT NOT NULL,
+        item       TEXT NOT NULL,
+        feito_em   TEXT NOT NULL,
+        feito_por  INTEGER REFERENCES usuarios(id),
+        PRIMARY KEY (semana, item)
+      );
+    `);
+    const cfg = db.prepare("INSERT INTO configuracoes (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO NOTHING");
+    cfg.run("marketing_planner_desde", hoje);
+    cfg.run("marketing_meta_conversas", "5");
+    console.log(`migração 41: planner de conteúdo — indicador a partir de ${hoje} (post anterior = retroativo); meta de 5 conversas por semana.`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

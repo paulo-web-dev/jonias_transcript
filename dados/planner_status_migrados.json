@@ -1,0 +1,90 @@
+{
+  "origem": "Funil de Conteúdo Unyflex (artifact) — tela salva em 12/11/2026, mês de novembro",
+  "observacao": "Status sem carimbo: entram como migrado, retroativos, fora do indicador (decisão do usuário, 2026-11-12). Métricas e links estavam vazios.",
+  "status": [
+    {
+      "chave": "20261103-instagram-portal-lgpd-e-ouvidoria-01-12",
+      "estado": "publicado",
+      "canal": "Instagram",
+      "etapa": "Descobrir",
+      "titulo": "O que o curso cobre: Portal, LGPD, e-SIC e Ouvidoria (programática)"
+    },
+    {
+      "chave": "20261103-linkedin-portal-lgpd-e-ouvidoria-01-12",
+      "estado": "publicado",
+      "canal": "LinkedIn",
+      "etapa": "Descobrir",
+      "titulo": "Mesmo carrossel como documento"
+    },
+    {
+      "chave": "20261104-instagram-comunicacao-publica-360-24-11",
+      "estado": "publicado",
+      "canal": "Instagram",
+      "etapa": "Conversar",
+      "titulo": "Turma da vez: quem faz a comunicação de prefeitura ensina"
+    },
+    {
+      "chave": "20261105-instagram-licitaexpo-2427-11",
+      "estado": "publicado",
+      "canal": "Instagram",
+      "etapa": "Confiar",
+      "titulo": "Como foram as 3 edições anteriores (auditório, palestrantes)"
+    },
+    {
+      "chave": "20261106-instagram-licitaexpo-2427-11",
+      "estado": "publicado",
+      "canal": "Instagram",
+      "etapa": "Conversar",
+      "titulo": "24 a 27/11, presencial em Curitiba · 75 vagas · os procuradores que vão palestrar"
+    },
+    {
+      "chave": "20261106-instagram-stories-tesouraria-10-11-planilha-de-custos-10-1",
+      "estado": "publicado",
+      "canal": "Instagram Stories",
+      "etapa": "Fechamento",
+      "titulo": "Começa na terça: presencial em Curitiba ou ● ao vivo"
+    },
+    {
+      "chave": "20261109-instagram-institucional",
+      "estado": "publicado",
+      "canal": "Instagram",
+      "etapa": "Confiar",
+      "titulo": "Quem ensina na Unyflex: professores de referência por setor"
+    },
+    {
+      "chave": "20261110-instagram-seminario-encerramento-do-exercicio-0811",
+      "estado": "produzido",
+      "canal": "Instagram",
+      "etapa": "Descobrir",
+      "titulo": "Restos a pagar: o que precisa fechar antes de 31/12"
+    },
+    {
+      "chave": "20261110-linkedin-seminario-encerramento-do-exercicio-0811",
+      "estado": "produzido",
+      "canal": "LinkedIn",
+      "etapa": "Descobrir",
+      "titulo": "Mesmo tema, texto + vídeo"
+    },
+    {
+      "chave": "20261110-youtube-shorts-seminario-encerramento-do-exercicio-0811",
+      "estado": "produzido",
+      "canal": "YouTube Shorts",
+      "etapa": "Descobrir",
+      "titulo": "Corte de 30s"
+    },
+    {
+      "chave": "20261111-instagram-comunicacao-publica-360-24-11",
+      "estado": "publicado",
+      "canal": "Instagram",
+      "etapa": "Conversar",
+      "titulo": "Turma da vez: o que muda na comunicação de prefeitura em ano pré-eleitoral"
+    },
+    {
+      "chave": "20261112-instagram-a-nova-era-da-tesouraria-10-11",
+      "estado": "produzido",
+      "canal": "Instagram",
+      "etapa": "Confiar",
+      "titulo": "Registro da turma em andamento"
+    }
+  ]
+}
