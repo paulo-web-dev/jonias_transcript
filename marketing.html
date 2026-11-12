@@ -22,13 +22,14 @@
 
   <main class="pagina-lista mk-pagina">
     <nav class="mk-abas" aria-label="Frentes do marketing">
-      <button type="button" class="mk-aba ativa" data-aba="emails">✉ E-mail marketing</button>
-      <button type="button" class="mk-aba" disabled title="Fase 2">📢 Campanhas de ADS</button>
-      <button type="button" class="mk-aba" disabled title="Fase 2">💬 Grupos de WhatsApp</button>
-      <button type="button" class="mk-aba" disabled title="Fase 2">🗓 Planner de conteúdo</button>
+      <button type="button" class="mk-aba" data-aba="emails">✉ E-mail marketing <span class="mk-aba-alerta" id="alerta-emails"></span></button>
+      <button type="button" class="mk-aba" data-aba="ads">📢 Campanhas de ADS <span class="mk-aba-alerta" id="alerta-ads"></span></button>
+      <button type="button" class="mk-aba" data-aba="whatsapp">💬 Grupos de WhatsApp <span class="mk-aba-alerta" id="alerta-whatsapp"></span></button>
+      <button type="button" class="mk-aba" disabled title="em breve">🗓 Planner de conteúdo</button>
     </nav>
 
-    <section id="aba-emails">
+    <!-- ================= E-MAIL ================= -->
+    <section id="aba-emails" class="mk-secao oculto">
       <p class="texto-suave" id="mk-intro">carregando…</p>
       <div class="grade-metricas" id="mk-resumo"></div>
 
@@ -40,6 +41,7 @@
         <span class="texto-suave" id="mk-legenda"></span>
       </div>
       <div id="mk-lista"></div>
+      <div id="mk-excluidas"></div>
 
       <section id="mk-admin" class="oculto">
         <h3 class="secao-titulo">Regra de antecedência (admin)</h3>
@@ -50,6 +52,22 @@
         </div>
         <p class="texto-suave">Cada envio guarda a regra do dia em que nasceu: mudar a data só afeta as turmas que ainda vão entrar.</p>
       </section>
+    </section>
+
+    <!-- ================= ADS ================= -->
+    <section id="aba-ads" class="mk-secao oculto">
+      <div class="mk-ads-topo" id="ads-topo">carregando…</div>
+      <div class="mk-ads-grade" id="ads-slots"></div>
+      <h3 class="secao-titulo">Histórico de campanhas por setor</h3>
+      <div id="ads-historico"></div>
+    </section>
+
+    <!-- ================= WHATSAPP ================= -->
+    <section id="aba-whatsapp" class="mk-secao oculto">
+      <div id="wa-atual" class="mk-wa-atual">carregando…</div>
+      <div class="grade-metricas" id="wa-resumo"></div>
+      <h3 class="secao-titulo">Semanas</h3>
+      <div id="wa-historico"></div>
     </section>
   </main>
 

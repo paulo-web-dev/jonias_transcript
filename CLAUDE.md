@@ -79,7 +79,7 @@ aula-ai/
 ├── feriados.js      # feriados (migração 33): dia útil = seg–sex fora da tabela — Rota, metas e TV
 ├── fimdeano.js      # ROTA FINALIZAÇÃO DE ANO (migração 36): faixas alfabéticas, plano curso×dia, publicar, contador R$ 500 mil
 ├── fim-de-ano.html  # plano (admin, editável) / "ROTA FINALIZAÇÃO DE ANO" (vendedor)  (rota /fim-de-ano)
-├── marketing.js     # MARKETING (migração 39): e-mail marketing gerado das turmas futuras (3 envios por turma), check, atraso
+├── marketing.js     # MARKETING (migrações 39–40): e-mail por turma (check, atraso, exclusão de turma), ADS em 5 slots, check semanal de WhatsApp
 ├── marketing.html   # área do marketing (rota /marketing; papel marketing e admin) — js/marketing.js
 ├── scripts/diagnostico-emails-marketing.js # SÓ LEITURA: turmas futuras e envios de e-mail nas regras 30/15/7 e 60/30/15
 ├── scripts/diagnostico-fim-de-ano.js # SÓ LEITURA: faixas × IBGE, aptos por vendedor/setor, faturamento nov/dez × PDF, dias úteis
@@ -221,7 +221,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **39**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **40**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -753,6 +753,9 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /marketing`, `GET /api/marketing/emails` | área do marketing (admin e papel marketing; vendedor 403): envios de e-mail com situação, prazo, atraso, retroativo/nasceu atrasado, `resumo` (indicador sem os retroativos) e `config` (ativação, virada, regras) |
 | `POST /api/marketing/emails/:id/enviado` | check do envio (carimbo = hora do servidor, trilha em `marketing_eventos`); já enviado ou turma começou/cancelada → 409 |
 | `DELETE /api/marketing/emails/:id/enviado` | só admin: desfaz o check `{observacao}` (fica na trilha); `GET …/:id/eventos` = trilha |
+| `POST/DELETE /api/marketing/turmas/:id/excluir` | só admin: exclui `{motivo}` / reinclui a turma no e-mail marketing (reincluir gera os envios que faltam, com a regra de hoje) |
+| `GET /api/marketing/ads`, `PUT /api/marketing/ads/:setor`, `PATCH /api/marketing/ads/:setor`, `POST …/:setor/encerrar` | ADS (admin e marketing): painel dos 5 slots (`ativos`, `orcamentoDiarioTotalCentavos`, `turmas` futuras para escolher, histórico por setor); PUT `{turmaId, inicio, dataCurso?, orcamentoDiario}` = nova campanha (encerra a ativa hoje, "troca de curso"); PATCH = ajuste da ativa sem trocar o curso; encerrar `{motivo}` deixa o slot vazio. Setor: `licitacao comunicacao reforma_tributaria financas portal` |
+| `GET/POST /api/marketing/whatsapp`, `DELETE /api/marketing/whatsapp/:semana` | check semanal dos grupos: GET = semanas cobradas e resumo; POST `{observacao}` = check da semana CORRENTE (outra semana nunca); DELETE só admin |
 | `PUT /api/marketing/config` | só admin: `{virada: AAAA-MM-DD}` (hoje em diante) — data da troca 30/15/7 → 60/30/15 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 
@@ -1671,10 +1674,39 @@ aprovada antes da seguinte:
   - Medido no banco local (sync de 09/09) em 12/11: 15 turmas futuras, 45
     envios, **22 retroativos** e 23 no prazo. O número de produção sai de
     `scripts/diagnostico-emails-marketing.js` (depois de um sync).
-- ⏳ **Fase 2** — ADS (5 slots fixos por setor, com histórico), check semanal
-  dos grupos de WhatsApp (1º dia útil da semana) e migração do planner de
-  conteúdo da Kesley (o HTML do artifact será colado pelo usuário; cadência
-  semanal a confirmar).
+  - **Medido em PRODUÇÃO** (12/11, depois do sync): 48 turmas futuras, 144
+    envios, **28 retroativos** com 30/15/7 (seriam 41 com 60/30/15). Virada
+    em **01/01/2027 confirmada pelo usuário**.
+- 🚧 **Fase 2** (migração 40):
+  - ✅ **Exclusão de turma do e-mail** (`marketing_turmas_excluidas`, só
+    ADMIN): para produtos de assinatura recorrente, como Monitoramento
+    ProLegis/ProGov (turmas 2364–2367, 12 envios em produção). O admin liga
+    caso a caso em "Por turma (histórico)", com motivo. A turma sai das
+    pendências e do indicador; os envios já gerados ficam no banco como
+    "excluída". Turma excluída antes de gerar não ganha envios. Reincluir
+    gera o que falta, com a regra do dia. A exclusão é só do admin porque
+    tira a turma do indicador do Gustavo.
+  - ✅ **ADS — 5 slots fixos** (`marketing_ads`): Licitação, Comunicação,
+    Reforma Tributária, Finanças, Portal. Cada campanha tem turma (futura,
+    da cópia da Unyflex), início, data do curso (vem da turma e é editável)
+    e orçamento diário. Ativa = `encerrada_em NULL`, uma por setor (índice
+    parcial). "Trocar curso" encerra a anterior HOJE com motivo "troca de
+    curso". "Editar" ajusta a ativa sem trocar o curso (fica na trilha).
+    "Encerrar" deixa o slot vazio. **Alerta vermelho**: slot vazio, curso já
+    realizado (data do curso < hoje) ou turma cancelada na origem. Os dois
+    últimos NÃO contam como ativos no "N de 5". Mostra o orçamento diário
+    total dos slots com campanha. Admin e marketing editam.
+  - ✅ **WhatsApp — check semanal** (`marketing_whatsapp`): um check por
+    semana (segunda ISO), devido no 1º dia útil da semana (feriado na segunda
+    → terça; Finados de 2026 caiu em 03/11). **Só a semana corrente pode ser
+    marcada** (decisão de implementação): semana que passou sem check fica
+    "NÃO FEITO" para sempre. Atraso = dias corridos do devido ao check.
+    Cobrança a partir de `marketing_whatsapp_desde` (dia da migração): a
+    primeira semana cobrada é a primeira com dia devido ≥ essa data.
+    Desfazer só admin.
+  - Trilha comum em `marketing_log` (ADS, WhatsApp, exclusões).
+  - ⏳ **Planner da Kesley** — aguarda o HTML do artifact, colado pelo
+    usuário; a cadência semanal será confirmada depois de ler o código.
 - ⏳ **Fase 3** — telas de TV do marketing na rotação.
 
 ### Etapa 4 — Ideias futuras (a priorizar)

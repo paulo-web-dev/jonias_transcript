@@ -1584,6 +1584,30 @@ app.get("/api/marketing/emails/:id/eventos", (req, res) => {
   }
 });
 
+// Fase 2 (migração 40). `rotaMkt` trata os erros com status de marketing.js;
+// `soAdmin` = ação que só o administrador faz (exclusão de turma, desfazer check).
+const rotaMkt = (nome, fn, soAdmin = false) => (req, res) => {
+  if (soAdmin && req.usuario.papel !== "admin") return res.status(403).json({ error: "Só o administrador." });
+  try {
+    res.json(fn(req));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro(`marketing/${nome}`, err, res);
+  }
+};
+// Turma que não gera e-mail (assinatura recorrente): só admin, caso a caso
+app.post("/api/marketing/turmas/:id/excluir", rotaMkt("turmas/excluir", (req) => marketing.excluirTurma(req.params.id, req.body?.motivo, req.usuario.id), true));
+app.delete("/api/marketing/turmas/:id/excluir", rotaMkt("turmas/reincluir", (req) => marketing.reincluirTurma(req.params.id, req.usuario.id), true));
+// ADS: 5 slots fixos
+app.get("/api/marketing/ads", rotaMkt("ads", () => marketing.painelAds()));
+app.put("/api/marketing/ads/:setor", rotaMkt("ads/definir", (req) => marketing.definirCampanhaAds(req.params.setor, req.body, req.usuario.id)));
+app.patch("/api/marketing/ads/:setor", rotaMkt("ads/editar", (req) => marketing.editarCampanhaAds(req.params.setor, req.body, req.usuario.id)));
+app.post("/api/marketing/ads/:setor/encerrar", rotaMkt("ads/encerrar", (req) => marketing.encerrarCampanhaAds(req.params.setor, req.body?.motivo, req.usuario.id)));
+// Grupos de WhatsApp: check semanal
+app.get("/api/marketing/whatsapp", rotaMkt("whatsapp", () => marketing.painelWhatsapp()));
+app.post("/api/marketing/whatsapp", rotaMkt("whatsapp/check", (req) => marketing.marcarWhatsapp(req.usuario.id, req.body?.observacao)));
+app.delete("/api/marketing/whatsapp/:semana", rotaMkt("whatsapp/desfazer", (req) => marketing.desfazerWhatsapp(req.params.semana, req.usuario.id), true));
+
 app.put("/api/marketing/config", (req, res) => {
   if (req.usuario.papel !== "admin") return res.status(403).json({ error: "Só o administrador." });
   try {

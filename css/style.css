@@ -1836,3 +1836,39 @@ col.c-rota-tipo { width: 120px; }
 .mk-tabela td:nth-child(2), .mk-tabela th:nth-child(2) { text-align: left; }
 .mk-tabela td:last-child { text-align: left; }
 .mk-historico th:not(:first-child), .mk-historico td:not(:first-child) { text-align: center !important; }
+/* Marketing — Fase 2 (migração 40): abas, ADS, WhatsApp, exclusão de turma */
+.mk-aba-alerta:not(:empty) {
+  display: inline-block; min-width: 1.3rem; padding: 0 0.35rem; margin-left: 0.3rem; border-radius: 999px;
+  background: var(--vermelho); color: #0b0e17; font-size: 0.75rem; font-weight: 800; text-align: center;
+}
+.mk-pagina .btn-mini.mk-link { background: none; border: none; padding: 0.2rem 0; color: var(--texto-suave); text-decoration: underline; }
+.mk-pagina .btn-mini.mk-link:hover { color: var(--vermelho); }
+.mk-excluir-form { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+.mk-excluir-form input { min-width: 220px; }
+.mk-ads-topo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem 2rem; margin-bottom: 1rem; }
+.mk-ads-placar { font-size: 1.4rem; }
+.mk-ads-placar strong { font-size: 2.4rem; }
+.mk-ok-texto { color: var(--verde); }
+.mk-vermelho-texto { color: var(--vermelho); }
+.mk-ads-total strong { font-size: 1.3rem; }
+.mk-ads-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.8rem; margin-bottom: 1.5rem; }
+.mk-ads-slot {
+  background: var(--fundo-painel); border: 1px solid var(--borda-painel); border-radius: var(--raio);
+  padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.6rem;
+}
+.mk-ads-slot header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.mk-ads-slot h3 { font-size: 1.05rem; }
+.mk-ads-alerta { border-color: rgba(255, 92, 114, 0.6); box-shadow: inset 0 0 0 1px rgba(255, 92, 114, 0.25); }
+.mk-ads-vazio { color: var(--vermelho); font-weight: 700; }
+.mk-ads-dados { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; font-size: 0.85rem; }
+.mk-ads-dados dt { color: var(--texto-suave); }
+.mk-ads-form { display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem; }
+.mk-ads-form label { display: flex; flex-direction: column; gap: 0.2rem; color: var(--texto-suave); }
+.mk-ads-form select { max-width: 100%; }
+.mk-wa-atual {
+  background: var(--fundo-painel); border: 1px solid var(--borda-painel); border-radius: var(--raio);
+  padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start;
+}
+.mk-wa-atual h2 { font-size: 1.15rem; }
+.mk-wa-feito { border-color: rgba(61, 220, 132, 0.5); }
+.mk-wa-obs { min-width: 260px; }

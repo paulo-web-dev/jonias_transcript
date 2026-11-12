@@ -28,6 +28,10 @@
 // - Turma que já começou (data ≤ hoje) ou saiu da origem: sai das pendências;
 //   envio sem check vira "não enviado" no histórico (conta no indicador, se
 //   não for retroativo).
+// - TURMA EXCLUÍDA (migração 40): o admin marca, caso a caso, turma que não
+//   gera e-mail (assinatura recorrente). Não ganha envios novos; os já gerados
+//   ficam no banco como "excluída", fora das pendências e do indicador, e
+//   voltam se ela for reincluída.
 
 const db = require("./db.js");
 const feriados = require("./feriados.js");
@@ -74,7 +78,8 @@ function gerarEnvios() {
   const turmas = db.prepare(
     `SELECT t.id, date(t.start_date) inicio FROM turmas t
       WHERE t.unyflex = 0 AND t.fora_da_origem_em IS NULL AND date(t.start_date) > ?
-        AND NOT EXISTS (SELECT 1 FROM marketing_envios e WHERE e.turma_id = t.id)`
+        AND NOT EXISTS (SELECT 1 FROM marketing_envios e WHERE e.turma_id = t.id)
+        AND NOT EXISTS (SELECT 1 FROM marketing_turmas_excluidas x WHERE x.turma_id = t.id)`
   ).all(hoje);
   const ins = db.prepare("INSERT OR IGNORE INTO marketing_envios (turma_id, ordem, antecedencia_dias, nasceu_em) VALUES (?, ?, ?, ?)");
   let envios = 0, nascidosAtrasados = 0, retroativos = 0;
@@ -104,7 +109,9 @@ function classificar(e, hoje, ativadoEm) {
   const referencia = nasceuAtrasado ? nasceu : prazo; // a partir de quando o atraso conta
   const encerrada = e.fora_da_origem_em ? "cancelada" : e.inicio <= hoje ? "aconteceu" : null;
   let situacao, atrasoDias = null, venceEmDias = null;
-  if (e.enviado_em) {
+  if (e.excluida_em) {
+    situacao = "excluida";
+  } else if (e.enviado_em) {
     situacao = "enviado";
     atrasoDias = Math.max(0, diasEntre(referencia, diaBrasilia(e.enviado_em)));
   } else if (encerrada) {
@@ -121,15 +128,19 @@ function classificar(e, hoje, ativadoEm) {
     ordem: e.ordem, envio: NOMES[e.ordem], antecedencia: e.antecedencia_dias, prazo, nasceuEm: e.nasceu_em,
     enviadoEm: e.enviado_em, enviadoPor: e.enviado_por_nome || null, situacao, atrasoDias, venceEmDias,
     retroativo, nasceuAtrasado, encerrada, prazoRetroDias: retroativo ? diasEntre(prazo, ativadoEm) : null,
+    excluida: e.excluida_em ? { em: e.excluida_em, motivo: e.excluida_motivo } : null,
   };
 }
 
 const SQL_ENVIOS = `
-  SELECT e.*, date(t.start_date) inicio, t.nome, t.subtitulo, t.fora_da_origem_em, u.nome enviado_por_nome
-    FROM marketing_envios e JOIN turmas t ON t.id = e.turma_id LEFT JOIN usuarios u ON u.id = e.enviado_por`;
+  SELECT e.*, date(t.start_date) inicio, t.nome, t.subtitulo, t.fora_da_origem_em, u.nome enviado_por_nome,
+         x.em excluida_em, x.motivo excluida_motivo
+    FROM marketing_envios e JOIN turmas t ON t.id = e.turma_id LEFT JOIN usuarios u ON u.id = e.enviado_por
+    LEFT JOIN marketing_turmas_excluidas x ON x.turma_id = e.turma_id`;
 
 // Indicador oficial (sem os retroativos) + o bloco dos retroativos à parte
 function resumir(lista) {
+  lista = lista.filter((x) => x.situacao !== "excluida");
   const oficiais = lista.filter((x) => !x.retroativo);
   const enviados = oficiais.filter((x) => x.situacao === "enviado");
   const atrasados = oficiais.filter((x) => x.situacao === "atrasado");
@@ -160,7 +171,12 @@ function listarEmails() {
   const hoje = hojeBrasilia();
   const cfg = config();
   const lista = db.prepare(`${SQL_ENVIOS} ORDER BY date(t.start_date), t.id, e.ordem`).all().map((e) => classificar(e, hoje, cfg.ativadoEm));
-  return { hoje, config: cfg, resumo: resumir(lista), envios: lista };
+  const excluidas = db.prepare(
+    `SELECT x.turma_id turmaId, t.nome turma, t.subtitulo, date(t.start_date) inicio, x.motivo, x.em, u.nome usuario
+       FROM marketing_turmas_excluidas x JOIN turmas t ON t.id = x.turma_id LEFT JOIN usuarios u ON u.id = x.usuario_id
+      ORDER BY date(t.start_date) DESC`
+  ).all();
+  return { hoje, config: cfg, resumo: resumir(lista), envios: lista, excluidas };
 }
 
 function buscar(id) {
@@ -172,6 +188,7 @@ function buscar(id) {
 function marcarEnviado(id, usuarioId) {
   const x = buscar(id);
   if (x.situacao === "enviado") throw erro("Esse envio já está marcado como enviado.", 409);
+  if (x.situacao === "excluida") throw erro("A turma foi excluída do e-mail marketing.", 409);
   if (x.situacao === "nao_enviado") {
     throw erro(x.encerrada === "cancelada" ? "A turma saiu da origem (cancelada) — o envio fica no histórico." : "A turma já começou — o envio fica no histórico como não enviado.", 409);
   }
@@ -214,4 +231,222 @@ function definirVirada(data) {
   return config();
 }
 
-module.exports = { gerarEnvios, listarEmails, marcarEnviado, desfazerEnviado, eventosDoEnvio, definirVirada, config, prazoDe, NOMES };
+// ---------- Trilha comum (migração 40) ----------
+function registrar(area, ref, acao, detalhe, usuarioId) {
+  db.prepare("INSERT INTO marketing_log (area, ref, acao, detalhe, usuario_id, em) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(area, ref == null ? null : String(ref), acao, detalhe == null ? null : JSON.stringify(detalhe), usuarioId ?? null, new Date().toISOString());
+}
+
+// ---------- Exclusão de turma do e-mail (só admin; a rota confere) ----------
+function excluirTurma(turmaId, motivo, usuarioId) {
+  const t = db.prepare("SELECT id, nome FROM turmas WHERE id = ?").get(Number(turmaId));
+  if (!t) throw erro("Turma não encontrada.", 404);
+  if (db.prepare("SELECT 1 FROM marketing_turmas_excluidas WHERE turma_id = ?").get(t.id)) throw erro("A turma já está excluída.", 409);
+  motivo = String(motivo || "").trim().slice(0, 200) || null;
+  db.transaction(() => {
+    db.prepare("INSERT INTO marketing_turmas_excluidas (turma_id, motivo, usuario_id, em) VALUES (?, ?, ?, ?)").run(t.id, motivo, usuarioId, new Date().toISOString());
+    registrar("email", t.id, "turma_excluida", { motivo }, usuarioId);
+  })();
+  return { turmaId: t.id, turma: t.nome };
+}
+
+function reincluirTurma(turmaId, usuarioId) {
+  const n = db.prepare("DELETE FROM marketing_turmas_excluidas WHERE turma_id = ?").run(Number(turmaId)).changes;
+  if (!n) throw erro("A turma não está excluída.", 404);
+  registrar("email", Number(turmaId), "turma_reincluida", null, usuarioId);
+  return gerarEnvios(); // turma futura sem envios ganha os 3 agora (regra de hoje)
+}
+
+// ---------- Campanhas de ADS: 5 slots fixos (migração 40) ----------
+// Slot vazio ou com o curso já realizado = alerta vermelho; "ativos" conta só
+// os slots com campanha cujo curso ainda não aconteceu. Trocar o curso encerra
+// a campanha anterior HOJE e abre a nova — o histórico por setor fica.
+const SETORES_ADS = [
+  { setor: "licitacao", nome: "Licitação" },
+  { setor: "comunicacao", nome: "Comunicação" },
+  { setor: "reforma_tributaria", nome: "Reforma Tributária" },
+  { setor: "financas", nome: "Finanças" },
+  { setor: "portal", nome: "Portal" },
+];
+const nomeSetor = (s) => SETORES_ADS.find((x) => x.setor === s)?.nome;
+
+const SQL_ADS = `
+  SELECT a.*, t.nome turma, t.subtitulo, date(t.start_date) turma_inicio, t.fora_da_origem_em, uc.nome criada_por_nome, ue.nome encerrada_por_nome
+    FROM marketing_ads a JOIN turmas t ON t.id = a.turma_id
+    LEFT JOIN usuarios uc ON uc.id = a.criada_por LEFT JOIN usuarios ue ON ue.id = a.encerrada_por`;
+
+function campanhaDe(a, hoje) {
+  const fim = a.encerrada_em ? diaBrasilia(a.encerrada_em) : null;
+  return {
+    id: a.id, setor: a.setor, turmaId: a.turma_id, turma: (a.turma || "").trim(), subtitulo: (a.subtitulo || "").trim(),
+    inicio: a.inicio, dataCurso: a.data_curso, orcamentoDiarioCentavos: a.orcamento_diario_centavos,
+    criadaEm: a.criada_em, criadaPor: a.criada_por_nome, encerradaEm: a.encerrada_em, encerradaPor: a.encerrada_por_nome, motivoFim: a.motivo_fim,
+    dias: diasEntre(a.inicio, fim || hoje) + 1,
+    cursoPassou: a.data_curso < hoje, turmaCancelada: !!a.fora_da_origem_em,
+  };
+}
+
+function painelAds() {
+  const hoje = hojeBrasilia();
+  const todas = db.prepare(`${SQL_ADS} ORDER BY a.id DESC`).all().map((a) => campanhaDe(a, hoje));
+  const setores = SETORES_ADS.map((s) => {
+    const ativa = todas.find((c) => c.setor === s.setor && !c.encerradaEm) || null;
+    const situacao = !ativa ? "vazio" : ativa.cursoPassou ? "curso_passou" : ativa.turmaCancelada ? "turma_cancelada" : "ok";
+    return { ...s, situacao, ativa, historico: todas.filter((c) => c.setor === s.setor && c.encerradaEm) };
+  });
+  const turmas = db.prepare(
+    `SELECT id, nome, subtitulo, date(start_date) inicio FROM turmas
+      WHERE fora_da_origem_em IS NULL AND date(start_date) >= ? ORDER BY date(start_date), nome`
+  ).all(hoje).map((t) => ({ id: t.id, nome: (t.nome || "").trim(), subtitulo: (t.subtitulo || "").trim(), inicio: t.inicio }));
+  return {
+    hoje, setores, turmas,
+    ativos: setores.filter((s) => s.situacao === "ok").length,
+    totalSlots: SETORES_ADS.length,
+    orcamentoDiarioTotalCentavos: setores.reduce((soma, s) => soma + (s.ativa ? s.ativa.orcamentoDiarioCentavos : 0), 0),
+  };
+}
+
+function lerCampanha(corpo, ativaAtual) {
+  const turmaId = corpo.turmaId === undefined && ativaAtual ? ativaAtual.turma_id : Number(corpo.turmaId);
+  const turma = db.prepare("SELECT id, date(start_date) inicio FROM turmas WHERE id = ?").get(turmaId);
+  if (!turma) throw erro("Escolha a turma da campanha.");
+  const inicio = corpo.inicio === undefined && ativaAtual ? ativaAtual.inicio : String(corpo.inicio || "");
+  if (!RE_DATA.test(inicio)) throw erro("Data de início da campanha inválida.");
+  const dataCurso = corpo.dataCurso === undefined || corpo.dataCurso === "" ? (ativaAtual && corpo.turmaId === undefined ? ativaAtual.data_curso : turma.inicio) : String(corpo.dataCurso);
+  if (!RE_DATA.test(dataCurso || "")) throw erro("Data do curso inválida.");
+  let centavos = ativaAtual?.orcamento_diario_centavos;
+  if (corpo.orcamentoDiario !== undefined || !ativaAtual) {
+    const v = Number(String(corpo.orcamentoDiario ?? "").replace(/\./g, "").replace(",", "."));
+    if (!Number.isFinite(v) || v < 0 || String(corpo.orcamentoDiario ?? "").trim() === "") throw erro("Orçamento diário inválido (em reais).");
+    centavos = Math.round(v * 100);
+  }
+  return { turmaId: turma.id, inicio, dataCurso, centavos };
+}
+
+// Nova campanha no slot: encerra a ativa (se houver) hoje e abre a nova
+function definirCampanhaAds(setor, corpo, usuarioId) {
+  if (!nomeSetor(setor)) throw erro("Setor inválido.");
+  const c = lerCampanha(corpo || {}, null);
+  const agora = new Date().toISOString();
+  return db.transaction(() => {
+    const ativa = db.prepare("SELECT id, turma_id FROM marketing_ads WHERE setor = ? AND encerrada_em IS NULL").get(setor);
+    if (ativa) {
+      db.prepare("UPDATE marketing_ads SET encerrada_em = ?, encerrada_por = ?, motivo_fim = ? WHERE id = ?").run(agora, usuarioId, "troca de curso", ativa.id);
+      registrar("ads", ativa.id, "encerrada", { setor, motivo: "troca de curso" }, usuarioId);
+    }
+    const id = db.prepare(
+      `INSERT INTO marketing_ads (setor, turma_id, inicio, data_curso, orcamento_diario_centavos, criada_em, criada_por) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(setor, c.turmaId, c.inicio, c.dataCurso, c.centavos, agora, usuarioId).lastInsertRowid;
+    registrar("ads", id, "criada", { setor, ...c }, usuarioId);
+    return painelAds();
+  })();
+}
+
+// Ajuste da campanha ATIVA (início, data do curso, orçamento) — sem trocar o curso
+function editarCampanhaAds(setor, corpo, usuarioId) {
+  const ativa = db.prepare("SELECT * FROM marketing_ads WHERE setor = ? AND encerrada_em IS NULL").get(setor);
+  if (!ativa) throw erro("Não há campanha ativa nesse setor.", 404);
+  const { turmaId, ...resto } = corpo || {};
+  const c = lerCampanha(resto, ativa);
+  const de = { inicio: ativa.inicio, dataCurso: ativa.data_curso, centavos: ativa.orcamento_diario_centavos };
+  db.transaction(() => {
+    db.prepare("UPDATE marketing_ads SET inicio = ?, data_curso = ?, orcamento_diario_centavos = ? WHERE id = ?").run(c.inicio, c.dataCurso, c.centavos, ativa.id);
+    registrar("ads", ativa.id, "editada", { de, para: { inicio: c.inicio, dataCurso: c.dataCurso, centavos: c.centavos } }, usuarioId);
+  })();
+  return painelAds();
+}
+
+// Encerrar sem substituto: o slot fica VAZIO (alerta vermelho)
+function encerrarCampanhaAds(setor, motivo, usuarioId) {
+  const ativa = db.prepare("SELECT id FROM marketing_ads WHERE setor = ? AND encerrada_em IS NULL").get(setor);
+  if (!ativa) throw erro("Não há campanha ativa nesse setor.", 404);
+  motivo = String(motivo || "").trim().slice(0, 200) || "encerrada sem substituta";
+  db.transaction(() => {
+    db.prepare("UPDATE marketing_ads SET encerrada_em = ?, encerrada_por = ?, motivo_fim = ? WHERE id = ?").run(new Date().toISOString(), usuarioId, motivo, ativa.id);
+    registrar("ads", ativa.id, "encerrada", { setor, motivo }, usuarioId);
+  })();
+  return painelAds();
+}
+
+// ---------- Grupos de WhatsApp: check semanal (migração 40) ----------
+// Um check por semana, devido no 1º dia útil (segunda; feriado → o seguinte).
+// Só a semana CORRENTE pode ser marcada: semana que passou sem check fica
+// vermelha no histórico para sempre. Atraso = dias corridos do devido ao check.
+// Semana sem dia útil não é cobrada; semana com devido antes de
+// marketing_whatsapp_desde também não (o controle começa limpo).
+const segundaDe = (d) => { const w = new Date(`${d}T12:00:00Z`).getUTCDay(); return somarDias(d, -((w + 6) % 7)); };
+function devidoDaSemana(segunda) {
+  for (let i = 0; i < 5; i++) { const d = somarDias(segunda, i); if (feriados.diaUtil(d)) return d; }
+  return null;
+}
+
+function painelWhatsapp() {
+  const hoje = hojeBrasilia();
+  const desde = lerConfig("marketing_whatsapp_desde") || hoje;
+  const checks = new Map(db.prepare(
+    "SELECT w.*, u.nome feito_por_nome FROM marketing_whatsapp w LEFT JOIN usuarios u ON u.id = w.feito_por"
+  ).all().map((c) => [c.semana, c]));
+  const semanas = [];
+  for (let s = segundaDe(desde); s <= segundaDe(hoje); s = somarDias(s, 7)) {
+    const devido = devidoDaSemana(s);
+    if (!devido || devido < desde) continue;
+    const c = checks.get(s);
+    const atual = s === segundaDe(hoje);
+    let situacao, atrasoDias = null;
+    if (c) { situacao = "feito"; atrasoDias = Math.max(0, diasEntre(devido, diaBrasilia(c.feito_em))); }
+    else if (!atual) situacao = "nao_feito";
+    else if (hoje < devido) situacao = "aguardando";
+    else if (hoje === devido) situacao = "hoje";
+    else { situacao = "atrasado"; atrasoDias = diasEntre(devido, hoje); }
+    semanas.push({ semana: s, devido, atual, situacao, atrasoDias, feitoEm: c?.feito_em || null, feitoPor: c?.feito_por_nome || null, observacao: c?.observacao || null });
+  }
+  semanas.reverse();
+  const fechadas = semanas.filter((x) => x.situacao === "feito" || x.situacao === "nao_feito");
+  const feitas = fechadas.filter((x) => x.situacao === "feito");
+  // semana atual sem dia devido ainda (controle começou depois do devido desta semana)
+  const atualSemCobranca = !semanas.some((x) => x.atual);
+  return {
+    hoje, desde, semanas, atual: semanas.find((x) => x.atual) || null, atualSemCobranca,
+    proximaSemana: atualSemCobranca ? { semana: somarDias(segundaDe(hoje), 7), devido: devidoDaSemana(somarDias(segundaDe(hoje), 7)) } : null,
+    resumo: {
+      semanas: fechadas.length, // semanas já decididas (feitas + não feitas), a atual inclusa só se já tem check
+      feitas: feitas.length,
+      noDia: feitas.filter((x) => x.atrasoDias === 0).length,
+      comAtraso: feitas.filter((x) => x.atrasoDias > 0).length,
+      naoFeitas: fechadas.filter((x) => x.situacao === "nao_feito").length,
+      atrasoMedio: feitas.length ? Math.round((feitas.reduce((s, x) => s + x.atrasoDias, 0) / feitas.length) * 10) / 10 : null,
+    },
+  };
+}
+
+function marcarWhatsapp(usuarioId, observacao) {
+  const p = painelWhatsapp();
+  if (!p.atual) throw erro("Esta semana não é cobrada (o controle começa na próxima semana, ou não há dia útil).", 409);
+  if (p.atual.situacao === "feito") throw erro("O check desta semana já foi dado.", 409);
+  const agora = new Date().toISOString();
+  observacao = String(observacao || "").trim().slice(0, 300) || null;
+  db.transaction(() => {
+    db.prepare("INSERT INTO marketing_whatsapp (semana, devido_em, feito_em, feito_por, observacao) VALUES (?, ?, ?, ?, ?)")
+      .run(p.atual.semana, p.atual.devido, agora, usuarioId, observacao);
+    registrar("whatsapp", p.atual.semana, "feito", { observacao }, usuarioId);
+  })();
+  return painelWhatsapp();
+}
+
+// Só admin (a rota confere): desfaz o check de uma semana (fica na trilha)
+function desfazerWhatsapp(semana, usuarioId) {
+  const c = db.prepare("SELECT * FROM marketing_whatsapp WHERE semana = ?").get(String(semana));
+  if (!c) throw erro("Não há check nessa semana.", 404);
+  db.transaction(() => {
+    db.prepare("DELETE FROM marketing_whatsapp WHERE semana = ?").run(c.semana);
+    registrar("whatsapp", c.semana, "desfeito", { feitoEm: c.feito_em, feitoPor: c.feito_por }, usuarioId);
+  })();
+  return painelWhatsapp();
+}
+
+module.exports = {
+  gerarEnvios, listarEmails, marcarEnviado, desfazerEnviado, eventosDoEnvio, definirVirada, config, prazoDe, NOMES,
+  excluirTurma, reincluirTurma,
+  SETORES_ADS, painelAds, definirCampanhaAds, editarCampanhaAds, encerrarCampanhaAds,
+  painelWhatsapp, marcarWhatsapp, desfazerWhatsapp, segundaDe, devidoDaSemana,
+};

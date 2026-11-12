@@ -1802,6 +1802,61 @@ const MIGRACOES = [
     cfg.run("marketing_email_virada", "2027-01-01");
     console.log(`migração 39: marketing — e-mails ativados em ${hoje} (prazo anterior = retroativo); regra 30/15/7 até 31/12/2026, 60/30/15 desde 01/01/2027.`);
   },
+  // 40 — MARKETING, Fase 2 (decisões do usuário, 2026-11-12; marketing.js):
+  // - marketing_turmas_excluidas: turma que NÃO gera e-mail (assinatura
+  //   recorrente como Monitoramento ProLegis/ProGov), ligada caso a caso pelo
+  //   ADMIN na tela. Sai das pendências e do indicador; os envios já gerados
+  //   ficam no banco (histórico) e voltam se a turma for reincluída.
+  // - marketing_ads: campanhas de ADS em 5 slots FIXOS por setor; ativa =
+  //   encerrada_em NULL (no máximo uma por setor, índice parcial). Trocar o
+  //   curso encerra a anterior com data de fim — o histórico por setor fica.
+  // - marketing_whatsapp: check SEMANAL dos grupos (1 por semana, devido no 1º
+  //   dia útil da semana). Semana = segunda ISO. Cobrança começa na primeira
+  //   semana cujo dia devido é ≥ marketing_whatsapp_desde (hoje).
+  // - marketing_log: trilha das ações de ADS, WhatsApp e exclusões.
+  () => {
+    const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+    db.exec(`
+      CREATE TABLE marketing_turmas_excluidas (
+        turma_id   INTEGER PRIMARY KEY REFERENCES turmas(id),
+        motivo     TEXT,
+        usuario_id INTEGER REFERENCES usuarios(id),
+        em         TEXT NOT NULL
+      );
+      CREATE TABLE marketing_ads (
+        id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+        setor                     TEXT    NOT NULL CHECK (setor IN ('licitacao', 'comunicacao', 'reforma_tributaria', 'financas', 'portal')),
+        turma_id                  INTEGER NOT NULL REFERENCES turmas(id),
+        inicio                    TEXT    NOT NULL,
+        data_curso                TEXT    NOT NULL,
+        orcamento_diario_centavos INTEGER NOT NULL CHECK (orcamento_diario_centavos >= 0),
+        criada_em                 TEXT    NOT NULL,
+        criada_por                INTEGER REFERENCES usuarios(id),
+        encerrada_em              TEXT,
+        encerrada_por             INTEGER REFERENCES usuarios(id),
+        motivo_fim                TEXT
+      );
+      CREATE UNIQUE INDEX idx_marketing_ads_ativa ON marketing_ads(setor) WHERE encerrada_em IS NULL;
+      CREATE TABLE marketing_whatsapp (
+        semana     TEXT PRIMARY KEY,
+        devido_em  TEXT NOT NULL,
+        feito_em   TEXT NOT NULL,
+        feito_por  INTEGER REFERENCES usuarios(id),
+        observacao TEXT
+      );
+      CREATE TABLE marketing_log (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        area       TEXT NOT NULL,
+        ref        TEXT,
+        acao       TEXT NOT NULL,
+        detalhe    TEXT,
+        usuario_id INTEGER REFERENCES usuarios(id),
+        em         TEXT NOT NULL
+      );
+    `);
+    db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('marketing_whatsapp_desde', ?) ON CONFLICT(chave) DO NOTHING").run(hoje);
+    console.log(`migração 40: marketing — exclusão de turma do e-mail, ADS (5 slots), check semanal de WhatsApp cobrado a partir de ${hoje}.`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:
