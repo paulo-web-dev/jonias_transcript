@@ -1831,7 +1831,11 @@ A Emanuelle (financeiro) passa a controlar os bens da Unyflex no jonIAs
 construídas**. Decisões do usuário (2026-11-18):
 - **Renumeração total**: 218 itens, códigos 0001–0218 (4 dígitos, CHECK no
   banco) pelo caminho de colagem (4º, 5º, 6º, 7º, itens de mesa). Itens
-  pessoais dos funcionários ficam FORA. Nada estava etiquetado.
+  pessoais dos funcionários ficam FORA. Nada estava etiquetado — **nem os
+  celulares** (confirmado pelo usuário em 18/11/2026): os números antigos
+  0002–0018 da planilha "controle Patrimonial" não existem nos aparelhos,
+  então não colidem com a série nova, e a renumeração 0001–0218 vale para
+  eles também.
 - **Pessoas**: tipo novo `administrativo` em `pessoas` (Emanuelle, Emily,
   Juliana, Marly, Caetano, Pablo; `entra_painel/tv/feedback = 0`, sem ramal
   nem wallet). É a primeira vez que gente fora das vendas entra em `pessoas`:
@@ -1922,11 +1926,12 @@ construídas**. Decisões do usuário (2026-11-18):
   inventário real sai da conferência física da Emanuelle; a planilha antiga
   "controle Patrimonial" (ex-funcionários, aba Celulares com senhas) é só
   lista de conferência, nunca fonte de carga.
-- ⚠ **Celulares (11 linhas na planilha: 0118, 0127, 0137, 0146, 0157,
-  0167, 0175, 0185, 0193, 0201, 0212)**: não importar até o usuário confirmar
-  se os aparelhos têm etiqueta física — os números antigos 0002–0018 colidem
-  com a série nova. Modelo e número da linha vão em campo próprio/observação;
-  senha nunca.
+- **Celulares (11 linhas na planilha: 0118, 0127, 0137, 0146, 0157,
+  0167, 0175, 0185, 0193, 0201, 0212)**: entram na importação como as
+  demais (decisão do usuário, 18/11/2026: não têm etiqueta física; já estão
+  nos 211 do teste 4). Modelo e número da linha vão em campo
+  próprio/observação; **senha nunca** — a aba Celulares da planilha antiga
+  continua fora.
 - Deploy: a produção está na 42, então sobem 43, 44 e 45 juntas. Backup e
   `conferir` antes (DEPLOY.md); o log tem de mostrar as três linhas de
   migração e a 43 com "antes N, depois N" de `importacoes` iguais.
