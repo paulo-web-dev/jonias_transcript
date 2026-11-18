@@ -86,10 +86,12 @@ aula-ai/
 ├── scripts/diagnostico-emails-marketing.js # SÓ LEITURA: turmas futuras e envios de e-mail nas regras 30/15/7 e 60/30/15
 ├── scripts/diagnostico-fim-de-ano.js # SÓ LEITURA: faixas × IBGE, aptos por vendedor/setor, faturamento nov/dez × PDF, dias úteis
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
-├── escopo.js        # papéis (admin | vendedor | marketing) e escopo por regional (campanha própria da Rota: prospecção livre) — corte no servidor
+├── patrimonio.js    # PATRIMÔNIO (migrações 43–45): importação, entrega/devolução/transferência com termo assinado, cancelamento, via impressa, meus itens
+├── patrimonio.html  # Itens / Termos / Locais (rota /patrimonio; papel patrimonio e admin; funciona no celular) — js/patrimonio.js
+├── escopo.js        # papéis (admin | vendedor | marketing | patrimonio | colaborador) e escopo por regional (campanha própria da Rota: prospecção livre) — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
 ├── trocar-senha.html # troca de senha (obrigatória no 1º acesso)
-├── meu-painel.html  # painel do vendedor: métricas próprias × metas
+├── meu-painel.html  # painel do vendedor: métricas próprias × metas + "Meus itens de patrimônio" (qualquer papel com pessoa; patrimonio/colaborador veem só os itens)
 ├── js/nav.js        # menu por papel via /api/sessao (conveniência; a proteção é nas rotas)
 ├── dados/           # referência versionada (CSV de regionais, JSONs do IBGE, mapa SVG)
 ├── scripts/gerar-referencias-territorio.js  # regenera dados/ a partir do IBGE (precisa de internet)
@@ -142,6 +144,16 @@ que não existe (`DB_CRIAR_NOVO=1` libera criar um banco novo de propósito), e
 se `NODE_ENV=production` estiver sem `DB_PATH`. Todo boot loga
 `🗄 Banco: <caminho absoluto> (DB_PATH|padrão local) · user_version N · N
 contato(s) de prospecção` — a primeira coisa a conferir depois de um deploy.
+
+⚠ **O banco LOCAL (`./aula-ai.db`) não espelha a produção.** Em 18/11/2026,
+uma checagem de sintaxe que carregou o `db.js` sem `DB_PATH` migrou o banco
+local, POR ENGANO, de `user_version` 36 para 44. As migrações 37–44 (incluindo
+as do patrimônio, 43–44) rodaram sobre os dados locais antigos, e a produção
+estava na 42. Para diagnosticar algo do comercial pelo banco local, lembrar
+que ele tem esquema mais novo e dados mais velhos que os da produção. Para
+reproduzir a produção, usar um backup dela (`scripts/banco.js backup`).
+Checagem de sintaxe é com `node --check`, nunca com `require`. Teste que
+abre o banco usa `DB_PATH` apontando para uma cópia.
 
 Abrir `http://localhost:8000` no Chrome → redireciona para /login.
 **Modo de teste:** `?bloco=30` na URL da sessão ao vivo reduz o bloco de 400
@@ -223,8 +235,8 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **42**. Migração que recria tabela referenciada
-por outras (`importacoes`, na 20) é marcada com `desligarFk`: o runner desliga
+pelo mesmo caminho). Versão atual: **45**. Migração que recria tabela referenciada
+por outras (`importacoes`, na 20 e na 43) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
 - `aulas(id, nome, data_criacao, status, duracao, transcricao_completa, resumo_md, usuario_id → usuarios)`
@@ -765,6 +777,14 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `POST/PUT/DELETE …/planner/extras[/:id]`, `PUT …/planner/rotina`, `GET …/posts/:id/historico` | feito extra (link obrigatório); check da rotina `{semana (segunda), item dNiM, marcado}`; trilha do post |
 | `PUT /api/marketing/config` | só admin: `{virada: AAAA-MM-DD}` (hoje em diante) — data da troca 30/15/7 → 60/30/15 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
+| `GET /patrimonio`, `GET /api/patrimonio` | PATRIMÔNIO (admin e patrimonio; resto 403): tela e payload único (itens com termo aberto e alerta "sem termo", locais com contagem, responsáveis = pessoas ativas consultor/administrativo, termos, últimas importações) |
+| `PATCH /api/patrimonio/itens/:id`, `POST …/itens/:id/status`, `GET …/itens/:id/historico` | edição do descritivo, conservação e local (local grava movimento `ajuste`; `pessoaId`/`status` no PATCH → 400); status pelo menu `{acao: reparo_saida\|reparo_retorno\|baixa\|desfazer_baixa, motivo}` (baixa exige motivo e item sem pessoa → 409; desfazer só admin → 403); histórico de movimentos |
+| `POST /api/patrimonio/entregas`, `POST /api/patrimonio/devolucoes` | entrega `{itemIds, pessoaId, localId, assinatura, assinanteNome?, observacao?}` → 1 termo + 1 movimento por item (201); item em termo aberto, baixado, em reparo ou com OUTRA pessoa → 409; devolução `{itemIds, assinatura, localId?, transferir?: {pessoaId, localId, assinatura}}` (itens de UMA pessoa; sem transferir → em estoque, padrão 7º Estoque); assinatura PNG em branco/ausente/não-PNG → 400 |
+| `POST /api/patrimonio/termos/:id/cancelar` | só admin `{motivo}`: itens voltam ao estado anterior (movimento `ajuste`); transferência cancela o par; 409 se algo mudou depois |
+| `POST /api/patrimonio/importar?arquivo=`, `GET …/importacoes/:id` | planilha .xlsx (admin e patrimonio); relatório (lidas, importadas, ignoradas, ressalvas, mantidos, avisos); auditoria em `importacoes` tipo `patrimonio` |
+| `POST/PATCH /api/patrimonio/locais[/:id]` | cria `{andar, nome}` / renomeia ou desativa `{nome, ativo}` (local com itens não desativa) |
+| `GET /api/patrimonio/meus` | qualquer usuário: os itens da PESSOA DA SESSÃO (nunca recebe id; sem pessoa = vazio) |
+| `GET /patrimonio/termos/:id/via` | via do termo em HTML para imprimir/salvar em PDF; admin, patrimonio ou a própria pessoa do termo — senão o mesmo 404 de inexistente |
 
 Erros que escapam das rotas passam por um tratador final em `server.js`: corpo
 acima do limite → 413 JSON com tamanho e limite; outros 4xx/5xx → JSON com o
@@ -1803,6 +1823,99 @@ aprovada antes da seguinte:
   - Payload público: nomes, números e títulos curtos — nunca link, motivo ou
     observação (conferido). Toda escrita bem-sucedida em `/api/marketing`
     emite SSE `config` (refetch silencioso) com a tela ligada.
+
+### 🚧 Patrimônio (2026-11-18, migrações 43–45) — Fase 1 de 3
+A Emanuelle (financeiro) passa a controlar os bens da Unyflex no jonIAs
+(`patrimonio.js`, tela `/patrimonio`, **zero IA**). Fase 1 = só patrimônio;
+**Fase 2 = estoque de consumo; Fase 3 = compras e checklist de salas — não
+construídas**. Decisões do usuário (2026-11-18):
+- **Renumeração total**: 218 itens, códigos 0001–0218 (4 dígitos, CHECK no
+  banco) pelo caminho de colagem (4º, 5º, 6º, 7º, itens de mesa). Itens
+  pessoais dos funcionários ficam FORA. Nada estava etiquetado.
+- **Pessoas**: tipo novo `administrativo` em `pessoas` (Emanuelle, Emily,
+  Juliana, Marly, Caetano, Pablo; `entra_painel/tv/feedback = 0`, sem ramal
+  nem wallet). É a primeira vez que gente fora das vendas entra em `pessoas`:
+  o comercial lista só `tipo = 'consultor'` (ranking, meta, prêmio, rota, TV,
+  feedback) e os TRÊS casamentos por nome (vendedor do Omie em
+  `importacao.js`, wallet em `sincronizacao.js`, consultor da planilha em
+  `prospeccao.js`) passaram a olhar só `tipo IN ('consultor','canal')` —
+  sem isso, as 5 oportunidades com vendedor "Marly" iriam para a Marly
+  administrativa (medido numa cópia). Conferido: retrato completo do
+  comercial (métricas, TV, metas, saúde, Rota, fim de ano, carteiras, CDR,
+  feedback, atribuições) IDÊNTICO byte a byte antes e depois da migração,
+  com controle positivo (Emanuelle como consultor muda 9 blocos).
+- **Responsável** = pessoa ATIVA do tipo consultor ou administrativo (canal
+  nunca); só muda por TERMO assinado, nunca pela edição da tabela.
+- **Papéis** (allowlist `ALLOWLIST` em `server.js`, como o marketing):
+  `patrimonio` (Emanuelle: `/patrimonio`, `/meu-painel`, senha) e
+  `colaborador` (só `/meu-painel` com os próprios itens, a via do próprio
+  termo e a senha — criado já na Fase 1 porque o Caetano vai precisar dele na
+  Fase 3). `/usuarios`: vendedor exige consultor; colaborador exige pessoa
+  consultor/administrativo; admin/patrimonio, opcional; marketing, nenhuma.
+  Usuário da Emanuelle é criado pela `/usuarios` (senha inicial nunca no log).
+- **Modelo**: `locais(andar, nome, ordem, ativo, UNIQUE(andar, nome))` com 16
+  de seed; `patrimonio_itens` (estado ATUAL; `codigo_antigo`, `origem`,
+  `extras_json` com o "posto na planilha antiga", `importacao_id`);
+  `patrimonio_movimentos` (histórico; `status_de/para`, `importacao_id`;
+  **gatilhos recusam UPDATE e DELETE**); `patrimonio_termos` (`tipo` entrega
+  | devolução, número `NNNN/AAAA` por `UNIQUE(ano, seq)`, assinatura PNG
+  base64, `relacionado_id` no par da transferência; **gatilho: só o
+  cancelamento muda, uma vez, com motivo**; nunca apagado);
+  `patrimonio_termo_itens(aberto, fechado_por_termo, conservacao)` com
+  **índice único parcial `(item_id) WHERE aberto = 1`** — o mesmo item em
+  dois termos abertos é recusado pelo banco (conferido com INSERT direto e
+  com duas entregas simultâneas). Toda mudança de pessoa, local ou status
+  grava um movimento na mesma transação.
+- **Fluxos**: Entregar (vários itens, uma pessoa, andar e sala, assinatura →
+  1 termo, 1 movimento por item; item da carga com responsável e sem termo
+  pode ser entregue à MESMA pessoa = regularização); Devolver (itens de uma
+  pessoa, assinatura, volta ao estoque) ou **transferência com duas
+  assinaturas** (devolução de quem entrega + entrega de quem recebe; 1
+  movimento `transferencia` por item); cancelamento só admin, com motivo
+  (itens voltam ao estado anterior, entrega fechada pela devolução é
+  reaberta). Baixa exige motivo e item sem pessoa; só o admin desfaz.
+- **Assinatura**: canvas 600×200 (pointer events, `touch-action: none` +
+  `preventDefault` no touchmove; limpar; sem traço não envia). O servidor
+  também recusa PNG em branco (descomprime o IDAT e procura pixel). Medido no
+  celular (Chrome headless 390×844 com toque): **~16 KB por termo** →
+  ~300 termos/ano ≈ 5 MB/ano no banco, até ~50 MB/ano nos backups (7 + 4).
+- **Termo impresso** (`htmlVia`, HTML com `@media print`, sem dependência de
+  PDF): cabeçalho Unyflex, número, nome, **CPF em branco** (CPF não é
+  guardado), local, data e hora, itens com código, nome, marca, série e
+  **conservação gravada NO TERMO no ato da assinatura** (migração 45; editar
+  o item depois não muda o termo), assinatura, quem coletou, rodapé jonIAs.
+  **Textos aprovados pelo usuário em 18/11/2026 — não alterar sem nova
+  aprovação**; sem cláusula de ressarcimento, desconto em folha ou multa
+  (desconto por dano é regra do contrato de trabalho; o termo prova a
+  guarda). ⚠ **145 dos 211 itens da carga estão sem conservação** (todos os
+  que vieram do "Estoque físico"; os 66 do checklist de salas têm "bom"): no
+  termo eles saem com "—" até a Emanuelle preencher.
+- **Importação** (admin e patrimonio; XML via jszip; colunas por nome, rótulo
+  com 2ª linha aceito): chave = CÓDIGO NOVO; STATUS = CONSUMO ignorado e
+  listado (Fase 2); responsável/sala que não casam = ressalva (nunca cria
+  pessoa nem local); status fora da lista = ressalva, padrão em uso (com
+  responsável) ou em estoque; conservação fora de bom/regular/ruim = ressalva
+  e em branco; coluna com "senha" no nome é descartada e observação com
+  "senha" não entra (**senha nunca vai ao banco**). Carga = movimento
+  `ajuste` "carga inicial", sem termo. Reimportar atualiza o descritivo
+  sempre e pessoa/local/status só em item nunca trabalhado no sistema (o
+  resto vira "mantidos").
+- **Teste 4 com a planilha real** (`inventario-patrimonio-para-etiquetar.xlsx`,
+  numa cópia): 218 lidas, 211 importadas, 7 ignoradas (cabos 0067–0073,
+  CONSUMO), 0 duplicadas, reimportar = 0 novos e 211 idênticos; 102 sem
+  local; responsável vazio nas 218 (atribuição pelo termo, no jonIAs).
+  Locais sem item NÃO são erro: a carga é parcial de propósito e o
+  inventário real sai da conferência física da Emanuelle; a planilha antiga
+  "controle Patrimonial" (ex-funcionários, aba Celulares com senhas) é só
+  lista de conferência, nunca fonte de carga.
+- ⚠ **Celulares (11 linhas na planilha: 0118, 0127, 0137, 0146, 0157,
+  0167, 0175, 0185, 0193, 0201, 0212)**: não importar até o usuário confirmar
+  se os aparelhos têm etiqueta física — os números antigos 0002–0018 colidem
+  com a série nova. Modelo e número da linha vão em campo próprio/observação;
+  senha nunca.
+- Deploy: a produção está na 42, então sobem 43, 44 e 45 juntas. Backup e
+  `conferir` antes (DEPLOY.md); o log tem de mostrar as três linhas de
+  migração e a 43 com "antes N, depois N" de `importacoes` iguais.
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

@@ -40,8 +40,27 @@
     document.dispatchEvent(new CustomEvent("sessao-pronta", { detail: sessao }));
     return;
   }
+  // Patrimônio (migração 44): papel patrimonio = /patrimonio + meus itens + senha;
+  // colaborador = só meus itens (em /meu-painel) + senha
+  if (sessao.papel === "patrimonio" || sessao.papel === "colaborador") {
+    const permitidos = sessao.papel === "patrimonio" ? ["/patrimonio", "/meu-painel"] : ["/meu-painel"];
+    for (const a of acoes.querySelectorAll("a[href]")) if (!permitidos.includes(a.getAttribute("href"))) a.remove();
+    for (const [href, texto] of [["/patrimonio", "📦 Patrimônio"], ["/meu-painel", "📦 Meus itens"]]) {
+      if (permitidos.includes(href) && atual !== href && !acoes.querySelector(`a[href="${href}"]`)) acoes.insertBefore(link(href, texto), sair);
+    }
+    if (!acoes.querySelector('a[href="/trocar-senha"]')) acoes.insertBefore(link("/trocar-senha", "🔑 Senha"), sair);
+    const quemPat = document.createElement("span");
+    quemPat.className = "topo-usuario";
+    quemPat.textContent = `${sessao.nome} · ${sessao.papel}`;
+    acoes.insertBefore(quemPat, acoes.firstChild);
+    document.dispatchEvent(new CustomEvent("sessao-pronta", { detail: sessao }));
+    return;
+  }
   if (sessao.papel === "admin" && atual !== "/marketing" && !acoes.querySelector('a[href="/marketing"]')) {
     acoes.insertBefore(link("/marketing", "📣 Marketing"), sair);
+  }
+  if (sessao.papel === "admin" && atual !== "/patrimonio" && !acoes.querySelector('a[href="/patrimonio"]')) {
+    acoes.insertBefore(link("/patrimonio", "📦 Patrimônio"), sair);
   }
   if (sessao.papel === "vendedor") {
     for (const a of acoes.querySelectorAll("a[href]")) if (SO_ADMIN.includes(a.getAttribute("href"))) a.remove();

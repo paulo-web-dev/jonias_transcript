@@ -1982,6 +1982,217 @@ const MIGRACOES = [
     `);
     console.log("migração 42: WhatsApp do marketing — admin pode registrar semana passada (data informada + quem marcou e quando).");
   },
+  // 43 — PATRIMÔNIO, Fase 1 (2026-11-18): `importacoes` é recriada para aceitar
+  // os tipos 'patrimonio' e 'consumo' (este já reservado para a Fase 2, para
+  // não repetir a recriação — decisão do usuário). Mesma receita da 20: SQLite
+  // não altera CHECK; a tabela é referenciada por ligacoes/oportunidades/
+  // matriculas/contatos_ativo…, então roda com foreign_keys OFF (`desligarFk`) e
+  // o runner confere foreign_key_check. Ids e o contador AUTOINCREMENT são
+  // preservados; aborta se a contagem mudar.
+  Object.assign(() => {
+    const antes = db.prepare("SELECT COUNT(*) n FROM importacoes").get().n;
+    const seq = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'importacoes'").get()?.seq ?? 0;
+    db.exec(`
+      CREATE TABLE importacoes_nova (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo                  TEXT    NOT NULL CHECK (tipo IN ('cdr','oportunidades','mysql','prospeccao','patrimonio','consumo')),
+        arquivo_nome          TEXT,
+        hash_sha256           TEXT,
+        linhas_lidas          INTEGER NOT NULL DEFAULT 0,
+        linhas_validas        INTEGER NOT NULL DEFAULT 0,
+        linhas_ignoradas      INTEGER NOT NULL DEFAULT 0,
+        registros_novos       INTEGER NOT NULL DEFAULT 0,
+        registros_atualizados INTEGER NOT NULL DEFAULT 0,
+        detalhes_json         TEXT    NOT NULL DEFAULT '{}',
+        status                TEXT    NOT NULL DEFAULT 'concluida' CHECK (status IN ('concluida','erro')),
+        erro                  TEXT,
+        usuario_id            INTEGER NOT NULL REFERENCES usuarios(id),
+        iniciado_em           TEXT    NOT NULL,
+        concluido_em          TEXT,
+        registros_identicos   INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO importacoes_nova (id, tipo, arquivo_nome, hash_sha256, linhas_lidas, linhas_validas,
+        linhas_ignoradas, registros_novos, registros_atualizados, detalhes_json, status, erro,
+        usuario_id, iniciado_em, concluido_em, registros_identicos)
+      SELECT id, tipo, arquivo_nome, hash_sha256, linhas_lidas, linhas_validas, linhas_ignoradas,
+        registros_novos, registros_atualizados, detalhes_json, status, erro, usuario_id, iniciado_em,
+        concluido_em, registros_identicos FROM importacoes;
+      DROP TABLE importacoes;
+      ALTER TABLE importacoes_nova RENAME TO importacoes;
+      CREATE INDEX idx_importacoes_tipo ON importacoes(tipo, iniciado_em);
+      CREATE INDEX idx_importacoes_hash ON importacoes(hash_sha256);
+    `);
+    const depois = db.prepare("SELECT COUNT(*) n FROM importacoes").get().n;
+    if (depois !== antes) throw new Error(`migração 43: importacoes tinha ${antes} linha(s) e ficou com ${depois} — abortada`);
+    db.prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'importacoes'").run(seq);
+    console.log(`migração 43: importacoes recriada aceitando 'patrimonio' e 'consumo' — antes ${antes}, depois ${depois} registro(s) (iguais); contador AUTOINCREMENT ${seq}.`);
+  }, { desligarFk: true }),
+
+  // 44 — PATRIMÔNIO, Fase 1 (2026-11-18, decisões do usuário):
+  // - pessoas do tipo NOVO 'administrativo' (Emanuelle, responsável pelo
+  //   controle, Emily, Juliana, Marly, Caetano, Pablo), com entra_painel/
+  //   entra_tv/entra_feedback = 0. O comercial lista só tipo = 'consultor'
+  //   (ranking, meta, prêmio, rota, TV, feedback) e os casamentos por nome
+  //   (Omie, wallet, planilha de prospecção) só olham consultor/canal — então
+  //   nenhum deles entra no comercial.
+  // - locais (andar × sala), seed de 16 na ordem do caminho de colagem.
+  // - patrimonio_itens = estado ATUAL; patrimonio_movimentos = histórico,
+  //   imutável (gatilhos recusam UPDATE e DELETE). Toda mudança de pessoa,
+  //   local ou status grava um movimento.
+  // - patrimonio_termos: entrega | devolução, numerados por ano (0001/2026),
+  //   assinatura PNG em base64 travada por gatilho; só os campos de
+  //   cancelamento mudam, uma vez.
+  // - patrimonio_termo_itens.aberto: índice único parcial — o mesmo item em
+  //   dois termos abertos é recusado pelo banco.
+  // CPF não é guardado (a via sai com a linha em branco).
+  () => {
+    const novaPessoa = db.prepare(
+      `INSERT INTO pessoas (nome, ativo, entra_feedback, tipo, entra_painel, entra_tv, nomes_alternativos)
+       SELECT ?, 1, 0, 'administrativo', 0, 0, '[]'
+       WHERE NOT EXISTS (SELECT 1 FROM pessoas WHERE nome = ? AND tipo = 'administrativo')`
+    );
+    const criadas = [];
+    for (const nome of ["Emanuelle", "Emily", "Juliana", "Marly", "Caetano", "Pablo"]) {
+      if (novaPessoa.run(nome, nome).changes) criadas.push(nome);
+    }
+    db.exec(`
+      CREATE TABLE locais (
+        id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        andar  INTEGER NOT NULL,
+        nome   TEXT    NOT NULL,
+        ordem  INTEGER NOT NULL DEFAULT 0,
+        ativo  INTEGER NOT NULL DEFAULT 1,
+        UNIQUE (andar, nome)
+      );
+      CREATE TABLE patrimonio_itens (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        codigo             TEXT    NOT NULL UNIQUE CHECK (length(codigo) = 4 AND codigo GLOB '[0-9][0-9][0-9][0-9]'),
+        nome               TEXT    NOT NULL,
+        marca_modelo       TEXT,
+        numero_serie       TEXT,
+        categoria          TEXT,
+        estado_conservacao TEXT    CHECK (estado_conservacao IN ('bom','regular','ruim')),
+        status             TEXT    NOT NULL DEFAULT 'em_estoque' CHECK (status IN ('em_uso','em_estoque','em_reparo','baixado')),
+        local_id           INTEGER REFERENCES locais(id),
+        pessoa_id          INTEGER REFERENCES pessoas(id),
+        conjunto           TEXT,
+        valor_centavos     INTEGER,
+        data_aquisicao     TEXT,
+        nota_fiscal        TEXT,
+        observacao         TEXT,
+        codigo_antigo      TEXT,
+        origem             TEXT,
+        extras_json        TEXT,
+        importacao_id      INTEGER REFERENCES importacoes(id),
+        criado_em          TEXT    NOT NULL,
+        atualizado_em      TEXT,
+        baixado_em         TEXT,
+        motivo_baixa       TEXT
+      );
+      CREATE INDEX idx_patrimonio_itens_pessoa ON patrimonio_itens(pessoa_id);
+      CREATE INDEX idx_patrimonio_itens_local ON patrimonio_itens(local_id);
+
+      CREATE TABLE patrimonio_termos (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo                 TEXT    NOT NULL CHECK (tipo IN ('entrega','devolucao')),
+        ano                  INTEGER NOT NULL,
+        seq                  INTEGER NOT NULL,
+        pessoa_id            INTEGER NOT NULL REFERENCES pessoas(id),
+        local_id             INTEGER REFERENCES locais(id),
+        data_hora            TEXT    NOT NULL,
+        assinatura           TEXT    NOT NULL CHECK (assinatura LIKE 'data:image/png;base64,%'),
+        assinante_nome       TEXT    NOT NULL,
+        usuario_id           INTEGER NOT NULL REFERENCES usuarios(id),
+        observacao           TEXT,
+        relacionado_id       INTEGER REFERENCES patrimonio_termos(id), -- transferência: devolução ↔ entrega
+        cancelado_em         TEXT,
+        motivo_cancelamento  TEXT,
+        cancelado_por        INTEGER REFERENCES usuarios(id),
+        UNIQUE (ano, seq)
+      );
+      CREATE INDEX idx_patrimonio_termos_pessoa ON patrimonio_termos(pessoa_id);
+
+      CREATE TABLE patrimonio_termo_itens (
+        termo_id          INTEGER NOT NULL REFERENCES patrimonio_termos(id),
+        item_id           INTEGER NOT NULL REFERENCES patrimonio_itens(id),
+        aberto            INTEGER NOT NULL DEFAULT 0 CHECK (aberto IN (0, 1)),
+        fechado_por_termo INTEGER REFERENCES patrimonio_termos(id), -- devolução que fechou esta entrega
+        fechado_em        TEXT,
+        PRIMARY KEY (termo_id, item_id)
+      );
+      CREATE UNIQUE INDEX idx_patrimonio_um_termo_aberto ON patrimonio_termo_itens(item_id) WHERE aberto = 1;
+      CREATE INDEX idx_patrimonio_termo_itens_item ON patrimonio_termo_itens(item_id);
+
+      CREATE TABLE patrimonio_movimentos (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id       INTEGER NOT NULL REFERENCES patrimonio_itens(id),
+        tipo          TEXT    NOT NULL CHECK (tipo IN ('entrega','devolucao','transferencia','reparo_saida','reparo_retorno','baixa','ajuste')),
+        pessoa_de     INTEGER REFERENCES pessoas(id),
+        pessoa_para   INTEGER REFERENCES pessoas(id),
+        local_de      INTEGER REFERENCES locais(id),
+        local_para    INTEGER REFERENCES locais(id),
+        status_de     TEXT,
+        status_para   TEXT,
+        termo_id      INTEGER REFERENCES patrimonio_termos(id),
+        importacao_id INTEGER REFERENCES importacoes(id),
+        usuario_id    INTEGER NOT NULL REFERENCES usuarios(id),
+        data_hora     TEXT    NOT NULL,
+        observacao    TEXT
+      );
+      CREATE INDEX idx_patrimonio_mov_item ON patrimonio_movimentos(item_id, id);
+
+      -- Histórico imutável: movimento nunca é editado nem apagado
+      CREATE TRIGGER patrimonio_mov_sem_update BEFORE UPDATE ON patrimonio_movimentos
+      BEGIN SELECT RAISE(ABORT, 'patrimonio_movimentos é imutável: movimento não pode ser editado'); END;
+      CREATE TRIGGER patrimonio_mov_sem_delete BEFORE DELETE ON patrimonio_movimentos
+      BEGIN SELECT RAISE(ABORT, 'patrimonio_movimentos é imutável: movimento não pode ser apagado'); END;
+
+      -- Termo: só o cancelamento muda, uma vez; assinatura e conteúdo travados
+      CREATE TRIGGER patrimonio_termo_travado BEFORE UPDATE ON patrimonio_termos
+      WHEN NEW.tipo IS NOT OLD.tipo OR NEW.ano IS NOT OLD.ano OR NEW.seq IS NOT OLD.seq
+        OR NEW.pessoa_id IS NOT OLD.pessoa_id OR NEW.local_id IS NOT OLD.local_id
+        OR NEW.data_hora IS NOT OLD.data_hora OR NEW.assinatura IS NOT OLD.assinatura
+        OR NEW.assinante_nome IS NOT OLD.assinante_nome OR NEW.usuario_id IS NOT OLD.usuario_id
+        OR NEW.observacao IS NOT OLD.observacao OR NEW.relacionado_id IS NOT OLD.relacionado_id
+        OR OLD.cancelado_em IS NOT NULL
+        OR NEW.cancelado_em IS NULL OR NEW.motivo_cancelamento IS NULL OR trim(NEW.motivo_cancelamento) = ''
+      BEGIN SELECT RAISE(ABORT, 'termo assinado não pode ser alterado (só cancelado, uma vez, com motivo)'); END;
+      CREATE TRIGGER patrimonio_termo_sem_delete BEFORE DELETE ON patrimonio_termos
+      BEGIN SELECT RAISE(ABORT, 'termo assinado não pode ser apagado'); END;
+
+      -- Itens do termo: só o fechamento/reabertura muda; nunca apagados
+      CREATE TRIGGER patrimonio_termo_itens_travado BEFORE UPDATE ON patrimonio_termo_itens
+      WHEN NEW.termo_id IS NOT OLD.termo_id OR NEW.item_id IS NOT OLD.item_id
+      BEGIN SELECT RAISE(ABORT, 'item do termo não pode trocar de termo nem de item'); END;
+      CREATE TRIGGER patrimonio_termo_itens_sem_delete BEFORE DELETE ON patrimonio_termo_itens
+      BEGIN SELECT RAISE(ABORT, 'item de termo não pode ser apagado'); END;
+    `);
+    const local = db.prepare("INSERT INTO locais (andar, nome, ordem) VALUES (?, ?, ?)");
+    const LOCAIS = [
+      [4, "Sala de reunião"], [4, "Sala auditório"], [4, "Unymotors"], [4, "Clínica de estética"],
+      [5, "Sala 04"], [5, "Coordenação 01"], [5, "Coordenação 02"], [5, "Open office"], [5, "Recepção"],
+      [6, "Sala 01"], [6, "Sala 02"], [6, "Sala 03"], [6, "Espaço coffee break"], [6, "Recepção"],
+      [7, "Cozinha"], [7, "Estoque"],
+    ];
+    LOCAIS.forEach(([andar, nome], i) => local.run(andar, nome, i + 1));
+    console.log(`migração 44: patrimônio — ${LOCAIS.length} locais, tabelas de itens/movimentos/termos; pessoas administrativas criadas: ${criadas.join(", ") || "nenhuma (já existiam)"}.`);
+  },
+  // 45 — PATRIMÔNIO: a conservação de cada item fica gravada NO TERMO, como
+  // estava no ato da assinatura (o texto do termo, aprovado pelo usuário em
+  // 18/11/2026, declara "nas condições de conservação indicadas ao lado de cada
+  // item"). Editar a conservação do item depois nunca muda um termo assinado:
+  // o gatilho passa a travar também esta coluna.
+  () => {
+    db.exec(`
+      ALTER TABLE patrimonio_termo_itens ADD COLUMN conservacao TEXT CHECK (conservacao IN ('bom','regular','ruim'));
+      DROP TRIGGER patrimonio_termo_itens_travado;
+      CREATE TRIGGER patrimonio_termo_itens_travado BEFORE UPDATE ON patrimonio_termo_itens
+      WHEN NEW.termo_id IS NOT OLD.termo_id OR NEW.item_id IS NOT OLD.item_id OR NEW.conservacao IS NOT OLD.conservacao
+      BEGIN SELECT RAISE(ABORT, 'item do termo não pode trocar de termo, de item nem de conservação'); END;
+    `);
+    const n = db.prepare("SELECT COUNT(*) n FROM patrimonio_termo_itens").get().n;
+    console.log(`migração 45: patrimônio — conservação gravada no termo (no ato da assinatura); ${n} linha(s) de termo já existente(s) ficam sem conservação registrada.`);
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

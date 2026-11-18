@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Patrimônio — jonIAs</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="cabe-no-celular">
+  <header class="topo">
+    <div class="topo-titulo">
+      <span class="logo-dot"></span>
+      <h1>jon<span class="grad">IA</span>s</h1>
+      <span class="subtitulo">patrimônio</span>
+    </div>
+    <div class="topo-acoes">
+      <a href="/central" class="btn-topo">🗄 Central</a>
+      <button id="btn-sair" class="btn-topo">Sair ⎋</button>
+    </div>
+  </header>
+
+  <main class="pagina-lista pat-pagina">
+    <nav class="pat-abas" aria-label="Patrimônio">
+      <button type="button" class="aba-btn ativo" data-aba="itens">📦 Itens</button>
+      <button type="button" class="aba-btn" data-aba="termos">📝 Termos</button>
+      <button type="button" class="aba-btn" data-aba="locais">🏢 Locais</button>
+    </nav>
+
+    <!-- ================= ITENS ================= -->
+    <section id="aba-itens" class="pat-secao">
+      <div class="pat-alertas" id="pat-alertas"></div>
+      <div class="pat-filtros">
+        <input type="search" id="f-busca" class="campo-select pat-busca" placeholder="Buscar código, nome ou nº de série" autocomplete="off" />
+        <select id="f-local" class="campo-select"><option value="">todos os locais</option></select>
+        <select id="f-pessoa" class="campo-select"><option value="">todos os responsáveis</option></select>
+        <select id="f-status" class="campo-select">
+          <option value="">todos os status</option><option value="em_uso">em uso</option><option value="em_estoque">em estoque</option>
+          <option value="em_reparo">em reparo</option><option value="baixado">baixado</option><option value="ativos">todos menos baixados</option>
+        </select>
+        <select id="f-conservacao" class="campo-select">
+          <option value="">qualquer conservação</option><option value="bom">bom</option><option value="regular">regular</option>
+          <option value="ruim">ruim</option><option value="-">sem conservação</option>
+        </select>
+        <span class="texto-suave" id="pat-contagem"></span>
+      </div>
+
+      <div class="pat-selecao" id="pat-selecao" hidden>
+        <span id="pat-sel-texto"></span>
+        <button type="button" class="btn btn-mini btn-primario" id="btn-entregar">✍ Entregar</button>
+        <button type="button" class="btn btn-mini" id="btn-devolver">↩ Devolver</button>
+        <button type="button" class="btn btn-mini" id="btn-limpar-sel">limpar seleção</button>
+      </div>
+
+      <div class="tabela-scroll pat-tabela-caixa">
+        <table class="tabela-metricas pat-tabela" id="pat-tabela">
+          <thead><tr>
+            <th class="pat-col-sel"><input type="checkbox" id="sel-todos" aria-label="selecionar todos os visíveis" /></th>
+            <th data-ord="codigo">Código</th><th data-ord="nome" style="text-align:left">Item</th>
+            <th data-ord="marcaModelo" style="text-align:left">Marca / modelo</th><th data-ord="numeroSerie" style="text-align:left">Nº de série</th>
+            <th data-ord="local" style="text-align:left">Local</th><th data-ord="pessoa" style="text-align:left">Responsável</th>
+            <th data-ord="status">Status</th><th data-ord="conservacao">Conservação</th><th style="text-align:left">Observação</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="texto-suave">Clique num texto para editar (Enter salva, Esc cancela). O responsável só muda por termo assinado: <strong>Entregar</strong> ou <strong>Devolver</strong>.</p>
+
+      <details class="pat-importar" id="pat-importar">
+        <summary>📥 Importar planilha (.xlsx)</summary>
+        <p class="texto-suave">Colunas: CÓDIGO NOVO, ITEM, MARCA / MODELO, Nº DE SÉRIE, ANDAR, SALA, RESPONSÁVEL, STATUS, CONSERVAÇÃO,
+          CÓDIGO ANTIGO, POSTO NA PLANILHA ANTIGA, ORIGEM, OBSERVAÇÕES. A chave é o CÓDIGO NOVO: reimportar atualiza, não duplica.
+          STATUS = CONSUMO é ignorado. Responsável e sala que não casam com o cadastro viram ressalva. Nenhuma coluna de senha é guardada.</p>
+        <div class="pat-filtros">
+          <input type="file" id="arquivo-xlsx" accept=".xlsx" class="campo-select" />
+          <button type="button" class="btn btn-mini btn-primario" id="btn-importar">Importar</button>
+        </div>
+        <div id="pat-relatorio"></div>
+        <div id="pat-importacoes"></div>
+      </details>
+    </section>
+
+    <!-- ================= TERMOS ================= -->
+    <section id="aba-termos" class="pat-secao" hidden>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas pat-tabela" id="pat-termos">
+          <thead><tr><th>Nº</th><th>Tipo</th><th style="text-align:left">Pessoa</th><th>Data</th><th>Itens</th><th style="text-align:left">Local</th><th>Situação</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ================= LOCAIS ================= -->
+    <section id="aba-locais" class="pat-secao" hidden>
+      <div class="pat-filtros">
+        <select id="novo-andar" class="campo-select"><option value="4">4º andar</option><option value="5">5º andar</option><option value="6">6º andar</option><option value="7">7º andar</option></select>
+        <input type="text" id="novo-local" class="campo-select" placeholder="nome da sala" maxlength="60" />
+        <button type="button" class="btn btn-mini btn-primario" id="btn-novo-local">+ Adicionar local</button>
+      </div>
+      <div class="tabela-scroll">
+        <table class="tabela-metricas pat-tabela" id="pat-locais">
+          <thead><tr><th>Andar</th><th style="text-align:left">Sala</th><th>Itens</th><th>Situação</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="texto-suave">Local sem item não é erro: a carga inicial é parcial e o inventário completo sai da conferência física.</p>
+    </section>
+  </main>
+
+  <!-- Fluxo de termo (entrega / devolução / transferência) — tela cheia no celular -->
+  <div class="modal oculto pat-modal" id="modal-termo" role="dialog" aria-modal="true" aria-labelledby="termo-titulo">
+    <div class="modal-caixa pat-modal-caixa">
+      <div class="modal-cabecalho"><h2 id="termo-titulo">Entregar</h2><button type="button" class="btn-mini" data-fechar>✕</button></div>
+      <div class="modal-conteudo" id="termo-corpo"></div>
+      <div class="modal-rodape modal-rodape-multi" id="termo-rodape"></div>
+    </div>
+  </div>
+
+  <!-- Pequeno diálogo genérico (motivo, histórico) -->
+  <div class="modal oculto" id="modal-simples" role="dialog" aria-modal="true" aria-labelledby="simples-titulo">
+    <div class="modal-caixa modal-pequena pat-modal-simples">
+      <div class="modal-cabecalho"><h2 id="simples-titulo"></h2><button type="button" class="btn-mini" data-fechar>✕</button></div>
+      <div class="modal-conteudo" id="simples-corpo"></div>
+      <div class="modal-rodape modal-rodape-multi" id="simples-rodape"></div>
+    </div>
+  </div>
+
+  <div id="aviso" class="aviso" role="status"></div>
+  <script src="/js/nav.js"></script>
+  <script src="/js/patrimonio.js"></script>
+</body>
+</html>

@@ -105,9 +105,29 @@ for (const b of document.querySelectorAll("button[data-periodo]")) b.addEventLis
 document.getElementById("btn-aplicar").addEventListener("click", aplicar);
 document.getElementById("btn-sair").addEventListener("click", async () => { await fetch("/api/logout", { method: "POST" }).catch(() => {}); location.href = "/login"; });
 
+// Meus itens de patrimônio (migração 44): o servidor devolve só os da pessoa da sessão
+async function carregarMeusItens() {
+  const r = await chamarApi("/api/patrimonio/meus");
+  if (!r.pessoa) return;
+  document.getElementById("meus-itens").hidden = false;
+  document.querySelector("#tabela-meus-itens tbody").innerHTML = r.itens.map((i) => `<tr class="sem-clique">
+    <td class="pat-codigo" data-rotulo="Código">${escapeHtml(i.codigo)}</td>
+    <td data-rotulo="Item" style="text-align:left">${escapeHtml(i.nome)}${i.marcaModelo ? ` <small class="texto-suave">· ${escapeHtml(i.marcaModelo)}</small>` : ""}</td>
+    <td data-rotulo="Local" style="text-align:left">${escapeHtml(i.local || "—")}</td>
+    <td data-rotulo="Entregue em">${i.entregueEm ? dataBr(i.entregueEm.slice(0, 10)) : '<span class="texto-suave">sem termo ainda</span>'}</td>
+    <td data-rotulo="Termo">${i.termo ? `<a href="/patrimonio/termos/${i.termo.id}/via" target="_blank" rel="noopener">📝 ${escapeHtml(i.termo.numero)}</a>` : "—"}</td></tr>`).join("")
+    || `<tr class="sem-clique"><td colspan="5" class="texto-suave">Nenhum item no seu nome.</td></tr>`;
+}
+
 (async () => {
   try {
     const s = await chamarApi("/api/sessao");
+    carregarMeusItens().catch((e) => avisar("⚠ " + e.message));
+    // patrimônio e colaborador (migração 44): só o bloco de itens — nenhum número comercial
+    if (s.papel === "patrimonio" || s.papel === "colaborador") {
+      document.getElementById("bloco-comercial").hidden = true;
+      return;
+    }
     document.getElementById("intro").textContent = `${s.nome}${s.pessoa ? " (" + s.pessoa.nome + ")" : ""} — seus números no período, pelo mesmo motor dos relatórios. Só os seus.`;
     const regs = s.escopo?.regionais || [];
     document.getElementById("regionais").innerHTML = regs.length

@@ -6,7 +6,7 @@
   <title>Meu painel — jonIAs</title>
   <link rel="stylesheet" href="/css/style.css" />
 </head>
-<body>
+<body class="cabe-no-celular">
   <header class="topo">
     <div class="topo-titulo">
       <span class="logo-dot"></span>
@@ -22,6 +22,15 @@
   </header>
 
   <main class="pagina-lista">
+    <!-- Meus itens de patrimônio (migração 44): só os do usuário da sessão, só leitura -->
+    <section id="meus-itens" hidden>
+      <h2 class="secao-titulo">📦 Meus itens de patrimônio</h2>
+      <p class="texto-suave">Bens da Unyflex no seu nome. Só leitura: entrega e devolução são feitas com a Emanuelle, com termo assinado.</p>
+      <div class="tabela-scroll"><table class="tabela-metricas pat-tabela" id="tabela-meus-itens">
+        <thead><tr><th>Código</th><th style="text-align:left">Item</th><th style="text-align:left">Local</th><th>Entregue em</th><th>Termo</th></tr></thead>
+        <tbody></tbody></table></div>
+    </section>
+    <div id="bloco-comercial">
     <p class="texto-suave" id="intro">Seus números no período, calculados pelo mesmo motor dos relatórios — só os seus.</p>
     <div class="lista-controles territorio-filtro">
       <button type="button" class="btn-mini" data-periodo="mes">este mês</button>
@@ -52,6 +61,7 @@
     </div>
     <h3 class="secao-titulo">Municípios da carteira sem ligação no período</h3>
     <div id="cdr-nunca" class="texto-suave">—</div>
+    </div>
   </main>
 
   <div id="aviso" class="aviso" role="status"></div>

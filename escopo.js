@@ -21,7 +21,9 @@
 const db = require("./db.js");
 
 // marketing (migração 39): só a área /marketing — o resto responde 403 (allowlist em server.js)
-const PAPEIS = ["admin", "vendedor", "marketing"];
+// patrimonio (migração 44): só /patrimonio, /meu-painel e a troca de senha (Emanuelle, financeiro)
+// colaborador (migração 44): só /meu-painel com os próprios itens, a via do termo dele e a senha
+const PAPEIS = ["admin", "vendedor", "marketing", "patrimonio", "colaborador"];
 
 // Rotas liberadas enquanto a senha temporária não foi trocada
 const LIVRES_COM_SENHA_TEMPORARIA = ["/trocar-senha", "/api/senha", "/api/sessao", "/api/logout", "/login"];
@@ -132,7 +134,8 @@ function paginaProibida() {
 <a class="btn btn-primario btn-largo" href="/">Voltar ao início</a></main></body></html>`;
 }
 
-const paginaInicialDe = (usuario) => (usuario.papel === "vendedor" ? "/prospeccao" : usuario.papel === "marketing" ? "/marketing" : "/aulas");
+const INICIAL = { vendedor: "/prospeccao", marketing: "/marketing", patrimonio: "/patrimonio", colaborador: "/meu-painel" };
+const paginaInicialDe = (usuario) => INICIAL[usuario.papel] || "/aulas";
 
 module.exports = {
   PAPEIS, escopoDe, clausulaMunicipios, dentroDoEscopo, exigirAdmin, exigirSenhaTrocada, paginaInicialDe,

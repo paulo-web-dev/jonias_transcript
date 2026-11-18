@@ -162,7 +162,7 @@ async function sincronizarMysql(usuarioId) {
   // nomes_alternativos — sem palpite por primeiro nome; o que não casar é
   // listado no relatório (é onde a atribuição de venda quebra em silêncio).
   const pessoas = db
-    .prepare("SELECT id, nome, wallet_nome, nomes_alternativos FROM pessoas")
+    .prepare("SELECT id, nome, wallet_nome, nomes_alternativos FROM pessoas WHERE tipo IN ('consultor', 'canal')") // administrativo (migração 44) nunca casa com wallet
     .all();
   const pessoaPorNome = new Map();
   for (const p of pessoas) {

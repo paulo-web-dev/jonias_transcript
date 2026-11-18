@@ -654,7 +654,8 @@ async function importarOportunidadesOmie(buffer, arquivoNome, usuarioId) {
   const existentesAntes = db.prepare("SELECT numero, incluido_em FROM oportunidades").all();
   const numerosDoArquivo = new Set();
 
-  const pessoas = db.prepare("SELECT id, nome, nomes_alternativos FROM pessoas").all();
+  // patrimônio (migração 44): pessoa administrativa nunca casa com vendedor do Omie
+  const pessoas = db.prepare("SELECT id, nome, nomes_alternativos FROM pessoas WHERE tipo IN ('consultor', 'canal')").all();
   const pessoaPorNome = new Map();
   for (const p of pessoas) {
     pessoaPorNome.set(normalizarNome(p.nome), p.id);

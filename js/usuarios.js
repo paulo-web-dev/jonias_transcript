@@ -42,11 +42,14 @@ function mostrarSenhaInicial(login, senha) {
 function renderizarUsuarios() {
   document.getElementById("chip-usuarios").textContent = dados.usuarios.length;
   const sel = document.getElementById("u-pessoa");
-  sel.innerHTML = `<option value="">consultor (pessoas)…</option>` + dados.pessoas.map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}${p.ativo ? "" : " (inativo)"}</option>`).join("");
+  // pessoa: consultor (vendedor) ou administrativo (patrimônio/colaborador, migração 44)
+  const rotuloPessoa = (p) => `${escapeHtml(p.nome)}${p.tipo === "administrativo" ? " · adm." : ""}${p.ativo ? "" : " (inativo)"}`;
+  sel.innerHTML = `<option value="">pessoa…</option>` + dados.pessoas.map((p) => `<option value="${p.id}">${rotuloPessoa(p)}</option>`).join("");
+  const papeis = ["admin", "vendedor", "marketing", "patrimonio", "colaborador"];
   document.querySelector("#tabela-usuarios tbody").innerHTML = dados.usuarios.map((u) => `<tr class="sem-clique" data-id="${u.id}">
     <td class="celula-nome">${escapeHtml(u.login)}</td><td style="text-align:left">${escapeHtml(u.nome)}</td>
-    <td><select class="campo-select campo-papel"><option value="admin" ${u.papel === "admin" ? "selected" : ""}>admin</option><option value="vendedor" ${u.papel === "vendedor" ? "selected" : ""}>vendedor</option><option value="marketing" ${u.papel === "marketing" ? "selected" : ""}>marketing</option></select></td>
-    <td style="text-align:left"><select class="campo-select campo-pessoa"><option value="">—</option>${dados.pessoas.map((p) => `<option value="${p.id}" ${p.id === u.pessoaId ? "selected" : ""}>${escapeHtml(p.nome)}</option>`).join("")}</select></td>
+    <td><select class="campo-select campo-papel">${papeis.map((p) => `<option value="${p}" ${u.papel === p ? "selected" : ""}>${p}</option>`).join("")}</select></td>
+    <td style="text-align:left"><select class="campo-select campo-pessoa"><option value="">—</option>${dados.pessoas.map((p) => `<option value="${p.id}" ${p.id === u.pessoaId ? "selected" : ""}>${rotuloPessoa(p)}</option>`).join("")}</select></td>
     <td><input type="checkbox" class="campo-ativo" ${u.ativo ? "checked" : ""} /></td>
     <td>${u.senhaTemporaria ? '<span class="pct-meio" title="ainda não trocou a senha inicial">temporária</span>' : '<span class="saude-ok">própria</span>'}</td>
     <td class="texto-suave">${escapeHtml(dataHoraBr(u.ultimoAcessoEm))}</td>
@@ -69,7 +72,8 @@ document.getElementById("btn-criar-usuario").addEventListener("click", async () 
     avisar(`Usuário "${r.usuario.login}" criado.`);
   } catch (e) { avisar("⚠ " + e.message, true); }
 });
-document.getElementById("u-papel").addEventListener("change", (ev) => { document.getElementById("u-pessoa").disabled = ev.target.value !== "vendedor"; });
+// marketing não tem pessoa; vendedor e colaborador exigem; admin e patrimonio, opcional (o servidor valida o tipo)
+document.getElementById("u-papel").addEventListener("change", (ev) => { document.getElementById("u-pessoa").disabled = ev.target.value === "marketing"; });
 
 document.getElementById("tabela-usuarios").addEventListener("change", async (ev) => {
   const tr = ev.target.closest("tr[data-id]");

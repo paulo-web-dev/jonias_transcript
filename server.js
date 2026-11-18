@@ -35,6 +35,7 @@ const rota = require("./rota.js");
 const fimDeAno = require("./fimdeano.js"); // ROTA FINALIZAÇÃO DE ANO (migração 36)
 const marketing = require("./marketing.js"); // MARKETING (migração 39)
 const planner = require("./planner.js"); // planner de conteúdo (migração 41)
+const patrimonio = require("./patrimonio.js"); // PATRIMÔNIO (migrações 43–44)
 const feriados = require("./feriados.js");
 const backup = require("./backup.js");
 const { PAPEIS, escopoDe, exigirAdmin, exigirSenhaTrocada, paginaInicialDe } = require("./escopo.js");
@@ -105,15 +106,26 @@ function usuarioDaSessao(req) {
 // Papel marketing (migração 39): ALLOWLIST — só a área de marketing, a troca
 // de senha e a sessão. Mais seguro que auditar cada rota: tela ou API nova do
 // comercial nasce fechada para o marketing.
-const PAGINAS_MARKETING = ["/", "/trocar-senha", "/marketing"];
-const APIS_MARKETING = ["/api/marketing", "/api/sessao", "/api/senha", "/api/logout"];
+// Papéis patrimonio e colaborador (migração 44): o mesmo princípio. A via do
+// termo (/patrimonio/termos/:id/via) passa pela allowlist, mas a própria rota
+// confere se o termo é da pessoa da sessão (404 caso contrário).
+const COMUNS_API = ["/api/sessao", "/api/senha", "/api/logout"];
+const ALLOWLIST = {
+  marketing: { paginas: ["/", "/trocar-senha", "/marketing"], prefixos: [], apis: ["/api/marketing", ...COMUNS_API] },
+  patrimonio: { paginas: ["/", "/trocar-senha", "/patrimonio", "/meu-painel"], prefixos: ["/patrimonio/termos/"], apis: ["/api/patrimonio", ...COMUNS_API] },
+  colaborador: { paginas: ["/", "/trocar-senha", "/meu-painel"], prefixos: ["/patrimonio/termos/"], apis: ["/api/patrimonio/meus", ...COMUNS_API] },
+};
 const caminhoDe = (req) => req.originalUrl.split("?")[0].replace(/\/+$/, "") || "/";
+const paginaLiberada = (papel, caminho) => {
+  const a = ALLOWLIST[papel];
+  return !a || a.paginas.includes(caminho) || a.prefixos.some((p) => caminho.startsWith(p));
+};
 
 function exigirLoginPagina(req, res, next) {
   const usuario = usuarioDaSessao(req);
   if (usuario) {
     req.usuario = usuario;
-    if (usuario.papel === "marketing" && !PAGINAS_MARKETING.includes(caminhoDe(req))) return res.status(403).send(paginaProibidaMarketing());
+    if (!paginaLiberada(usuario.papel, caminhoDe(req))) return res.status(403).send(paginaProibidaMarketing());
     return next();
   }
   req.session.destroy(() => res.redirect("/login"));
@@ -260,7 +272,14 @@ app.use("/api", exigirLoginApi, exigirSenhaTrocada);
 app.use("/api", (req, res, next) => {
   const caminho = caminhoDe(req);
   const dentro = (lista) => lista.some((p) => caminho === p || caminho.startsWith(p + "/"));
-  if (req.usuario.papel === "marketing" && !dentro(APIS_MARKETING)) return res.status(403).json({ error: "Acesso restrito à área de marketing." });
+  const lista = ALLOWLIST[req.usuario.papel];
+  if (lista && !dentro(lista.apis)) {
+    return res.status(403).json({ error: req.usuario.papel === "marketing" ? "Acesso restrito à área de marketing." : "Acesso restrito a esta área." });
+  }
+  // /api/patrimonio: admin e patrimônio; /api/patrimonio/meus: qualquer usuário (corte pela pessoa da sessão)
+  if (dentro(["/api/patrimonio"]) && !dentro(["/api/patrimonio/meus"]) && !["admin", "patrimonio"].includes(req.usuario.papel)) {
+    return res.status(403).json({ error: "Área do patrimônio." });
+  }
   if (dentro(["/api/marketing"]) && !["admin", "marketing"].includes(req.usuario.papel)) return res.status(403).json({ error: "Área do marketing." });
   next();
 });
@@ -372,7 +391,7 @@ app.put("/api/metas/config", (req, res) => {
 // ---------- Páginas internas ----------
 
 // Senha temporária: qualquer página interna redireciona para a troca
-app.use(["/aulas", "/aula-ao-vivo", "/aula", "/central", "/relatorios", "/saude", "/metas", "/territorio", "/prospeccao", "/usuarios", "/meu-painel", "/marketing"],
+app.use(["/aulas", "/aula-ao-vivo", "/aula", "/central", "/relatorios", "/saude", "/metas", "/territorio", "/prospeccao", "/usuarios", "/meu-painel", "/marketing", "/patrimonio"],
   exigirLoginPagina, exigirSenhaTrocada);
 
 app.get("/", exigirLoginPagina, (req, res) => res.redirect(req.usuario.senha_temporaria ? "/trocar-senha" : paginaInicialDe(req.usuario)));
@@ -416,6 +435,21 @@ app.get("/prospeccao", exigirLoginPagina, (req, res) =>
 app.get("/marketing", exigirLoginPagina, (req, res) => {
   if (!["admin", "marketing"].includes(req.usuario.papel)) return res.status(403).send(paginaProibidaMarketing());
   res.sendFile(path.join(__dirname, "marketing.html"));
+});
+// PATRIMÔNIO (migração 44): tela da Emanuelle (papel patrimonio) e do admin
+app.get("/patrimonio", exigirLoginPagina, (req, res) => {
+  if (!["admin", "patrimonio"].includes(req.usuario.papel)) return res.status(403).send(paginaProibidaMarketing());
+  res.sendFile(path.join(__dirname, "patrimonio.html"));
+});
+// Via do termo para impressão: admin, patrimônio ou a própria pessoa do termo (senão 404)
+app.get("/patrimonio/termos/:id/via", exigirLoginPagina, (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store").type("html").send(patrimonio.htmlVia(req.params.id, req.usuario));
+  } catch (err) {
+    if (err.status) return res.status(err.status).send(paginaProibidaMarketing());
+    console.error("[/patrimonio/termos/via]", err.message || err);
+    res.status(500).send("Falha ao montar a via do termo.");
+  }
 });
 app.get("/fim-de-ano", exigirLoginPagina, (req, res) =>
   res.sendFile(path.join(__dirname, "fim-de-ano.html"))
@@ -1395,18 +1429,33 @@ const listarUsuarios = () =>
   ).all();
 
 app.get("/api/usuarios", (req, res) => {
-  const pessoas = db.prepare("SELECT id, nome, ativo FROM pessoas WHERE tipo = 'consultor' ORDER BY nome").all();
+  // consultor (vendedor) e administrativo (patrimônio/colaborador, migração 44); canal nunca tem login
+  const pessoas = db.prepare("SELECT id, nome, ativo, tipo FROM pessoas WHERE tipo IN ('consultor', 'administrativo') ORDER BY tipo DESC, nome").all();
   res.json({ usuarios: listarUsuarios(), pessoas });
 });
 
-function validarPessoaDeVendedor(papel, pessoaId, usuarioId) {
-  if (papel !== "vendedor") return null;
+const MSG_PAPEIS = "Papel deve ser admin, vendedor, marketing, patrimonio ou colaborador.";
+// Pessoa ligada ao usuário, por papel (migração 44):
+//   vendedor    → obrigatória, consultor
+//   colaborador → obrigatória, consultor ou administrativo (vê só os próprios itens)
+//   admin, patrimonio → opcional, consultor ou administrativo
+//   marketing   → nenhuma (Gustavo segue na Gerencial pelo nome no Omie)
+function validarPessoaDoUsuario(papel, pessoaId, usuarioId) {
+  if (papel === "marketing") return null;
+  const falha = (msg) => Object.assign(new Error(msg), { status: 400 });
+  if (pessoaId === null || pessoaId === undefined || pessoaId === "") {
+    if (papel === "vendedor") throw falha("Vendedor precisa estar ligado a um consultor de `pessoas`.");
+    if (papel === "colaborador") throw falha("Colaborador precisa estar ligado a uma pessoa (consultor ou administrativo).");
+    return null;
+  }
   const id = Number(pessoaId);
-  if (!Number.isInteger(id) || !db.prepare("SELECT 1 FROM pessoas WHERE id = ? AND tipo = 'consultor'").get(id)) {
-    throw Object.assign(new Error("Vendedor precisa estar ligado a um consultor de `pessoas`."), { status: 400 });
+  const tipos = papel === "vendedor" ? ["consultor"] : ["consultor", "administrativo"];
+  const p = Number.isInteger(id) ? db.prepare("SELECT tipo FROM pessoas WHERE id = ?").get(id) : null;
+  if (!p || !tipos.includes(p.tipo)) {
+    throw falha(papel === "vendedor" ? "Vendedor precisa estar ligado a um consultor de `pessoas`." : "A pessoa precisa ser consultor ou administrativo.");
   }
   const dono = db.prepare("SELECT id, login FROM usuarios WHERE pessoa_id = ? AND id != COALESCE(?, -1)").get(id, usuarioId ?? null);
-  if (dono) throw Object.assign(new Error(`Esse consultor já está ligado ao usuário "${dono.login}".`), { status: 400 });
+  if (dono) throw falha(`Essa pessoa já está ligada ao usuário "${dono.login}".`);
   return id;
 }
 
@@ -1416,9 +1465,9 @@ app.post("/api/usuarios", async (req, res) => {
     const nome = String(req.body?.nome || "").trim();
     const papel = String(req.body?.papel || "");
     if (!/^[a-z0-9._-]{3,40}$/.test(login)) return res.status(400).json({ error: "Login: 3–40 caracteres, letras minúsculas, números, ponto, hífen ou sublinhado." });
-    if (!PAPEIS.includes(papel)) return res.status(400).json({ error: "Papel deve ser admin, vendedor ou marketing." });
+    if (!PAPEIS.includes(papel)) return res.status(400).json({ error: MSG_PAPEIS });
     if (db.prepare("SELECT 1 FROM usuarios WHERE lower(login) = ?").get(login)) return res.status(400).json({ error: "Login já existe." });
-    const pessoaId = validarPessoaDeVendedor(papel, req.body?.pessoaId, null);
+    const pessoaId = validarPessoaDoUsuario(papel, req.body?.pessoaId, null);
     const senhaInicial = gerarSenhaInicial();
     const info = db.prepare(
       `INSERT INTO usuarios (login, senha_hash, nome, papel, ativo, criado_em, pessoa_id, senha_temporaria)
@@ -1437,14 +1486,11 @@ app.patch("/api/usuarios/:id", (req, res) => {
     if (!alvo) return res.status(404).json({ error: "Usuário não encontrado." });
     const { nome, ativo, pessoaId, papel } = req.body || {};
     const novoPapel = papel === undefined ? alvo.papel : String(papel);
-    if (!PAPEIS.includes(novoPapel)) return res.status(400).json({ error: "Papel deve ser admin, vendedor ou marketing." });
+    if (!PAPEIS.includes(novoPapel)) return res.status(400).json({ error: MSG_PAPEIS });
     if (alvo.id === req.usuario.id && (ativo === false || ativo === 0 || novoPapel !== "admin")) {
       return res.status(400).json({ error: "Você não pode desativar ou rebaixar o próprio usuário." });
     }
-    const novaPessoa = novoPapel === "marketing" ? null // marketing não é consultor (Gustavo segue na Gerencial pelo nome no Omie)
-      : novoPapel === "vendedor"
-      ? validarPessoaDeVendedor("vendedor", pessoaId === undefined ? alvo.pessoa_id : pessoaId, alvo.id)
-      : (pessoaId === undefined ? alvo.pessoa_id : (pessoaId === null ? null : validarPessoaDeVendedor("vendedor", pessoaId, alvo.id)));
+    const novaPessoa = validarPessoaDoUsuario(novoPapel, pessoaId === undefined ? alvo.pessoa_id : pessoaId, alvo.id);
     db.prepare("UPDATE usuarios SET nome = ?, ativo = ?, pessoa_id = ?, papel = ? WHERE id = ?")
       .run(nome === undefined ? alvo.nome : String(nome).trim() || alvo.login, ativo === undefined ? alvo.ativo : (ativo ? 1 : 0), novaPessoa, novoPapel, alvo.id);
     if (ativo === false || ativo === 0) db.prepare("DELETE FROM sessions WHERE sess LIKE ?").run(`%"usuarioId":${alvo.id}%`); // derruba sessões abertas
@@ -1707,6 +1753,41 @@ function tiqueMarketing() {
   }
   syncAutomatico().catch((err) => console.error("✖ sync automático:", err.message || err));
 }
+
+// ---------- PATRIMÔNIO (migrações 43–44) ----------
+// /api/patrimonio/* só admin e patrimonio (middleware de /api); /meus é de
+// qualquer usuário e corta pela pessoa da sessão — nunca recebe id de fora.
+const rotaPat = (nome, fn, status = 200) => (req, res) => {
+  try {
+    res.status(status).json(fn(req));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    if (/UNIQUE constraint failed: patrimonio_termo_itens\.item_id|idx_patrimonio_um_termo_aberto/.test(err.message || "")) {
+      return res.status(409).json({ error: "Um dos itens já está em outro termo aberto." });
+    }
+    tratarErro(`patrimonio/${nome}`, err, res);
+  }
+};
+app.get("/api/patrimonio/meus", rotaPat("meus", (req) => patrimonio.meusItens(req.usuario)));
+app.get("/api/patrimonio", rotaPat("payload", (req) => patrimonio.payload(req.usuario)));
+app.patch("/api/patrimonio/itens/:id", rotaPat("itens", (req) => ({ item: patrimonio.atualizarItem(req.params.id, req.body || {}, req.usuario) })));
+app.post("/api/patrimonio/itens/:id/status", rotaPat("itens/status", (req) => ({ item: patrimonio.mudarStatus(req.params.id, req.body || {}, req.usuario) })));
+app.get("/api/patrimonio/itens/:id/historico", rotaPat("itens/historico", (req) => patrimonio.historicoDoItem(req.params.id)));
+app.post("/api/patrimonio/entregas", rotaPat("entregas", (req) => patrimonio.entregar(req.body || {}, req.usuario), 201));
+app.post("/api/patrimonio/devolucoes", rotaPat("devolucoes", (req) => patrimonio.devolver(req.body || {}, req.usuario), 201));
+app.post("/api/patrimonio/termos/:id/cancelar", rotaPat("termos/cancelar", (req) => patrimonio.cancelarTermo(req.params.id, req.body?.motivo, req.usuario)));
+app.post("/api/patrimonio/locais", rotaPat("locais", (req) => ({ local: patrimonio.criarLocal(req.body || {}) }), 201));
+app.patch("/api/patrimonio/locais/:id", rotaPat("locais/:id", (req) => ({ local: patrimonio.editarLocal(req.params.id, req.body || {}) })));
+app.get("/api/patrimonio/importacoes/:id", rotaPat("importacoes/:id", (req) => patrimonio.detalheImportacao(req.params.id)));
+app.post("/api/patrimonio/importar", corpoXlsx, async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: "Corpo vazio — envie a planilha .xlsx do patrimônio." });
+  try {
+    res.json(await patrimonio.importar(req.body, String(req.query.arquivo || "patrimonio.xlsx").slice(0, 200), req.usuario.id));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("patrimonio/importar", err, res);
+  }
+});
 
 function paginaProibidaMarketing() {
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Acesso restrito — jonIAs</title>

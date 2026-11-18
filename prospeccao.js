@@ -297,7 +297,7 @@ let nomesConsultoresCache = null;
 function nomesConsultores() {
   if (nomesConsultoresCache) return nomesConsultoresCache;
   nomesConsultoresCache = new Set();
-  for (const p of db.prepare("SELECT nome, wallet_nome, nomes_alternativos FROM pessoas").all()) {
+  for (const p of db.prepare("SELECT nome, wallet_nome, nomes_alternativos FROM pessoas WHERE tipo IN ('consultor', 'canal')").all()) {
     for (const n of [p.nome, p.wallet_nome, ...JSON.parse(p.nomes_alternativos || "[]")]) {
       if (n) nomesConsultoresCache.add(normalizarRotulo(n));
     }
