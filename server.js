@@ -112,7 +112,7 @@ function usuarioDaSessao(req) {
 const COMUNS_API = ["/api/sessao", "/api/senha", "/api/logout"];
 const ALLOWLIST = {
   marketing: { paginas: ["/", "/trocar-senha", "/marketing"], prefixos: [], apis: ["/api/marketing", ...COMUNS_API] },
-  patrimonio: { paginas: ["/", "/trocar-senha", "/patrimonio", "/meu-painel"], prefixos: ["/patrimonio/termos/"], apis: ["/api/patrimonio", ...COMUNS_API] },
+  patrimonio: { paginas: ["/", "/trocar-senha", "/patrimonio", "/patrimonio/roteiro", "/meu-painel"], prefixos: ["/patrimonio/termos/"], apis: ["/api/patrimonio", ...COMUNS_API] },
   colaborador: { paginas: ["/", "/trocar-senha", "/meu-painel"], prefixos: ["/patrimonio/termos/"], apis: ["/api/patrimonio/meus", ...COMUNS_API] },
 };
 const caminhoDe = (req) => req.originalUrl.split("?")[0].replace(/\/+$/, "") || "/";
@@ -225,7 +225,11 @@ app.get("/api/tv/dados", (req, res) => {
   let dadosMarketing = { ativo: false };
   try { dadosMarketing = marketing.painelTvMarketing({ previa: previaMarketing }); }
   catch (err) { console.error("[tv] marketing:", err.message || err); }
-  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador({ tv: true }), marketing: dadosMarketing });
+  // Patrimônio: mesmo interruptor/prévia do marketing; só números, nenhum nome
+  let dadosPatrimonio = { ativo: false };
+  try { dadosPatrimonio = patrimonio.painelTvPatrimonio({ previa: previaMarketing }); }
+  catch (err) { console.error("[tv] patrimonio:", err.message || err); }
+  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador({ tv: true }), marketing: dadosMarketing, patrimonio: dadosPatrimonio });
 });
 
 // SSE: empurra "dados atualizados" para as TVs quando uma ingestão termina.
@@ -440,6 +444,11 @@ app.get("/marketing", exigirLoginPagina, (req, res) => {
 app.get("/patrimonio", exigirLoginPagina, (req, res) => {
   if (!["admin", "patrimonio"].includes(req.usuario.papel)) return res.status(403).send(paginaProibidaMarketing());
   res.sendFile(path.join(__dirname, "patrimonio.html"));
+});
+// Roteiro de coleta para imprimir (aba Gerencial): admin e patrimonio
+app.get("/patrimonio/roteiro", exigirLoginPagina, (req, res) => {
+  if (!["admin", "patrimonio"].includes(req.usuario.papel)) return res.status(403).send(paginaProibidaMarketing());
+  res.set("Cache-Control", "no-store").type("html").send(patrimonio.htmlRoteiro());
 });
 // Via do termo para impressão: admin, patrimônio ou a própria pessoa do termo (senão 404)
 app.get("/patrimonio/termos/:id/via", exigirLoginPagina, (req, res) => {
@@ -1768,7 +1777,24 @@ const rotaPat = (nome, fn, status = 200) => (req, res) => {
     tratarErro(`patrimonio/${nome}`, err, res);
   }
 };
+// TV do patrimônio: toda escrita bem-sucedida avisa as TVs (refetch silencioso),
+// só com a tela ligada — mesmo princípio do marketing
+app.use("/api/patrimonio", (req, res, next) => {
+  if (req.method !== "GET") {
+    res.on("finish", () => { if (res.statusCode < 400 && patrimonio.tvLigada()) emitirEventoTv("patrimonio", "config"); });
+  }
+  next();
+});
 app.get("/api/patrimonio/meus", rotaPat("meus", (req) => patrimonio.meusItens(req.usuario)));
+app.get("/api/patrimonio/gerencial", rotaPat("gerencial", (req) => patrimonio.gerencial({ mes: String(req.query.mes || "") })));
+app.get("/api/patrimonio/tv", rotaPat("tv", () => ({ ativo: patrimonio.tvLigada() })));
+app.put("/api/patrimonio/tv", (req, res) => {
+  if (req.usuario.papel !== "admin") return res.status(403).json({ error: "Só o administrador liga a tela na TV." });
+  if (typeof req.body?.ativo !== "boolean") return res.status(400).json({ error: "Informe { ativo: true|false }." });
+  const r = patrimonio.definirTv(req.body.ativo);
+  emitirEventoTv("patrimonio", "config"); // ligar/desligar entra ou sai da rotação na hora
+  res.json(r);
+});
 app.get("/api/patrimonio", rotaPat("payload", (req) => patrimonio.payload(req.usuario)));
 app.patch("/api/patrimonio/itens/:id", rotaPat("itens", (req) => ({ item: patrimonio.atualizarItem(req.params.id, req.body || {}, req.usuario) })));
 app.post("/api/patrimonio/itens/:id/status", rotaPat("itens/status", (req) => ({ item: patrimonio.mudarStatus(req.params.id, req.body || {}, req.usuario) })));

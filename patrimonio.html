@@ -24,6 +24,7 @@
       <button type="button" class="aba-btn ativo" data-aba="itens">📦 Itens</button>
       <button type="button" class="aba-btn" data-aba="termos">📝 Termos</button>
       <button type="button" class="aba-btn" data-aba="locais">🏢 Locais</button>
+      <button type="button" class="aba-btn" data-aba="gerencial">📊 Gerencial</button>
     </nav>
 
     <!-- ================= ITENS ================= -->
@@ -103,6 +104,33 @@
         </table>
       </div>
       <p class="texto-suave">Local sem item não é erro: a carga inicial é parcial e o inventário completo sai da conferência física.</p>
+    </section>
+
+    <!-- ================= GERENCIAL ================= -->
+    <section id="aba-gerencial" class="pat-secao" hidden>
+      <div id="ger-tv" class="mk-tv-barra"></div>
+      <div id="ger-topo"></div>
+
+      <h3 class="secao-titulo">Roteiro de coleta <small class="texto-suave" id="ger-roteiro-resumo"></small></h3>
+      <div class="pat-filtros">
+        <a class="btn btn-mini" href="/patrimonio/roteiro" target="_blank" rel="noopener">🖨 Imprimir o roteiro</a>
+        <span class="texto-suave">Marque os itens e entregue: o termo assinado tira o item do roteiro.</span>
+      </div>
+      <div class="pat-selecao" id="ger-selecao" hidden>
+        <span id="ger-sel-texto"></span>
+        <button type="button" class="btn btn-mini btn-primario" id="ger-entregar">✍ Entregar</button>
+        <button type="button" class="btn btn-mini" id="ger-limpar-sel">limpar seleção</button>
+      </div>
+      <div id="ger-roteiro"></div>
+
+      <div class="pat-ger-grade">
+        <div><h3 class="secao-titulo">Itens por andar e sala</h3><div id="ger-locais"></div></div>
+        <div><h3 class="secao-titulo">Itens por responsável</h3><div id="ger-pessoas"></div></div>
+      </div>
+      <div class="pat-ger-grade">
+        <div><h3 class="secao-titulo">Em reparo há mais de <span id="ger-reparo-dias">15</span> dias</h3><div id="ger-reparo"></div></div>
+        <div><h3 class="secao-titulo">Termos do mês</h3><div id="ger-termos"></div></div>
+      </div>
     </section>
   </main>
 

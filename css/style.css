@@ -1977,6 +1977,31 @@ body:not(.mk-admin) .so-admin-mk { display: none; }
 .mk-wa-retro { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; color: var(--texto); }
 .mk-wa-retro input[name="obs"] { min-width: 180px; }
 
+/* ============ TV — tela PATRIMÔNIO (js/tv.js renderPatrimonio) ============
+   Três números gigantes + a barra do inventário completo. Zero = verde ("0 ✓");
+   tudo completo = faixa verde "INVENTÁRIO COMPLETO" (só com ?fixo=patrimonio:
+   completo, a tela sai da rotação). */
+.tv-pat-numeros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6vw; flex: 1; min-height: 0; align-items: stretch; }
+.tv-pat-num {
+  background: rgba(255, 92, 114, 0.08); border: 2px solid rgba(255, 92, 114, 0.55); border-radius: 1.2vw;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6vw; color: var(--vermelho);
+}
+.tv-pat-num b { font-size: 11vw; line-height: 1; font-weight: 900; font-variant-numeric: tabular-nums; }
+.tv-pat-num span { font-size: 2.4vw; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--texto); }
+.tv-pat-num.tv-pat-zero { background: rgba(61, 220, 132, 0.1); border-color: rgba(61, 220, 132, 0.6); color: var(--verde); }
+.tv-pat-num.tv-pat-zero b { font-size: 8vw; }
+.tv-pat-ok {
+  grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; border-radius: 1.2vw;
+  font-size: 6vw; font-weight: 900; letter-spacing: 2px; color: var(--verde);
+  background: rgba(61, 220, 132, 0.12); border: 3px solid rgba(61, 220, 132, 0.7);
+}
+.tv-pat-barra-linha { display: flex; align-items: center; gap: 1.4vw; margin-top: 1.6vw; }
+.tv-pat-barra-linha .tv-trilha { flex: 1; height: 3vw; }
+.tv-pat-rot { font-size: 1.5vw; font-weight: 800; letter-spacing: 2px; color: var(--texto-suave); white-space: nowrap; }
+.tv-pat-pct { font-size: 4.2vw; font-weight: 900; min-width: 10vw; text-align: right; font-variant-numeric: tabular-nums; }
+.tv-patrimonio.tv-pat-completo .tv-pat-pct { color: var(--verde); }
+.tv-pat-rodape { font-size: 1.6vw; color: var(--texto-suave); margin-top: 0.6vw; text-align: right; }
+
 /* ============ TV — tela MARKETING (Fase 3; js/tv.js renderMarketing) ============
    Kesley × Gustavo lado a lado. Zero positivo: coluna em dia ganha borda e
    placar verdes ("✓ TUDO EM DIA"); atrasado = vermelho com os dias; ADS com
@@ -2060,6 +2085,46 @@ body:not(.mk-admin) .so-admin-mk { display: none; }
 .pat-relatorio { margin: 0.6rem 0; padding: 0.7rem 0.9rem; border-radius: 10px; background: var(--fundo-painel); }
 .pat-relatorio-lista { max-height: 16rem; overflow: auto; font-size: 0.85rem; padding-left: 1.1rem; }
 .pat-aviso { color: var(--amarelo); }
+
+/* Aba Gerencial do patrimônio (js/patrimonio.js renderGerencial) */
+.pat-ger-status { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; margin: 0.2rem 0 0.8rem; color: var(--texto-suave); font-size: 0.9rem; }
+.pat-ger-status b { color: var(--texto); font-size: 1.15rem; margin-right: 0.2rem; }
+.pat-ger-buracos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.6rem; margin-bottom: 0.9rem; }
+.pat-ger-buraco {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; padding: 0.7rem 0.9rem; border-radius: 12px; cursor: pointer;
+  border: 1px solid rgba(255, 200, 87, 0.55); background: rgba(255, 200, 87, 0.08); color: var(--amarelo); text-align: left; font: inherit;
+}
+.pat-ger-buraco b { font-size: 2rem; line-height: 1; font-weight: 800; }
+.pat-ger-buraco span { font-size: 0.85rem; color: var(--texto); }
+.pat-ger-buraco:hover:not(:disabled) { background: rgba(255, 200, 87, 0.16); }
+.pat-ger-buraco-ok { border-color: rgba(61, 220, 132, 0.5); background: rgba(61, 220, 132, 0.07); color: var(--verde); cursor: default; }
+.pat-ger-inventario { border: 1px solid var(--borda-painel); border-radius: 12px; padding: 0.8rem 1rem; margin-bottom: 1.2rem; }
+.pat-ger-inv-linha { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.pat-ger-inv-linha b { font-size: 1.6rem; }
+.pat-ger-trilha { height: 14px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); overflow: hidden; margin: 0.4rem 0; }
+.pat-ger-trilha div { height: 100%; background: linear-gradient(135deg, var(--acento), var(--acento-2)); border-radius: 999px; }
+.pat-ger-completo { border-color: rgba(61, 220, 132, 0.6); }
+.pat-ger-completo .pat-ger-inv-linha, .pat-ger-completo b { color: var(--verde); }
+.pat-ger-completo .pat-ger-trilha div { background: linear-gradient(135deg, var(--verde), var(--acento-2)); }
+.pat-ger-sub { margin: 0.9rem 0 0.4rem; font-size: 0.95rem; }
+.pat-ger-grupo { border: 1px solid var(--borda-painel); border-radius: 10px; margin-bottom: 0.5rem; }
+.pat-ger-grupo summary { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.5rem 0.8rem; cursor: pointer; }
+.pat-ger-grupo ul { list-style: none; margin: 0; padding: 0 0.8rem 0.6rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.pat-ger-grupo li label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; cursor: pointer; padding: 0.15rem 0; }
+.pat-ger-grupo li input { transform: translateY(2px); }
+.pat-ger-acoes { display: flex; gap: 0.4rem; }
+#ger-selecao { position: sticky; top: 0; z-index: 3; }
+.pat-ger-grade { display: grid; grid-template-columns: 3fr 2fr; gap: 1.2rem; margin-top: 0.6rem; }
+.pat-ger-grade > div { min-width: 0; }
+.pat-ger-zerado td { background: rgba(255, 200, 87, 0.06); }
+.pat-alerta-txt { color: var(--amarelo); font-weight: 700; }
+.pat-ger-lista { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.pat-ger-mes { min-width: 9rem; text-align: center; }
+@media (max-width: 900px) { .pat-ger-grade { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+  .pat-ger-grade { grid-template-columns: 1fr; }
+  .pat-ger-buraco b { font-size: 1.6rem; }
+}
 .pat-ok { color: var(--verde); font-weight: 700; font-size: 1.05rem; }
 .pat-menu { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
 .pat-historico { padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.55rem; font-size: 0.88rem; max-height: 60vh; overflow: auto; }

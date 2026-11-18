@@ -12,10 +12,10 @@ const params = new URLSearchParams(location.search);
 const token = params.get("token") || "";
 // ?giro=N segundos por tela (padrão 20 desde 2026-10-01; antes 30, e 45 até 2026-09-25)
 const GIRO_MS = Math.max(6, Number(params.get("giro")) || 20) * 1000;
-// Cartão de destaque (falta para a meta da semana): entra ENTRE cada tela da
-// rotação, com duração própria — ?destaque=N segundos (padrão 12, mín. 4)
+// Cartão de destaque (falta para a meta da semana): entra a cada DUAS telas da
+// rotação (desde 2026-11-18; antes, depois de cada tela), com duração própria — ?destaque=N segundos (padrão 12, mín. 4)
 const DESTAQUE_MS = Math.max(4, Number(params.get("destaque")) || 12) * 1000;
-const FIXO = params.get("fixo"); // status | ranking | semana | receita | mes | marketing | parados3 | parados10 | destaque
+const FIXO = params.get("fixo"); // status | ranking | semana | receita | mes | parados3 | parados10 | marketing | patrimonio | destaque
 // ?previa=1: mostra a tela MARKETING desligada — o servidor só atende admin logado neste navegador
 const PREVIA = params.get("previa") === "1";
 // Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
@@ -307,7 +307,7 @@ function proximaCelebracao() {
 
 // ---------- Rotação entre visões ----------
 
-const VISOES = ["status", "ranking", "destaque", "semana", "receita", "mes", "marketing", "parados3", "parados10"];
+const VISOES = ["status", "ranking", "destaque", "semana", "receita", "mes", "parados3", "parados10", "marketing", "patrimonio"];
 let receitaAvisada = false;
 let visoesAtivas = [];
 let visaoAtual = 0;
@@ -343,16 +343,26 @@ function aplicarVisoes(d) {
   telas.push("semana");
   if (temReceita) telas.push("receita");
   telas.push("mes");
-  // MARKETING (Fase 3): só com o interruptor da /marketing ligado (o payload vem vazio desligado)
-  if (d.marketing?.ativo) { telas.push("marketing"); foraAvisadas.delete("marketing"); }
-  else avisarFora("marketing", "tela do marketing desligada em /marketing");
   // Leads parados: cada faixa só entra com alguém nela (tela vazia sai da rotação)
   for (const [visao, faixa] of [["parados3", "amarela"], ["parados10", "vermelha"]]) {
     if (d.parados?.faixas[faixa]?.total) { telas.push(visao); foraAvisadas.delete(visao); }
     else avisarFora(visao, `nenhuma oportunidade ativa na faixa ${faixa}`);
   }
-  // destaque intercalado: STATUS → cartão → RANKING → cartão → SEMANA → cartão → …
-  const novas = temDestaque ? telas.flatMap((t) => [t, "destaque"]) : telas;
+  // Rotação única agrupada por área (2026-11-18): comercial inteiro → marketing → patrimônio
+  // MARKETING (Fase 3): só com o interruptor da /marketing ligado (o payload vem vazio desligado)
+  if (d.marketing?.ativo) { telas.push("marketing"); foraAvisadas.delete("marketing"); }
+  else avisarFora("marketing", "tela do marketing desligada em /marketing");
+  // PATRIMÔNIO: só com o interruptor da aba Gerencial ligado; com o inventário
+  // 100% completo sai da rotação (com ?fixo=patrimonio continua, em verde)
+  if (d.patrimonio?.ativo && d.patrimonio.total && (!d.patrimonio.completo || FIXO === "patrimonio")) { telas.push("patrimonio"); foraAvisadas.delete("patrimonio"); }
+  else avisarFora("patrimonio", !d.patrimonio?.ativo ? "tela do patrimônio desligada em /patrimonio (aba Gerencial)" : d.patrimonio.total ? "inventário 100% completo" : "nenhum item no patrimônio");
+  // destaque a cada DUAS telas (decisão do usuário, 2026-11-18: nove vezes o
+  // mesmo cartão por ciclo era repetição demais): A → B → cartão → C → D →
+  // cartão → …; com número ímpar de telas, a última também ganha o cartão
+  // (nunca três telas seguidas sem ele, contando a volta do ciclo)
+  const novas = temDestaque
+    ? telas.flatMap((t, i) => (i % 2 === 1 || i === telas.length - 1 ? [t, "destaque"] : [t]))
+    : telas;
   const fixoValido = FIXO && novas.includes(FIXO) ? FIXO : null;
   const telaAntes = visoesAtivas[visaoAtual];
   visoesAtivas = fixoValido ? [fixoValido] : novas;
@@ -364,7 +374,7 @@ function aplicarVisoes(d) {
   mostrarVisao(visoesAtivas[visaoAtual]);
 }
 
-const NOMES_VISAO = { status: "STATUS", ranking: "RANKING DE VENDAS", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", marketing: "MARKETING", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
+const NOMES_VISAO = { status: "STATUS", ranking: "RANKING DE VENDAS", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", marketing: "MARKETING", patrimonio: "PATRIMÔNIO", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
 
 function mostrarVisao(nome) {
   if (nome === "parados3" || nome === "parados10") ajustarCards(nome);
@@ -822,6 +832,7 @@ function renderizar(d, origem) {
 
   renderParados(d.parados);
   renderMarketing(d.marketing);
+  renderPatrimonio(d.patrimonio);
 
   // ---- DESTAQUE: falta para a meta da SEMANA (equipe, R$) ----
   const eq = d.semana.equipe.receita;
@@ -995,6 +1006,31 @@ function renderMarketing(m) {
     if (marketingAnterior && marketingAnterior[chave] === false && m[chave].emDia) brilhar(alvo, "tv-glow-meta");
   }
   marketingAnterior = { kesley: m.kesley.emDia, gustavo: m.gustavo.emDia };
+}
+
+// ---------- PATRIMÔNIO (patrimonio.js → painelTvPatrimonio) ----------
+// Três números grandes (sem responsável, sem local, sem assinatura) + a barra
+// do inventário completo. SÓ números: o payload público não tem nome, código,
+// sala nem descrição. Zero nos três e a barra cheia = "INVENTÁRIO COMPLETO" em
+// verde (e a tela sai da rotação — aplicarVisoes).
+let patrimonioAnterior = null;
+function renderPatrimonio(p) {
+  if (!p?.ativo) return;
+  el("patrimonio-titulo").textContent = `PATRIMÔNIO · INVENTÁRIO${p.previa ? " · PRÉVIA (desligada na TV)" : ""}`;
+  const caixa = el("visao-patrimonio");
+  caixa.classList.toggle("tv-pat-completo", !!p.completo);
+  const cartao = (n, rot) => `<div class="tv-pat-num ${n ? "" : "tv-pat-zero"}"><b>${n ? num(n) : "0 ✓"}</b><span>${rot}</span></div>`;
+  const html = p.completo
+    ? `<div class="tv-pat-ok">✓ INVENTÁRIO COMPLETO</div>`
+    : cartao(p.semResponsavel, "sem responsável") + cartao(p.semLocal, "sem local") + cartao(p.semAssinatura, "sem assinatura");
+  const alvo = el("patrimonio-numeros");
+  if (alvo.dataset.h !== html) { alvo.innerHTML = html; alvo.dataset.h = html; }
+  el("patrimonio-barra").style.width = `${p.pct}%`;
+  el("patrimonio-barra").classList.toggle("fill-ok", !!p.completo);
+  el("patrimonio-pct").textContent = `${p.pct}%`;
+  el("patrimonio-rodape").textContent = `${num(p.completos)} de ${num(p.total)} itens completos`;
+  if (patrimonioAnterior != null && p.pct > patrimonioAnterior) brilhar(caixa, p.completo ? "tv-glow-meta" : "tv-glow");
+  patrimonioAnterior = p.pct;
 }
 
 // ---------- Relógio / status ----------

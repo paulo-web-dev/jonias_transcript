@@ -87,7 +87,7 @@ aula-ai/
 ├── scripts/diagnostico-fim-de-ano.js # SÓ LEITURA: faixas × IBGE, aptos por vendedor/setor, faturamento nov/dez × PDF, dias úteis
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
 ├── patrimonio.js    # PATRIMÔNIO (migrações 43–45): importação, entrega/devolução/transferência com termo assinado, cancelamento, via impressa, meus itens
-├── patrimonio.html  # Itens / Termos / Locais (rota /patrimonio; papel patrimonio e admin; funciona no celular) — js/patrimonio.js
+├── patrimonio.html  # Itens / Termos / Locais / Gerencial (rota /patrimonio; papel patrimonio e admin; funciona no celular) — js/patrimonio.js
 ├── escopo.js        # papéis (admin | vendedor | marketing | patrimonio | colaborador) e escopo por regional (campanha própria da Rota: prospecção livre) — corte no servidor
 ├── usuarios.html    # usuários e carteiras (rota /usuarios, admin)
 ├── trocar-senha.html # troca de senha (obrigatória no 1º acesso)
@@ -720,7 +720,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `POST /api/saude/backup` | admin: backup agora, pelo mesmo caminho do automático; 201 ok / 500 falha, com o `resumo` |
 | `GET /api/oportunidades/sem-ticket` | leads ATIVOS com ticket zero (`leadsSemTicket()`): por consultor, total, mais antigo, faixas de idade e a lista (número, conta, fase, criada, dias, `noUltimoArquivo`); admin = todos os consultores ativos, vendedor = só os dele (SQL) |
 | `GET/POST /api/periodos/:id/feedbacks` | feedback individual com IA (Etapa 3): GET lista gerados + consultores elegíveis (`entra_feedback = 1`); POST `{pessoaId}` gera via Claude sobre o **snapshot mais recente** do período e grava em `feedbacks`; pessoa com `entra_feedback = 0` → 403 |
-| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: `status` e `premio` (telas STATUS e RANKING, `statusSemanaTv()` em `metricas.js` sobre `rotasDaSemanaTv()` de `rota.js`), `rota` (progresso da Rota do dia, `progressoTv()`), dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20 desde 2026-10-01; 30 de 25/09 a 30/09, antes 45), `?fixo=status\|ranking\|semana\|receita\|mes\|parados3\|parados10\|destaque` (HOJE e ROTA DO DIA saíram em 2026-10-02, com o `?dia=sempre`), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
+| `GET /tv?token=`, `GET /api/tv/dados?token=` e `GET /api/tv/eventos?token=` (SSE) | painel de TV: **fora do auth de sessão**, token de dispositivo `TV_TOKEN` do .env comparado com `timingSafeEqual`; sem a variável → 503. Payload: `status` e `premio` (telas STATUS e RANKING, `statusSemanaTv()` em `metricas.js` sobre `rotasDaSemanaTv()` de `rota.js`), `rota` (progresso da Rota do dia, `progressoTv()`), dia parcial com ritmo projetado (jornada 09–18, pela hora do último dado), semana × dias úteis decorridos, receita mensal × R$ 75k e frescor por fonte. O SSE emite `{tipo:"dados", fonte}` ao fim de cada ingestão (heartbeat a cada 25 s); o cliente refaz o fetch e decide o que animar/celebrar por diff. Parâmetros: `?giro=N` (segundos por visão, padrão 20 desde 2026-10-01; 30 de 25/09 a 30/09, antes 45), `?fixo=status\|ranking\|semana\|receita\|mes\|parados3\|parados10\|marketing\|patrimonio\|destaque` (HOJE e ROTA DO DIA saíram em 2026-10-02, com o `?dia=sempre`), `?som=1\|0` (override por dispositivo da config global `tv_som`; ausente = segue a config), `?volume=0–1`, `?teto=N` (padrão 5 — evento com mais de N matrículas novas de hoje atualiza números sem celebração, com registro no console). O payload de `/api/tv/dados` inclui `som` (preferência global) |
 | `GET/PUT /api/config/tv` | preferência global de som das TVs (`configuracoes.tv_som`), autenticada; PUT `{som: true\|false}`, corpo inválido → 400; toggle na /central |
 | `GET /api/metas`, `PUT /api/metas`, `PUT /api/metas/config` | painel `/metas` (`resumoMetas()`): padrão vigente, valor efetivo por consultor (própria ou herdada, com "desde" e vigência futura), meta da equipe + soma das individuais, receita do mês com/sem Gerencial, histórico. PUT `{pessoaId: null\|id, escopo: dia\|semana\|mes\|equipe, vigenteDesde, valores: {ligacoes, leads, matriculas, receita \| receita (semana) \| semana, mes}}` — campo ausente não mexe, `null`/"" = sem meta (pessoa: volta a herdar), reais → centavos; data inválida/retroativa, escopo equipe com pessoa, consultor inexistente → 400/404. `/config` `{incluiGerencial: bool}`. Ambos emitem SSE `{tipo:"config"}` — a TV refaz o fetch em silêncio (sem pulso/toast) |
 | `GET /api/sincronizacoes/status` | MySQL configurado?, última sync, contagens locais |
@@ -785,6 +785,8 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `POST/PATCH /api/patrimonio/locais[/:id]` | cria `{andar, nome}` / renomeia ou desativa `{nome, ativo}` (local com itens não desativa) |
 | `GET /api/patrimonio/meus` | qualquer usuário: os itens da PESSOA DA SESSÃO (nunca recebe id; sem pessoa = vazio) |
 | `GET /patrimonio/termos/:id/via` | via do termo em HTML para imprimir/salvar em PDF; admin, patrimonio ou a própria pessoa do termo — senão o mesmo 404 de inexistente |
+| `GET /api/patrimonio/gerencial?mes=AAAA-MM`, `GET /patrimonio/roteiro` | aba Gerencial (admin e patrimonio): `porStatus`, `inventario` (buracos, completos, `pct` arredondado para baixo, `completo`), `roteiro` (`porPessoa`, `descobrir`), `porLocal` (`zerado`), `semLocal`, `porResponsavel`, `reparoLongo` (> 15 dias), `termosDoMes`, `tv`; mês inválido = mês corrente. Roteiro de coleta em HTML para imprimir |
+| `GET/PUT /api/patrimonio/tv` | interruptor da tela PATRIMÔNIO na TV (`configuracoes.patrimonio_tv`, nasce desligado); GET admin e patrimonio, PUT `{ativo: bool}` só admin (403; corpo inválido → 400). No payload da TV, `patrimonio` = `{ativo:false}` desligado, ou só números (`semResponsavel, semLocal, semAssinatura, completos, total, pct, completo, previa`) |
 
 Erros que escapam das rotas passam por um tratador final em `server.js`: corpo
 acima do limite → 413 JSON com tamanho e limite; outros 4xx/5xx → JSON com o
@@ -1047,9 +1049,11 @@ responde 401, páginas redirecionam para `/login`. A sessão guarda `usuarioId` 
   (semana e mês — número próprio, soma das individuais mostrada ao lado só
   para comparar) e o toggle da Gerencial. Na TV: **cartão de destaque "FALTA
   PARA A META DA SEMANA"** (R$ gigante + barra `.tv-trilha-grande` + "R$ feito
-  de R$ meta · % · dia N de 5" + linha do mês) **intercalado entre CADA tela da
-  rotação** (HOJE → cartão → SEMANA → cartão → RECEITA → cartão → MÊS →
-  cartão), com duração
+  de R$ meta · % · dia N de 5" + linha do mês) intercalado na rotação —
+  **desde 2026-11-18, a cada DUAS telas** (A → B → cartão → C → D → cartão
+  …; com número ímpar de telas a última também ganha o cartão; antes era
+  depois de cada tela, nove vezes por ciclo — ver "Aba Gerencial e tela
+  PATRIMÔNIO na TV"), com duração
   própria `?destaque=N` s (padrão 12; as telas seguem com `?giro`), `?fixo=
   destaque` para fixar; sem meta da semana cadastrada o cartão sai da rotação
   (log no console). Receita da equipe para a meta = TODOS os consultores
@@ -1801,8 +1805,9 @@ aprovada antes da seguinte:
   público da TV não leva nada do marketing. **Prévia**: `/tv?token=…&fixo=
   marketing&previa=1` mostra a tela desligada só para ADMIN logado no mesmo
   navegador (o servidor confere a sessão; a sala nunca recebe).
-  - Uma tela "MARKETING" na rotação, depois do MÊS e antes dos parados (cartão
-    da meta depois dela, `?fixo=marketing`, navegação manual), Kesley ×
+  - Uma tela "MARKETING" na rotação, **depois de todas as telas do comercial
+    (os parados incluídos) e antes do PATRIMÔNIO** desde 2026-11-18 (antes:
+    depois do MÊS e antes dos parados) (cartão da meta a cada duas telas, `?fixo=marketing`, navegação manual), Kesley ×
     Gustavo lado a lado, nomes curtos.
   - **Retroativos FORA da TV** (decisão do usuário: "dívida do sistema não vai
     para a parede"): só entra o que venceu depois do início do controle; nada
@@ -1922,8 +1927,9 @@ construídas**. Decisões do usuário (2026-11-18):
   numa cópia): 218 lidas, 211 importadas, 7 ignoradas (cabos 0067–0073,
   CONSUMO), 0 duplicadas, reimportar = 0 novos e 211 idênticos; 102 sem
   local; responsável vazio nas 218 (atribuição pelo termo, no jonIAs).
-  Locais sem item NÃO são erro: a carga é parcial de propósito e o
-  inventário real sai da conferência física da Emanuelle; a planilha antiga
+  Locais sem item NÃO são erro de importação: a carga é parcial de propósito e o
+  inventário real sai da conferência física da Emanuelle (na aba Gerencial
+  aparecem em ÂMBAR como "sem item — conferir", nunca em vermelho); a planilha antiga
   "controle Patrimonial" (ex-funcionários, aba Celulares com senhas) é só
   lista de conferência, nunca fonte de carga.
 - **Celulares (11 linhas na planilha: 0118, 0127, 0137, 0146, 0157,
@@ -1935,6 +1941,50 @@ construídas**. Decisões do usuário (2026-11-18):
 - Deploy: a produção está na 42, então sobem 43, 44 e 45 juntas. Backup e
   `conferir` antes (DEPLOY.md); o log tem de mostrar as três linhas de
   migração e a 43 com "antes N, depois N" de `importacoes` iguais.
+
+### 🚧 Patrimônio — aba Gerencial e tela PATRIMÔNIO na TV (2026-11-18, sem migração)
+Decisões do usuário (2026-11-18), em `patrimonio.js` (`gerencial`,
+`contarInventario`, `roteiroDeColeta`, `htmlRoteiro`, `painelTvPatrimonio`):
+- **Regra de "completo" por status** (base da barra, dos buracos e da TV):
+  em uso = responsável + local + conservação + termo de entrega aberto; em
+  estoque = local + conservação; em reparo = conservação; baixado fica FORA
+  da conta. Buracos com a mesma regra: sem responsável e sem assinatura =
+  itens em uso; sem local = em uso ou em estoque; sem conservação = qualquer
+  não baixado. Percentual arredondado PARA BAIXO: 100% só com todos.
+  Carga real no primeiro dia: 168 sem responsável, 102 sem local, 145 sem
+  conservação, 168 sem assinatura, **0%**.
+- **Aba Gerencial** em `/patrimonio` (admin e patrimonio; `GET
+  /api/patrimonio/gerencial?mes=`): totais por status; os quatro buracos
+  (clicar abre a aba Itens filtrada); a barra do inventário completo;
+  **roteiro de coleta** (itens em uso sem termo) em duas partes — "Colher a
+  assinatura — por pessoa" (com responsável, aberto, botão "Colher
+  assinatura" que abre a entrega já com a pessoa: regularização) e
+  **"Descobrir quem usa — por andar e sala"** (sem responsável, grupos
+  fechados com "selecionar a sala"; no primeiro dia é o único ponto de
+  partida, 168 itens); itens por andar e sala (local ativo sem item em
+  âmbar); itens por responsável; em reparo há mais de 15 dias (desde o
+  último `reparo_saida`); termos do mês com ‹ › (emitidos, entregas,
+  devoluções, transferências = par contado uma vez, cancelados pela data do
+  cancelamento). **Roteiro impresso**: `/patrimonio/roteiro` (HTML com
+  `@media print`, ☐ por item, linha em branco "quem usa", rodapé jonIAs).
+- **Tela PATRIMÔNIO na TV**: três números gigantes (sem responsável, sem
+  local, sem assinatura) + barra "INVENTÁRIO COMPLETO N%". **Payload público
+  só com números** — nenhum nome, código, sala ou descrição (testado contra
+  todas as pessoas e salas); contagem por pessoa só na aba Gerencial.
+  `entra_tv` não se aplica (a tela não mostra pessoas). Interruptor
+  `configuracoes.patrimonio_tv`, **nasce desligado**, só o ADMIN liga na aba
+  Gerencial (`GET/PUT /api/patrimonio/tv`; a Emanuelle vê o estado);
+  prévia `?fixo=patrimonio&previa=1` só para admin logado. **Verde e saída
+  da rotação só com a barra em 100%** (decisão do usuário: "INVENTÁRIO
+  COMPLETO" ao lado de 93% seria mentira); com `?fixo=patrimonio` continua
+  aparecendo, em verde. Toda escrita bem-sucedida em `/api/patrimonio` emite
+  SSE `config` com a tela ligada.
+- **Rotação única, agrupada por área**: o `?fixo=` só trava numa tela; sem
+  ele, entra tudo o que tem dado e está ligado — STATUS → RANKING → SEMANA →
+  RECEITA → MÊS → PARADOS 3–9 → PARADOS 10+ → MARKETING → PATRIMÔNIO, com o
+  cartão da meta **a cada duas telas** (antes, depois de cada tela).
+  Ciclo com tudo ligado: 9 telas × 20 s + 5 cartões × 12 s = **240 s (4,0
+  min)**; antes da mudança seriam 288 s (4,8 min).
 
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)

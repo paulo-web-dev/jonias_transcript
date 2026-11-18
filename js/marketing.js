@@ -517,7 +517,7 @@ document.getElementById("mk-tv").addEventListener("click", async (ev) => {
   estado.confirmando = null;
   try {
     const r = await chamarApi("/api/marketing/tv", json("PUT", { ativo: b.dataset.tvAlternar === "1" }));
-    avisar(r.ativo ? "Tela do marketing LIGADA na TV — entra na rotação depois do MÊS." : "Tela do marketing desligada na TV.");
+    avisar(r.ativo ? "Tela do marketing LIGADA na TV — entra na rotação depois das telas do comercial." : "Tela do marketing desligada na TV.");
   } catch (e) { avisar("⚠ " + e.message, true); }
   carregarTv();
 });

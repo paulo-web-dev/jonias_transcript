@@ -36,6 +36,7 @@ async function carregar() {
   D = await api("/api/patrimonio");
   preencherFiltros();
   render();
+  if (!$("#aba-gerencial").hidden) await carregarGerencial();
 }
 
 // ---------- filtros ----------
@@ -49,7 +50,7 @@ function preencherFiltros() {
     D.responsaveis.filter((p) => comItens.has(p.id)).map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join("");
   fl.value = vl; fp.value = vp;
 }
-let alertaAtivo = null; // "semPessoa" | "semLocal" | "semTermo"
+let alertaAtivo = null; // "semPessoa" | "semLocal" | "semTermo" | "semConservacao" | "semAssinatura" (os dois últimos vêm da aba Gerencial)
 function filtrados() {
   const busca = norm($("#f-busca").value.trim());
   const fl = $("#f-local").value, fp = $("#f-pessoa").value, fs = $("#f-status").value, fc = $("#f-conservacao").value;
@@ -60,8 +61,10 @@ function filtrados() {
     if (fs === "ativos" ? i.status === "baixado" : fs && i.status !== fs) return false;
     if (fc === "-" ? i.conservacao : fc && i.conservacao !== fc) return false;
     if (alertaAtivo === "semPessoa" && (i.pessoaId || i.status !== "em_uso")) return false;
-    if (alertaAtivo === "semLocal" && (i.localId || i.status === "baixado")) return false;
+    if (alertaAtivo === "semLocal" && (i.localId || !["em_uso", "em_estoque"].includes(i.status))) return false;
     if (alertaAtivo === "semTermo" && !i.semTermo) return false;
+    if (alertaAtivo === "semConservacao" && (i.conservacao || i.status === "baixado")) return false;
+    if (alertaAtivo === "semAssinatura" && (i.termo || i.status !== "em_uso")) return false;
     return true;
   });
   const { campo, dir } = ordem;
@@ -72,13 +75,15 @@ function filtrados() {
 // ---------- render: itens ----------
 function render() {
   const ativos = D.itens.filter((i) => i.status !== "baixado");
-  const semLocal = ativos.filter((i) => !i.localId).length;
+  const semLocal = ativos.filter((i) => !i.localId && ["em_uso", "em_estoque"].includes(i.status)).length;
   const semPessoa = ativos.filter((i) => i.status === "em_uso" && !i.pessoaId).length;
   const semTermo = D.itens.filter((i) => i.semTermo).length;
   const chip = (k, n, txt) => `<button type="button" class="pat-alerta ${n ? "pat-alerta-on" : "pat-alerta-ok"} ${alertaAtivo === k ? "ativo" : ""}" data-alerta="${k}" ${n ? "" : "disabled"}>${n ? "⚠" : "✓"} ${n} ${txt}</button>`;
   $("#pat-alertas").innerHTML =
     `<span class="pat-total"><strong>${ativos.length}</strong> itens ativos · ${D.itens.length - ativos.length} baixados</span>` +
     chip("semLocal", semLocal, "sem local") + chip("semPessoa", semPessoa, "em uso sem responsável") + chip("semTermo", semTermo, "com responsável e sem termo assinado") +
+    (alertaAtivo === "semConservacao" ? `<span class="pat-alerta pat-alerta-on ativo">sem conservação</span>` : "") +
+    (alertaAtivo === "semAssinatura" ? `<span class="pat-alerta pat-alerta-on ativo">em uso sem termo assinado</span>` : "") +
     (alertaAtivo ? `<button type="button" class="btn-mini" data-alerta="">✕ tirar filtro</button>` : "");
 
   const lista = filtrados();
@@ -463,11 +468,171 @@ function renderRelatorio(r) {
   </div>`;
 }
 
+// ---------- gerencial ----------
+// Estado do inventário (patrimonio.gerencial): totais, os buracos, a barra do
+// inventário completo, o ROTEIRO DE COLETA (por pessoa: colher a assinatura;
+// sem responsável: descobrir quem usa, por andar e sala), locais, responsáveis,
+// reparo longo e termos do mês. Clicar num buraco abre a aba Itens filtrada.
+let G = null;
+let gerMes = null;
+// Grupos do roteiro: "por pessoa" nasce aberto (é a ação do dia); "descobrir quem
+// usa" nasce FECHADO (168 itens no primeiro dia enterravam o resto da aba). O que
+// a pessoa abre ou fecha é lembrado entre as recargas da aba.
+const gruposAbertos = new Map();
+const nomeMes = (m) => { const t = new Date(`${m}-15T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" }); return t[0].toUpperCase() + t.slice(1); };
+const somarMes = (m, n) => { const [a, b] = m.split("-").map(Number); const d = new Date(a, b - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+
+async function carregarGerencial() {
+  G = await api(`/api/patrimonio/gerencial${gerMes ? `?mes=${gerMes}` : ""}`);
+  gerMes = G.termosDoMes.mes;
+  renderGerencial();
+}
+
+function renderGerencial() {
+  if (!G) return;
+  const inv = G.inventario;
+  const st = G.porStatus;
+  $("#ger-tv").innerHTML = `📺 Tela do patrimônio na TV: <b class="${G.tv ? "ligada" : ""}">${G.tv ? "LIGADA" : "desligada"}</b>` +
+    (D.admin
+      ? ` <button type="button" class="btn btn-mini" data-tv-alternar="${G.tv ? "0" : "1"}">${G.tv ? "desligar" : "ligar"}</button>
+         <span>prévia: <code>/tv?token=…&amp;fixo=patrimonio&amp;previa=1</code> (só admin logado)</span>`
+      : " <span>(só o administrador liga ou desliga)</span>");
+  const buraco = (k, n, txt) => `<button type="button" class="pat-ger-buraco ${n ? "" : "pat-ger-buraco-ok"}" data-ir-alerta="${k}" ${n ? "" : "disabled"}><b>${n || "0 ✓"}</b><span>${txt}</span></button>`;
+  $("#ger-topo").innerHTML = `
+    <div class="pat-ger-status">
+      <span><b>${st.em_uso}</b> em uso</span><span><b>${st.em_estoque}</b> em estoque</span>
+      <span><b>${st.em_reparo}</b> em reparo</span><span><b>${st.baixado}</b> baixados</span>
+    </div>
+    <div class="pat-ger-buracos">
+      ${buraco("semPessoa", inv.semResponsavel, "em uso sem responsável")}
+      ${buraco("semLocal", inv.semLocal, "sem local")}
+      ${buraco("semConservacao", inv.semConservacao, "sem conservação")}
+      ${buraco("semAssinatura", inv.semAssinatura, "em uso sem termo assinado")}
+    </div>
+    <div class="pat-ger-inventario ${inv.completo ? "pat-ger-completo" : ""}">
+      <div class="pat-ger-inv-linha"><strong>${inv.completo ? "✓ Inventário completo" : "Inventário completo"}</strong><b>${inv.pct}%</b></div>
+      <div class="pat-ger-trilha"><div style="width:${inv.pct}%"></div></div>
+      <p class="texto-suave">${inv.completos} de ${inv.total} itens com tudo o que o status exige — em uso: responsável, local, conservação e termo assinado;
+        em estoque: local e conservação; em reparo: conservação. Baixados ficam fora.</p>
+    </div>`;
+
+  // roteiro de coleta
+  const ro = G.roteiro;
+  const nPessoas = ro.porPessoa.reduce((n, p) => n + p.itens.length, 0);
+  const nDescobrir = ro.descobrir.reduce((n, x) => n + x.itens.length, 0);
+  $("#ger-roteiro-resumo").textContent = `· ${ro.total} em uso sem termo assinado`;
+  const linhaItem = (i, comLocal) => `<li><label><input type="checkbox" class="ger-sel" data-item="${i.id}" ${sel.has(i.id) ? "checked" : ""} />
+    <span class="pat-codigo">${i.codigo}</span> ${escapeHtml(i.nome)}${i.marcaModelo ? ` <small class="texto-suave">${escapeHtml(i.marcaModelo)}</small>` : ""}
+    ${comLocal ? `<small class="texto-suave">· ${escapeHtml(i.local || "sem local")}</small>` : ""}</label></li>`;
+  const grupo = (chave, padraoAberto, titulo, sub, itens, acao, comLocal) => `<details class="pat-ger-grupo" data-grupo="${chave}" ${(gruposAbertos.get(chave) ?? padraoAberto) ? "open" : ""}><summary><span><strong>${titulo}</strong> <small class="texto-suave">${sub}</small></span>
+    <span class="pat-ger-acoes">${acao}</span></summary><ul>${itens.map((i) => linhaItem(i, comLocal)).join("")}</ul></details>`;
+  $("#ger-roteiro").innerHTML =
+    `<h4 class="pat-ger-sub">Colher a assinatura — por pessoa <small class="texto-suave">(${nPessoas})</small></h4>` +
+    (ro.porPessoa.map((p) => grupo(`p${p.pessoaId}`, true, escapeHtml(p.pessoa), `${p.itens.length} item(ns)`, p.itens,
+      `<button type="button" class="btn btn-mini btn-primario" data-entregar-pessoa="${p.pessoaId}">✍ Colher assinatura</button>`, true)).join("")
+      || `<p class="texto-suave">Nenhum item com responsável esperando assinatura.</p>`) +
+    `<h4 class="pat-ger-sub">Descobrir quem usa — por andar e sala <small class="texto-suave">(${nDescobrir})</small></h4>` +
+    (ro.descobrir.map((x, k) => grupo(`s${x.localId || 0}`, false, escapeHtml(x.local || "Sem local"), `${x.itens.length} item(ns) sem responsável`, x.itens,
+      `<button type="button" class="btn btn-mini" data-sel-sala="${k}">selecionar a sala</button>`, false)).join("")
+      || `<p class="texto-suave">Nenhum item em uso sem responsável.</p>`);
+  renderGerSelecao();
+
+  // locais
+  const zerados = G.porLocal.filter((l) => l.zerado).length;
+  $("#ger-locais").innerHTML = (zerados ? `<p class="pat-aviso">⚠ ${zerados} sala(s) sem nenhum item — conferir na conferência física.</p>` : "") +
+    `<div class="tabela-scroll"><table class="tabela-metricas pat-tabela"><thead><tr><th>Andar</th><th style="text-align:left">Sala</th><th>Itens</th><th>Em uso</th><th>Estoque</th></tr></thead><tbody>` +
+    G.porLocal.map((l) => `<tr class="sem-clique ${l.zerado ? "pat-ger-zerado" : ""}"><td data-rotulo="Andar">${l.andar}º</td><td data-rotulo="Sala" style="text-align:left">${escapeHtml(l.nome)}${l.ativo ? "" : ' <span class="pat-vazio">(inativo)</span>'}${l.zerado ? ' <span class="chip pat-chip-aviso">sem item</span>' : ""}</td>
+      <td data-rotulo="Itens">${l.itens}</td><td data-rotulo="Em uso">${l.emUso}</td><td data-rotulo="Estoque">${l.emEstoque}</td></tr>`).join("") +
+    (G.semLocal ? `<tr class="sem-clique pat-ger-zerado"><td data-rotulo="Andar">—</td><td data-rotulo="Sala" style="text-align:left"><button type="button" class="btn-mini" data-ir-alerta="semLocal">⚠ sem local</button></td><td data-rotulo="Itens">${G.semLocal}</td><td></td><td></td></tr>` : "") +
+    "</tbody></table></div>";
+
+  // responsáveis
+  $("#ger-pessoas").innerHTML = G.porResponsavel.length
+    ? `<div class="tabela-scroll"><table class="tabela-metricas pat-tabela"><thead><tr><th style="text-align:left">Responsável</th><th>Itens</th><th>Em uso</th><th>Sem termo</th></tr></thead><tbody>` +
+      G.porResponsavel.map((p) => `<tr class="sem-clique"><td data-rotulo="Responsável" style="text-align:left"><button type="button" class="btn-mini" data-ir-pessoa="${p.pessoaId}">${escapeHtml(p.pessoa)}</button></td>
+        <td data-rotulo="Itens">${p.itens}</td><td data-rotulo="Em uso">${p.emUso}</td><td data-rotulo="Sem termo">${p.semTermo ? `<span class="pat-alerta-txt">${p.semTermo}</span>` : "0"}</td></tr>`).join("") +
+      "</tbody></table></div>"
+    : `<p class="texto-suave">Nenhum item com responsável ainda: o responsável entra pelo termo assinado.</p>`;
+
+  // reparo longo
+  $("#ger-reparo-dias").textContent = G.reparoDias;
+  $("#ger-reparo").innerHTML = G.reparoLongo.length
+    ? `<ul class="pat-ger-lista">${G.reparoLongo.map((x) => `<li><span class="pat-codigo">${x.codigo}</span> ${escapeHtml(x.nome)} — <b class="pat-alerta-txt">${x.dias} dias</b>
+        <small class="texto-suave">desde ${dataBr(x.desde)}${x.pessoa ? ` · ${escapeHtml(x.pessoa)}` : ""}${x.motivo ? ` · ${escapeHtml(x.motivo)}` : ""}</small></li>`).join("")}</ul>`
+    : `<p class="texto-suave">✓ Nenhum item em reparo há mais de ${G.reparoDias} dias.</p>`;
+
+  // termos do mês
+  const t = G.termosDoMes;
+  const ehAtual = t.mes >= G.hoje.slice(0, 7);
+  $("#ger-termos").innerHTML = `<div class="pat-filtros"><button type="button" class="btn btn-mini" data-mes="-1" aria-label="mês anterior">‹</button>
+      <strong class="pat-ger-mes">${nomeMes(t.mes)}</strong><button type="button" class="btn btn-mini" data-mes="1" aria-label="mês seguinte" ${ehAtual ? "disabled" : ""}>›</button></div>
+    <div class="pat-ger-status">
+      <span><b>${t.emitidos}</b> emitidos</span><span><b>${t.entregas}</b> entregas</span><span><b>${t.devolucoes}</b> devoluções</span>
+      <span><b>${t.transferencias}</b> transferências <small class="texto-suave">(2 termos cada)</small></span>
+      <span class="${t.cancelados ? "pat-alerta-txt" : ""}"><b>${t.cancelados}</b> cancelados</span>
+    </div>`;
+}
+
+function renderGerSelecao() {
+  $("#ger-selecao").hidden = sel.size === 0;
+  $("#ger-sel-texto").textContent = `${sel.size} selecionado(s)`;
+}
+
+function irParaItens(alerta, pessoaId) {
+  alertaAtivo = alerta || null;
+  $("#f-busca").value = ""; $("#f-local").value = ""; $("#f-status").value = ""; $("#f-conservacao").value = "";
+  $("#f-pessoa").value = pessoaId ? String(pessoaId) : "";
+  $('.pat-abas .aba-btn[data-aba="itens"]').click();
+  render();
+}
+
+const gerSecao = $("#aba-gerencial");
+gerSecao.addEventListener("toggle", (ev) => { const d = ev.target.closest?.("[data-grupo]"); if (d) gruposAbertos.set(d.dataset.grupo, d.open); }, true);
+gerSecao.addEventListener("change", (ev) => {
+  const c = ev.target.closest(".ger-sel"); if (!c) return;
+  const id = Number(c.dataset.item);
+  c.checked ? sel.add(id) : sel.delete(id);
+  renderGerSelecao(); renderSelecao();
+});
+gerSecao.addEventListener("click", async (ev) => {
+  const ir = ev.target.closest("[data-ir-alerta]"); if (ir) return irParaItens(ir.dataset.irAlerta);
+  const ip = ev.target.closest("[data-ir-pessoa]"); if (ip) return irParaItens(null, ip.dataset.irPessoa);
+  const ep = ev.target.closest("[data-entregar-pessoa]");
+  if (ep) {
+    ev.preventDefault();
+    const p = G.roteiro.porPessoa.find((x) => x.pessoaId === Number(ep.dataset.entregarPessoa));
+    sel.clear(); p.itens.forEach((i) => sel.add(i.id));
+    return iniciarEntrega(); // pessoa já preenchida: os itens são todos dela (regularização)
+  }
+  const ss = ev.target.closest("[data-sel-sala]");
+  if (ss) {
+    ev.preventDefault();
+    const itens = G.roteiro.descobrir[Number(ss.dataset.selSala)].itens;
+    const todos = itens.every((i) => sel.has(i.id));
+    itens.forEach((i) => (todos ? sel.delete(i.id) : sel.add(i.id)));
+    renderGerencial(); renderSelecao();
+    return;
+  }
+  const m = ev.target.closest("[data-mes]");
+  if (m) { gerMes = somarMes(gerMes, Number(m.dataset.mes)); return carregarGerencial().catch((e) => avisar(e.message, true)); }
+  const tv = ev.target.closest("[data-tv-alternar]");
+  if (tv) {
+    try {
+      const r = await api("/api/patrimonio/tv", { metodo: "PUT", corpo: { ativo: tv.dataset.tvAlternar === "1" } });
+      avisar(r.ativo ? "Tela do patrimônio LIGADA na TV — entra na rotação depois do marketing." : "Tela do patrimônio desligada na TV.");
+      await carregarGerencial();
+    } catch (e) { avisar(e.message, true); }
+  }
+});
+$("#ger-entregar").addEventListener("click", iniciarEntrega);
+$("#ger-limpar-sel").addEventListener("click", () => { sel.clear(); renderGerencial(); renderSelecao(); });
+
 // ---------- eventos ----------
 $$(".pat-abas .aba-btn").forEach((b) => b.addEventListener("click", () => {
   $$(".pat-abas .aba-btn").forEach((x) => x.classList.toggle("ativo", x === b));
-  for (const s of ["itens", "termos", "locais"]) $(`#aba-${s}`).hidden = s !== b.dataset.aba;
+  for (const s of ["itens", "termos", "locais", "gerencial"]) $(`#aba-${s}`).hidden = s !== b.dataset.aba;
   try { sessionStorage.setItem("pat-aba", b.dataset.aba); } catch (_) {}
+  if (b.dataset.aba === "gerencial") carregarGerencial().catch((e) => avisar(e.message, true));
 }));
 for (const id of ["#f-busca", "#f-local", "#f-pessoa", "#f-status", "#f-conservacao"]) $(id).addEventListener("input", render);
 $("#pat-alertas").addEventListener("click", (ev) => { const b = ev.target.closest("[data-alerta]"); if (!b) return; alertaAtivo = b.dataset.alerta || null; render(); });

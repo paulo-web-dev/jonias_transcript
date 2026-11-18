@@ -841,6 +841,210 @@ function detalheImportacao(id) {
   return { ...r, detalhes: JSON.parse(r.detalhes_json || "{}"), detalhes_json: undefined };
 }
 
+// ---------- gerencial e TV (2026-11-18, decisões do usuário) ----------
+//
+// "Completo" depende do status do item (baixado fica fora da conta):
+//   em uso     → responsável + local + conservação + termo de entrega aberto
+//   em estoque → local + conservação (estoque não tem responsável nem termo)
+//   em reparo  → conservação (o item está fora; o alerta de 15 dias cuida dele)
+// Os buracos usam a MESMA regra: sem responsável e sem assinatura = itens em
+// uso; sem local = em uso ou em estoque; sem conservação = qualquer não baixado.
+// O percentual é arredondado PARA BAIXO: 100% só com todos completos — a TV
+// diz "INVENTÁRIO COMPLETO" só com a barra cheia (nunca ao lado de 99,6%).
+
+const hojeLocal = () => agora().slice(0, 10);
+
+function itensBrutos() {
+  return db.prepare(`${SQL_ITEM} ORDER BY l.andar, l.ordem, l.nome, i.codigo`).all();
+}
+
+function faltasDoItem(r) {
+  const f = { pessoa: false, local: false, conservacao: false, termo: false };
+  if (r.status === "baixado") return null;
+  if (!r.estado_conservacao) f.conservacao = true;
+  if ((r.status === "em_uso" || r.status === "em_estoque") && !r.local_id) f.local = true;
+  if (r.status === "em_uso") {
+    if (!r.pessoa_id) f.pessoa = true;
+    if (!r.termo_id) f.termo = true;
+  }
+  return f;
+}
+
+function contarInventario(rows = itensBrutos()) {
+  const c = { total: 0, completos: 0, semResponsavel: 0, semLocal: 0, semConservacao: 0, semAssinatura: 0 };
+  for (const r of rows) {
+    const f = faltasDoItem(r);
+    if (!f) continue;
+    c.total++;
+    if (f.pessoa) c.semResponsavel++;
+    if (f.local) c.semLocal++;
+    if (f.conservacao) c.semConservacao++;
+    if (f.termo) c.semAssinatura++;
+    if (!f.pessoa && !f.local && !f.conservacao && !f.termo) c.completos++;
+  }
+  c.pct = c.total ? Math.floor((c.completos * 100) / c.total) : 0;
+  c.completo = c.total > 0 && c.completos === c.total;
+  return c;
+}
+
+const itemDoRoteiro = (r) => ({
+  id: r.id, codigo: r.codigo, nome: r.nome, marcaModelo: r.marca_modelo, numeroSerie: r.numero_serie,
+  local: r.local_id ? `${r.andar}º · ${r.local_nome}` : null, conservacao: r.estado_conservacao,
+});
+
+// Roteiro de coleta: itens EM USO sem termo assinado.
+// - porPessoa: com responsável (veio da carga), agrupado por pessoa, itens na
+//   ordem do prédio (andar, sala) — a Emanuelle colhe a assinatura.
+// - descobrir: SEM responsável, agrupado por andar e sala ("descobrir quem
+//   usa") — no primeiro dia é o único ponto de partida (168 itens).
+function roteiroDeColeta(rows = itensBrutos()) {
+  const semTermo = rows.filter((r) => r.status === "em_uso" && !r.termo_id);
+  const pessoas = new Map();
+  for (const r of semTermo.filter((x) => x.pessoa_id)) {
+    if (!pessoas.has(r.pessoa_id)) pessoas.set(r.pessoa_id, { pessoaId: r.pessoa_id, pessoa: r.pessoa_nome, itens: [] });
+    pessoas.get(r.pessoa_id).itens.push(itemDoRoteiro(r));
+  }
+  const salas = new Map();
+  for (const r of semTermo.filter((x) => !x.pessoa_id)) {
+    const chave = r.local_id || 0;
+    if (!salas.has(chave)) salas.set(chave, { localId: r.local_id || null, andar: r.andar ?? null, local: r.local_id ? `${r.andar}º · ${r.local_nome}` : null, itens: [] });
+    salas.get(chave).itens.push(itemDoRoteiro(r));
+  }
+  const descobrir = [...salas.values()].sort((a, b) => (a.localId ? 0 : 1) - (b.localId ? 0 : 1)); // sem local por último (rows já vêm na ordem do prédio)
+  return {
+    total: semTermo.length,
+    porPessoa: [...pessoas.values()].sort((a, b) => a.pessoa.localeCompare(b.pessoa, "pt-BR")),
+    descobrir,
+  };
+}
+
+const MES_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+function termosDoMes(mes) {
+  const m = mes && MES_RE.test(mes) ? mes : hojeLocal().slice(0, 7);
+  const r = db.prepare(
+    `SELECT
+       SUM(tipo = 'entrega') entregas,
+       SUM(tipo = 'devolucao') devolucoes,
+       SUM(tipo = 'entrega' AND relacionado_id IS NOT NULL) transferencias,
+       COUNT(*) emitidos
+     FROM patrimonio_termos WHERE substr(data_hora, 1, 7) = ?`
+  ).get(m);
+  const cancelados = db.prepare("SELECT COUNT(*) n FROM patrimonio_termos WHERE substr(cancelado_em, 1, 7) = ?").get(m).n;
+  return {
+    mes: m, emitidos: r.emitidos || 0, cancelados,
+    // transferência = um par (devolução + entrega); entregas/devoluções "simples" sem o par
+    entregas: (r.entregas || 0) - (r.transferencias || 0), devolucoes: (r.devolucoes || 0) - (r.transferencias || 0),
+    transferencias: r.transferencias || 0,
+  };
+}
+
+const REPARO_DIAS = 15;
+function emReparoLongo() {
+  return db.prepare(
+    `SELECT i.id, i.codigo, i.nome, p.nome pessoa, m.data_hora desde, m.observacao motivo,
+            CAST(julianday(?) - julianday(substr(m.data_hora, 1, 10)) AS INTEGER) dias
+     FROM patrimonio_itens i
+     JOIN patrimonio_movimentos m ON m.id = (SELECT MAX(id) FROM patrimonio_movimentos WHERE item_id = i.id AND tipo = 'reparo_saida')
+     LEFT JOIN pessoas p ON p.id = i.pessoa_id
+     WHERE i.status = 'em_reparo'
+     ORDER BY m.data_hora`
+  ).all(hojeLocal()).filter((x) => x.dias > REPARO_DIAS);
+}
+
+function gerencial({ mes } = {}) {
+  const rows = itensBrutos();
+  const porStatus = Object.fromEntries(STATUS.map((s) => [s, rows.filter((r) => r.status === s).length]));
+  const ativos = rows.filter((r) => r.status !== "baixado");
+  const porLocal = listarLocais()
+    .filter((l) => l.ativo || l.itens)
+    .map((l) => {
+      const doLocal = ativos.filter((r) => r.local_id === l.id);
+      return { id: l.id, andar: l.andar, nome: l.nome, ativo: l.ativo, itens: doLocal.length,
+        emUso: doLocal.filter((r) => r.status === "em_uso").length, emEstoque: doLocal.filter((r) => r.status === "em_estoque").length,
+        zerado: Boolean(l.ativo && !doLocal.length) };
+    });
+  const pessoas = new Map();
+  for (const r of ativos.filter((x) => x.pessoa_id)) {
+    if (!pessoas.has(r.pessoa_id)) pessoas.set(r.pessoa_id, { pessoaId: r.pessoa_id, pessoa: r.pessoa_nome, itens: 0, emUso: 0, semTermo: 0 });
+    const p = pessoas.get(r.pessoa_id);
+    p.itens++;
+    if (r.status === "em_uso") p.emUso++;
+    if (r.status === "em_uso" && !r.termo_id) p.semTermo++;
+  }
+  return {
+    hoje: hojeLocal(),
+    porStatus,
+    inventario: contarInventario(rows),
+    roteiro: roteiroDeColeta(rows),
+    porLocal,
+    semLocal: ativos.filter((r) => !r.local_id).length,
+    porResponsavel: [...pessoas.values()].sort((a, b) => b.itens - a.itens || a.pessoa.localeCompare(b.pessoa, "pt-BR")),
+    reparoLongo: emReparoLongo(),
+    reparoDias: REPARO_DIAS,
+    termosDoMes: termosDoMes(mes),
+    tv: tvLigada(),
+  };
+}
+
+// Roteiro de coleta para imprimir (HTML com @media print, no padrão da via)
+function htmlRoteiro() {
+  const r = roteiroDeColeta();
+  // última coluna: o local (colher a assinatura) ou uma linha em branco para anotar quem usa
+  const tabela = (itens, quemUsa) => `<table><thead><tr><th class="ck"></th><th>Código</th><th>Item</th><th>Marca / modelo</th><th>Nº de série</th><th>${quemUsa ? "Quem usa" : "Local"}</th></tr></thead><tbody>${
+    itens.map((i) => `<tr><td class="ck">☐</td><td class="cod">${esc(i.codigo)}</td><td>${esc(i.nome)}</td><td>${esc(i.marcaModelo || "—")}</td><td>${esc(i.numeroSerie || "—")}</td>${
+      quemUsa ? '<td class="linha"></td>' : `<td>${esc(i.local || "sem local")}</td>`}</tr>`).join("")}</tbody></table>`;
+  const blocoPessoas = r.porPessoa.map((p) => `<section><h3>${esc(p.pessoa)} <small>${p.itens.length} item(ns) — colher a assinatura</small></h3>${tabela(p.itens, false)}</section>`).join("")
+    || `<p class="vazio">Nenhum item com responsável esperando assinatura.</p>`;
+  const blocoDescobrir = r.descobrir.map((s) => `<section><h3>${esc(s.local || "Sem local")} <small>${s.itens.length} item(ns) — quem usa?</small></h3>${tabela(s.itens, true)}</section>`).join("")
+    || `<p class="vazio">Nenhum item em uso sem responsável.</p>`;
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roteiro de coleta — patrimônio</title>
+<style>
+  *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#111;background:#fff;margin:0;padding:24px;font-size:12px;line-height:1.4}
+  .folha{max-width:900px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #111;padding-bottom:8px;margin-bottom:14px;gap:12px;flex-wrap:wrap}
+  .marca{font-size:22px;font-weight:800}.marca small{display:block;font-size:12px;font-weight:400;color:#444}
+  h2{font-size:15px;text-transform:uppercase;margin:18px 0 6px;border-bottom:1px solid #999;padding-bottom:3px}
+  h3{font-size:13px;margin:12px 0 4px}h3 small{font-weight:400;color:#555}
+  section{break-inside:avoid}
+  table{width:100%;border-collapse:collapse;margin:4px 0 8px}th,td{border:1px solid #999;padding:4px 6px;text-align:left;vertical-align:top}
+  th{background:#eee;font-size:10px;text-transform:uppercase}td.cod{font-family:monospace;font-size:13px;white-space:nowrap}
+  .ck{width:22px;text-align:center;font-size:14px}td.linha{min-width:160px}
+  .resumo{font-size:13px}.vazio{color:#555;font-style:italic}
+  footer{margin-top:24px;border-top:1px solid #999;padding-top:6px;font-size:11px;color:#555;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .acoes{max-width:900px;margin:0 auto 14px;display:flex;gap:8px}.acoes button{font-size:14px;padding:8px 14px;cursor:pointer}
+  @media screen and (max-width:560px){body{padding:10px}th:nth-child(4),td:nth-child(4),th:nth-child(5),td:nth-child(5){display:none}td.linha{min-width:90px}td{word-break:break-word}}
+  @media print{.acoes{display:none}body{padding:0}@page{size:A4;margin:12mm}}
+</style></head><body>
+<div class="acoes"><button type="button" onclick="window.print()">🖨 Imprimir / salvar em PDF</button><button type="button" onclick="history.back()">Voltar</button></div>
+<div class="folha">
+  <header><div class="marca">UNYFLEX<small>Controle de patrimônio — roteiro de coleta</small></div><div>Gerado em ${esc(dataHoraBr(agora()))}</div></header>
+  <p class="resumo"><b>${r.total}</b> item(ns) em uso sem termo assinado: <b>${r.porPessoa.reduce((n, p) => n + p.itens.length, 0)}</b> com responsável (colher a assinatura) e <b>${r.descobrir.reduce((n, s) => n + s.itens.length, 0)}</b> sem responsável (descobrir quem usa).</p>
+  <h2>Colher a assinatura — por pessoa</h2>${blocoPessoas}
+  <h2>Descobrir quem usa — por andar e sala</h2>${blocoDescobrir}
+  <footer><span>Gerado por jonIAs — Assistente de Aulas</span><span>Roteiro de coleta</span></footer>
+</div></body></html>`;
+}
+
+// Interruptor da tela na TV (admin, na aba Gerencial): nasce DESLIGADO
+// (`configuracoes.patrimonio_tv`); desligado, o payload público da TV não leva
+// nada do patrimônio. A tela só tem NÚMEROS — nenhum nome, código, sala ou
+// descrição vai para a sala (contagem por pessoa fica na aba Gerencial).
+const tvLigada = () => db.prepare("SELECT valor FROM configuracoes WHERE chave = 'patrimonio_tv'").get()?.valor === "1";
+function definirTv(ativo) {
+  db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('patrimonio_tv', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").run(ativo ? "1" : "0");
+  return { ativo: tvLigada() };
+}
+function painelTvPatrimonio({ previa = false } = {}) {
+  if (!tvLigada() && !previa) return { ativo: false };
+  const c = contarInventario();
+  return {
+    ativo: true, previa: !tvLigada(),
+    semResponsavel: c.semResponsavel, semLocal: c.semLocal, semAssinatura: c.semAssinatura,
+    completos: c.completos, total: c.total, pct: c.pct, completo: c.completo,
+  };
+}
+
 // Tudo o que a tela /patrimonio precisa numa chamada
 function payload(usuario) {
   return {
@@ -853,4 +1057,5 @@ module.exports = {
   STATUS, ESTADOS, payload, listarItens, listarLocais, criarLocal, editarLocal, responsaveis,
   atualizarItem, mudarStatus, historicoDoItem, entregar, devolver, cancelarTermo, listarTermos,
   htmlVia, meusItens, importar, ultimasImportacoes, detalheImportacao, validarAssinatura,
+  gerencial, htmlRoteiro, contarInventario, tvLigada, definirTv, painelTvPatrimonio,
 };
