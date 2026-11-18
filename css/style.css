@@ -2123,3 +2123,8 @@ body:not(.mk-admin) .so-admin-mk { display: none; }
   .pat-tabela tbody tr[data-id] td:last-child { position: absolute; right: 3rem; top: 0.35rem; }
   .pat-tabela tbody tr[data-id] td.pat-col-sel { grid-column: auto; }
 }
+.pat-lista-cons li { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; }
+.pat-lista-cons select { min-width: 7.5rem; font-size: 1rem; padding: 0.4rem; }
+.pat-lista-cons { max-height: none; }
+.campo-select.pat-falta { border-color: var(--amarelo); box-shadow: 0 0 0 2px rgba(255, 200, 87, 0.35); }
+.pat-campo[hidden] { display: none; }

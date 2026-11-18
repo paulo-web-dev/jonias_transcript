@@ -267,7 +267,27 @@ function ligarSeletorLocal(prefixo, localPadrao) {
 }
 const opcoesPessoas = (excluir) => `<option value="">escolha a pessoa…</option>` + D.responsaveis.filter((p) => p.id !== excluir)
   .map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}${p.tipo === "consultor" ? " · comercial" : ""}</option>`).join("");
-const listaItens = (itens) => `<ul class="pat-lista-itens">${itens.map((i) => `<li><span class="pat-codigo">${i.codigo}</span> ${escapeHtml(i.nome)}${i.marcaModelo ? ` <small>· ${escapeHtml(i.marcaModelo)}</small>` : ""}</li>`).join("")}</ul>`;
+const listaItens = (itens, escolha) => `<ul class="pat-lista-itens">${itens.map((i) => `<li><span class="pat-codigo">${i.codigo}</span> ${escapeHtml(i.nome)}${i.marcaModelo ? ` <small>· ${escapeHtml(i.marcaModelo)}</small>` : ""}${escolha ? ` — <strong>${escapeHtml((escolha[i.id] || "").toUpperCase())}</strong>` : ""}</li>`).join("")}</ul>`;
+
+// Conservação de cada item, AVALIADA NO ATO (obrigatória na entrega e na
+// devolução). Entrega: vem preenchida com a do item, para conferir. Devolução:
+// sempre em branco — nunca herdada da entrega (é o que mostra se voltou pior).
+// `escolha` ({itemId: estado}) sobrevive ao "‹ Voltar" da assinatura.
+function blocoConservacao(itens, escolha, dica) {
+  return `<p class="pat-campo">Conservação de cada item — ${escapeHtml(dica)}</p><ul class="pat-lista-itens pat-lista-cons">${itens.map((i) => `<li>
+    <span><span class="pat-codigo">${i.codigo}</span> ${escapeHtml(i.nome)}</span>
+    <select class="campo-select cons-item" data-item="${i.id}" aria-label="conservação do ${i.codigo}"><option value="">avaliar…</option>
+      ${["bom", "regular", "ruim"].map((v) => `<option value="${v}" ${escolha[i.id] === v ? "selected" : ""}>${v}</option>`).join("")}</select></li>`).join("")}</ul>`;
+}
+function ligarConservacao(escolha) {
+  $$("#termo-corpo .cons-item").forEach((s) => s.addEventListener("change", () => { escolha[s.dataset.item] = s.value || undefined; s.classList.toggle("pat-falta", !s.value); }));
+}
+function faltaConservacao(itens, escolha) {
+  const faltam = itens.filter((i) => !escolha[i.id]);
+  $$("#termo-corpo .cons-item").forEach((s) => s.classList.toggle("pat-falta", !escolha[s.dataset.item]));
+  if (faltam.length) avisar(`Avalie a conservação de: ${faltam.map((i) => i.codigo).join(", ")}.`, true);
+  return faltam.length > 0;
+}
 
 function etapaAssinatura({ titulo, quem, resumo, voltar, confirmar, rotuloConfirmar }) {
   $("#termo-titulo").textContent = titulo;
@@ -302,29 +322,32 @@ function iniciarEntrega() {
   const abertos = itens.filter((i) => i.termo);
   if (abertos.length) { avisar(`${abertos.map((i) => i.codigo).join(", ")} já está(ão) em termo aberto: para trocar de pessoa, use Devolver → transferir.`, true); return; }
   const localPadrao = itens.find((i) => i.localId)?.localId ?? null;
+  const escolha = Object.fromEntries(itens.filter((i) => i.conservacao).map((i) => [i.id, i.conservacao]));
   const passo1 = () => {
     $("#termo-titulo").textContent = `Entregar ${itens.length} item(ns)`;
-    $("#termo-corpo").innerHTML = listaItens(itens) +
+    $("#termo-corpo").innerHTML = blocoConservacao(itens, escolha, "confira ou preencha agora") +
       `<label class="pat-campo">Para quem<select class="campo-select" id="ent-pessoa">${opcoesPessoas()}</select></label>` +
       seletorLocal("ent", localPadrao) + `<label class="pat-campo">Observação (opcional)<input type="text" class="campo-select" id="ent-obs" maxlength="300" /></label>`;
     ligarSeletorLocal("ent", localPadrao);
+    ligarConservacao(escolha);
     const donoCarga = new Set(itens.map((i) => i.pessoaId).filter(Boolean));
     if (donoCarga.size === 1) $("#ent-pessoa").value = String([...donoCarga][0]);
     $("#termo-rodape").innerHTML = `<button type="button" class="btn btn-mini" data-fechar-termo>Cancelar</button><button type="button" class="btn btn-mini btn-primario" id="termo-seguir">Seguir para assinatura ›</button>`;
     $("[data-fechar-termo]").onclick = () => fechar("#modal-termo");
     $("#termo-seguir").onclick = () => {
       const pessoaId = Number($("#ent-pessoa").value), localId = Number($("#ent-sala").value);
+      if (faltaConservacao(itens, escolha)) return;
       if (!pessoaId) { avisar("Escolha para quem.", true); return; }
       if (!localId) { avisar("Escolha a sala.", true); return; }
       const pessoa = D.responsaveis.find((p) => p.id === pessoaId); const local = D.locais.find((l) => l.id === localId);
       const obs = $("#ent-obs").value;
       etapaAssinatura({
         titulo: `Assinatura — ${pessoa.nome}`, quem: pessoa.nome, rotuloConfirmar: "✓ Confirmar entrega",
-        resumo: `<p>${itens.length} item(ns) para <strong>${escapeHtml(pessoa.nome)}</strong> · ${local.andar}º · ${escapeHtml(local.nome)}</p>${listaItens(itens)}`,
+        resumo: `<p>${itens.length} item(ns) para <strong>${escapeHtml(pessoa.nome)}</strong> · ${local.andar}º · ${escapeHtml(local.nome)}</p>${listaItens(itens, escolha)}`,
         voltar: passo1,
         confirmar: async ({ assinatura, assinanteNome }) => {
           try {
-            const r = await api("/api/patrimonio/entregas", { metodo: "POST", corpo: { itemIds: itens.map((i) => i.id), pessoaId, localId, assinatura, assinanteNome, observacao: obs } });
+            const r = await api("/api/patrimonio/entregas", { metodo: "POST", corpo: { itemIds: itens.map((i) => i.id), pessoaId, localId, assinatura, assinanteNome, observacao: obs, conservacoes: { ...escolha } } });
             concluido(`Entrega registrada: termo ${r.termo.numero}, ${r.itens} item(ns).`, [r.termo]);
           } catch (e) { avisar(e.message, true); }
         },
@@ -342,14 +365,16 @@ function iniciarDevolucao() {
   if (donos.size > 1) { avisar("Uma devolução é de uma pessoa só: selecione os itens de uma pessoa.", true); return; }
   const de = D.responsaveis.find((p) => p.id === itens[0].pessoaId) || { id: itens[0].pessoaId, nome: itens[0].pessoa };
   const estoque = D.locais.find((l) => l.andar === 7 && l.nome === "Estoque")?.id ?? null;
+  const escolha = {}; // devolução: sempre avaliada agora, nunca herdada da entrega
   const passo1 = () => {
     $("#termo-titulo").textContent = `Devolver ${itens.length} item(ns) de ${de.nome}`;
-    $("#termo-corpo").innerHTML = listaItens(itens) +
+    $("#termo-corpo").innerHTML = blocoConservacao(itens, escolha, "avalie agora, como o item está voltando") +
       `<fieldset class="pat-opcoes"><label><input type="radio" name="dev-destino" value="estoque" checked /> volta para o estoque (sem responsável)</label>
        <label><input type="radio" name="dev-destino" value="transferir" /> transferir direto para outra pessoa (ela também assina)</label></fieldset>
        <label class="pat-campo" id="dev-para-caixa" hidden>Para quem<select class="campo-select" id="dev-para">${opcoesPessoas(de.id)}</select></label>` +
       seletorLocal("dev", estoque) + `<label class="pat-campo">Observação (opcional)<input type="text" class="campo-select" id="dev-obs" maxlength="300" /></label>`;
     ligarSeletorLocal("dev", estoque);
+    ligarConservacao(escolha);
     $$('input[name="dev-destino"]').forEach((r) => r.addEventListener("change", () => { $("#dev-para-caixa").hidden = !$('input[name="dev-destino"][value="transferir"]').checked; }));
     $("#termo-rodape").innerHTML = `<button type="button" class="btn btn-mini" data-fechar-termo>Cancelar</button><button type="button" class="btn btn-mini btn-primario" id="termo-seguir">Seguir para assinatura ›</button>`;
     $("[data-fechar-termo]").onclick = () => fechar("#modal-termo");
@@ -357,6 +382,7 @@ function iniciarDevolucao() {
       const transferir = $('input[name="dev-destino"][value="transferir"]').checked;
       const paraId = transferir ? Number($("#dev-para").value) : null;
       const localId = Number($("#dev-sala").value);
+      if (faltaConservacao(itens, escolha)) return;
       if (transferir && !paraId) { avisar("Escolha para quem transferir.", true); return; }
       if (!localId) { avisar("Escolha a sala.", true); return; }
       const para = paraId ? D.responsaveis.find((p) => p.id === paraId) : null;
@@ -366,10 +392,10 @@ function iniciarDevolucao() {
       etapaAssinatura({
         titulo: `Assinatura de quem devolve — ${de.nome}`, quem: de.nome,
         rotuloConfirmar: para ? "Seguir: assinatura de quem recebe ›" : "✓ Confirmar devolução",
-        resumo: `<p><strong>${escapeHtml(de.nome)}</strong> devolve ${itens.length} item(ns) · ${destino}</p>${listaItens(itens)}`,
+        resumo: `<p><strong>${escapeHtml(de.nome)}</strong> devolve ${itens.length} item(ns) · ${destino}</p>${listaItens(itens, escolha)}`,
         voltar: passo1,
         confirmar: async (assinDe) => {
-          const corpo = { itemIds: itens.map((i) => i.id), assinatura: assinDe.assinatura, assinanteNome: assinDe.assinanteNome, observacao: obs };
+          const corpo = { itemIds: itens.map((i) => i.id), assinatura: assinDe.assinatura, assinanteNome: assinDe.assinanteNome, observacao: obs, conservacoes: { ...escolha } };
           if (!para) {
             try {
               const r = await api("/api/patrimonio/devolucoes", { metodo: "POST", corpo: { ...corpo, localId } });
@@ -380,7 +406,7 @@ function iniciarDevolucao() {
           // transferência: segunda assinatura, de quem recebe
           etapaAssinatura({
             titulo: `Assinatura de quem recebe — ${para.nome}`, quem: para.nome, rotuloConfirmar: "✓ Confirmar transferência",
-            resumo: `<p><strong>${escapeHtml(para.nome)}</strong> recebe ${itens.length} item(ns) de ${escapeHtml(de.nome)} · ${local.andar}º · ${escapeHtml(local.nome)}</p>${listaItens(itens)}`,
+            resumo: `<p><strong>${escapeHtml(para.nome)}</strong> recebe ${itens.length} item(ns) de ${escapeHtml(de.nome)} · ${local.andar}º · ${escapeHtml(local.nome)}</p>${listaItens(itens, escolha)}`,
             voltar: passo1,
             confirmar: async (assinPara) => {
               try {

@@ -779,7 +779,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 | `GET /patrimonio`, `GET /api/patrimonio` | PATRIMÔNIO (admin e patrimonio; resto 403): tela e payload único (itens com termo aberto e alerta "sem termo", locais com contagem, responsáveis = pessoas ativas consultor/administrativo, termos, últimas importações) |
 | `PATCH /api/patrimonio/itens/:id`, `POST …/itens/:id/status`, `GET …/itens/:id/historico` | edição do descritivo, conservação e local (local grava movimento `ajuste`; `pessoaId`/`status` no PATCH → 400); status pelo menu `{acao: reparo_saida\|reparo_retorno\|baixa\|desfazer_baixa, motivo}` (baixa exige motivo e item sem pessoa → 409; desfazer só admin → 403); histórico de movimentos |
-| `POST /api/patrimonio/entregas`, `POST /api/patrimonio/devolucoes` | entrega `{itemIds, pessoaId, localId, assinatura, assinanteNome?, observacao?}` → 1 termo + 1 movimento por item (201); item em termo aberto, baixado, em reparo ou com OUTRA pessoa → 409; devolução `{itemIds, assinatura, localId?, transferir?: {pessoaId, localId, assinatura}}` (itens de UMA pessoa; sem transferir → em estoque, padrão 7º Estoque); assinatura PNG em branco/ausente/não-PNG → 400 |
+| `POST /api/patrimonio/entregas`, `POST /api/patrimonio/devolucoes` | entrega `{itemIds, pessoaId, localId, conservacoes: {itemId: bom|regular|ruim}, assinatura, assinanteNome?, observacao?}` (conservação de TODOS os itens, avaliada no ato — inclusive na devolução; faltando → 400) → 1 termo + 1 movimento por item (201); item em termo aberto, baixado, em reparo ou com OUTRA pessoa → 409; devolução `{itemIds, assinatura, localId?, transferir?: {pessoaId, localId, assinatura}}` (itens de UMA pessoa; sem transferir → em estoque, padrão 7º Estoque); assinatura PNG em branco/ausente/não-PNG → 400 |
 | `POST /api/patrimonio/termos/:id/cancelar` | só admin `{motivo}`: itens voltam ao estado anterior (movimento `ajuste`); transferência cancela o par; 409 se algo mudou depois |
 | `POST /api/patrimonio/importar?arquivo=`, `GET …/importacoes/:id` | planilha .xlsx (admin e patrimonio); relatório (lidas, importadas, ignoradas, ressalvas, mantidos, avisos); auditoria em `importacoes` tipo `patrimonio` |
 | `POST/PATCH /api/patrimonio/locais[/:id]` | cria `{andar, nome}` / renomeia ou desativa `{nome, ativo}` (local com itens não desativa) |
@@ -1887,9 +1887,23 @@ construídas**. Decisões do usuário (2026-11-18):
   **Textos aprovados pelo usuário em 18/11/2026 — não alterar sem nova
   aprovação**; sem cláusula de ressarcimento, desconto em folha ou multa
   (desconto por dano é regra do contrato de trabalho; o termo prova a
-  guarda). ⚠ **145 dos 211 itens da carga estão sem conservação** (todos os
-  que vieram do "Estoque físico"; os 66 do checklist de salas têm "bom"): no
-  termo eles saem com "—" até a Emanuelle preencher.
+  guarda).
+- **Conservação OBRIGATÓRIA, avaliada no ato, na entrega E na devolução**
+  (decisão do usuário, 18/11/2026; `conservacoes: {itemId: estado}` no corpo,
+  faltando qualquer item → 400 citando os códigos; a avaliação passa a ser a
+  conservação do item). Na entrega, a tela traz a do item preenchida, para
+  conferir; na **devolução, sempre em branco — nunca herdada da entrega**: é
+  o que mostra se o item voltou pior. Na transferência, quem recebe recebe no
+  estado avaliado na devolução. Na via da devolução, quando muda em relação à
+  entrega que ela fechou: **"saiu BOM, voltou REGULAR"** (`celulaConservacao`;
+  se a devolução for cancelada, compara com a última entrega válida
+  anterior). Só termo anterior à regra sai com "—". Na carga real, 145 dos
+  211 itens vieram sem conservação (todos do "Estoque físico"; os 66 do
+  checklist de salas têm "bom"): são avaliados na primeira entrega.
+  **Decisão do usuário (18/11/2026), não reabrir: cancelar um termo devolve
+  pessoa, local e status, mas NÃO reverte a conservação do item.** A
+  avaliação é uma observação real do item; o cancelamento é administrativo.
+  A conservação gravada no termo cancelado também continua lá.
 - **Importação** (admin e patrimonio; XML via jszip; colunas por nome, rótulo
   com 2ª linha aceito): chave = CÓDIGO NOVO; STATUS = CONSUMO ignorado e
   listado (Fase 2); responsável/sala que não casam = ressalva (nunca cria

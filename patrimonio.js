@@ -312,6 +312,16 @@ function idsDeItens(itemIds) {
   return ids;
 }
 
+// Conservação AVALIADA NO ATO, obrigatória para cada item, na entrega e na
+// devolução (decisão do usuário, 18/11/2026: na devolução nunca é herdada da
+// entrega — é o que mostra se o item voltou pior do que saiu). {itemId: estado}
+function conservacoesDoAto(valor, ids, codigoDe) {
+  const mapa = valor && typeof valor === "object" ? valor : {};
+  const faltam = ids.filter((id) => !ESTADOS.includes(mapa[id] ?? mapa[String(id)]));
+  if (faltam.length) throw erro(`Informe a conservação de cada item, avaliada agora (bom, regular ou ruim): ${faltam.map(codigoDe).join(", ")}.`);
+  return Object.fromEntries(ids.map((id) => [id, mapa[id] ?? mapa[String(id)]]));
+}
+
 // Entrega: vários itens, uma pessoa, um local, uma assinatura → 1 termo e 1
 // movimento por item. Item com termo aberto (com qualquer pessoa) é recusado:
 // para passar de uma pessoa a outra, é transferência (Devolver → transferir).
@@ -336,17 +346,18 @@ function entregar(corpo, usuario) {
     }
     const termo = criarTermo({ tipo: "entrega", pessoaId: pessoa.id, localId: local.id, assinatura, assinanteNome: assinante, observacao: limpo(corpo.observacao) }, usuario, quando);
     // conservação gravada como está no ato da assinatura (migração 45)
+    const cons = conservacoesDoAto(corpo.conservacoes, ids, (id) => itens.find((i) => i.id === id).codigo);
     const insItem = db.prepare("INSERT INTO patrimonio_termo_itens (termo_id, item_id, aberto, conservacao) VALUES (?, ?, 1, ?)");
-    const upd = db.prepare("UPDATE patrimonio_itens SET pessoa_id = ?, local_id = ?, status = 'em_uso', atualizado_em = ? WHERE id = ?");
+    const upd = db.prepare("UPDATE patrimonio_itens SET pessoa_id = ?, local_id = ?, status = 'em_uso', estado_conservacao = ?, atualizado_em = ? WHERE id = ?");
     const mov = insMov();
     for (const it of itens) {
-      insItem.run(termo.id, it.id, it.estado_conservacao);
+      insItem.run(termo.id, it.id, cons[it.id]);
       mov.run({
         item: it.id, tipo: "entrega", pessoaDe: it.pessoa_id, pessoaPara: pessoa.id, localDe: it.local_id, localPara: local.id,
         statusDe: it.status, statusPara: "em_uso", termo: termo.id, importacao: null, usuario: usuario.id, quando,
         obs: it.pessoa_id === pessoa.id ? "regularização: item já constava com a pessoa, sem termo" : null,
       });
-      upd.run(pessoa.id, local.id, quando, it.id);
+      upd.run(pessoa.id, local.id, cons[it.id], quando, it.id);
     }
     return { termo, itens: ids.length };
   })();
@@ -389,26 +400,27 @@ function devolver(corpo, usuario) {
         relacionadoId: dev.id }, usuario, quando);
     }
     const fechar = db.prepare("UPDATE patrimonio_termo_itens SET aberto = 0, fechado_por_termo = ?, fechado_em = ? WHERE item_id = ? AND aberto = 1");
+    const cons = conservacoesDoAto(corpo.conservacoes, ids, (id) => itens.find((i) => i.id === id).codigo);
     const insItem = db.prepare("INSERT INTO patrimonio_termo_itens (termo_id, item_id, aberto, conservacao) VALUES (?, ?, ?, ?)");
-    const upd = db.prepare("UPDATE patrimonio_itens SET pessoa_id = ?, local_id = ?, status = ?, atualizado_em = ? WHERE id = ?");
+    const upd = db.prepare("UPDATE patrimonio_itens SET pessoa_id = ?, local_id = ?, status = ?, estado_conservacao = ?, atualizado_em = ? WHERE id = ?");
     const mov = insMov();
     for (const it of itens) {
       fechar.run(dev.id, quando, it.id);
-      insItem.run(dev.id, it.id, 0, it.estado_conservacao);
+      insItem.run(dev.id, it.id, 0, cons[it.id]);
       if (ent) {
-        insItem.run(ent.id, it.id, 1, it.estado_conservacao);
+        insItem.run(ent.id, it.id, 1, cons[it.id]); // quem recebe recebe no estado avaliado agora
         mov.run({
           item: it.id, tipo: "transferencia", pessoaDe: deId, pessoaPara: novo.id, localDe: it.local_id, localPara: destinoLocal.id,
           statusDe: it.status, statusPara: "em_uso", termo: ent.id, importacao: null, usuario: usuario.id, quando,
           obs: `devolução no termo ${dev.numero}, entrega no termo ${ent.numero}`,
         });
-        upd.run(novo.id, destinoLocal.id, "em_uso", quando, it.id);
+        upd.run(novo.id, destinoLocal.id, "em_uso", cons[it.id], quando, it.id);
       } else {
         mov.run({
           item: it.id, tipo: "devolucao", pessoaDe: deId, pessoaPara: null, localDe: it.local_id, localPara: destinoLocal.id,
           statusDe: it.status, statusPara: "em_estoque", termo: dev.id, importacao: null, usuario: usuario.id, quando, obs: null,
         });
-        upd.run(null, destinoLocal.id, "em_estoque", quando, it.id);
+        upd.run(null, destinoLocal.id, "em_estoque", cons[it.id], quando, it.id);
       }
     }
     return { devolucao: dev, entrega: ent, itens: ids.length };
@@ -497,14 +509,27 @@ function termoParaVia(id, usuario) {
   const pode = t && (["admin", "patrimonio"].includes(usuario.papel) || (usuario.pessoa_id && usuario.pessoa_id === t.pessoa_id));
   if (!pode) throw erro("Termo não encontrado.", 404); // o mesmo 404 de inexistente
   const itens = db.prepare(
-    `SELECT i.codigo, i.nome, i.marca_modelo marcaModelo, i.numero_serie numeroSerie, ti.conservacao
+    `SELECT i.codigo, i.nome, i.marca_modelo marcaModelo, i.numero_serie numeroSerie, ti.conservacao,
+            CASE WHEN ? = 'devolucao' THEN COALESCE(
+              (SELECT e.conservacao FROM patrimonio_termo_itens e WHERE e.fechado_por_termo = ti.termo_id AND e.item_id = ti.item_id),
+              (SELECT e.conservacao FROM patrimonio_termo_itens e JOIN patrimonio_termos te ON te.id = e.termo_id
+                WHERE e.item_id = ti.item_id AND te.tipo = 'entrega' AND te.id < ti.termo_id AND te.cancelado_em IS NULL
+                ORDER BY te.id DESC LIMIT 1)) END saiu
      FROM patrimonio_termo_itens ti JOIN patrimonio_itens i ON i.id = ti.item_id WHERE ti.termo_id = ? ORDER BY i.codigo`
-  ).all(t.id);
+  ).all(t.tipo, t.id);
   return { t, itens };
 }
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const dataHoraBr = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)} às ${s.slice(11, 16)}` : "");
+
+// Na devolução, quando a conservação mudou desde a entrega: "saiu BOM, voltou REGULAR"
+const MAIUSC = (v) => esc(String(v || "").toUpperCase());
+function celulaConservacao(i) {
+  if (!i.conservacao) return "—"; // termos anteriores à conservação obrigatória
+  if (i.saiu && i.saiu !== i.conservacao) return `<span class="mudou">saiu ${MAIUSC(i.saiu)}, voltou ${MAIUSC(i.conservacao)}</span>`;
+  return MAIUSC(i.conservacao);
+}
 
 function htmlVia(id, usuario) {
   const { t, itens } = termoParaVia(id, usuario);
@@ -531,7 +556,7 @@ function htmlVia(id, usuario) {
   .campo span{display:block;font-size:11px;color:#555;text-transform:uppercase}.campo b{font-size:14px}
   .linha{border-bottom:1px solid #111;min-height:20px}
   table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}
-  th{background:#eee;font-size:11px;text-transform:uppercase}td.cod{font-family:monospace;font-size:14px;white-space:nowrap}td.cons{text-transform:uppercase;font-weight:700;white-space:nowrap}
+  th{background:#eee;font-size:11px;text-transform:uppercase}td.cod{font-family:monospace;font-size:14px;white-space:nowrap}td.cons{font-weight:700;white-space:nowrap}td.cons .mudou{white-space:normal}
   .assin{margin-top:24px;display:flex;gap:28px;flex-wrap:wrap;align-items:flex-end}
   .assin .bloco{flex:1;min-width:260px}.assin img{max-width:100%;height:110px;object-fit:contain;display:block;border-bottom:1px solid #111}
   .assin p{margin:4px 0 0;font-size:12px}
@@ -559,7 +584,7 @@ function htmlVia(id, usuario) {
   <p>${declaracao}</p>
   ${relacionado}
   <table><thead><tr><th>Código</th><th>Item</th><th>Marca / modelo</th><th>Nº de série</th><th>Conservação</th></tr></thead><tbody>
-  ${itens.map((i) => `<tr><td class="cod">${esc(i.codigo)}</td><td>${esc(i.nome)}</td><td>${esc(i.marcaModelo || "—")}</td><td>${esc(i.numeroSerie || "—")}</td><td class="cons">${esc(i.conservacao || "—")}</td></tr>`).join("")}
+  ${itens.map((i) => `<tr><td class="cod">${esc(i.codigo)}</td><td>${esc(i.nome)}</td><td>${esc(i.marcaModelo || "—")}</td><td>${esc(i.numeroSerie || "—")}</td><td class="cons">${celulaConservacao(i)}</td></tr>`).join("")}
   </tbody></table>
   <p>Total: <b>${itens.length}</b> ${itens.length === 1 ? "item" : "itens"}.${t.observacao ? ` Observação: ${esc(t.observacao)}` : ""}</p>
   <div class="assin">
