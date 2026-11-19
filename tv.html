@@ -20,6 +20,21 @@
   </header>
 
   <main class="tv-visoes">
+    <!-- PAINEL GERAL: as três áreas lado a lado, UM número grande por coluna e
+         no máximo duas linhas de apoio. Primeira tela da rotação; interruptor
+         próprio na /central (nasce desligado). Coluna de área desligada some. -->
+    <!-- ?fixo= de tela fora da rotação (ou inexistente): aviso com o motivo,
+         em vez de cair em silêncio na rotação inteira -->
+    <section class="tv-visao tv-fora-aviso" id="visao-fora">
+      <h2 id="fora-titulo">FORA DA ROTAÇÃO</h2>
+      <p class="tv-fora-motivo" id="fora-motivo"></p>
+      <p class="tv-fora-dica" id="fora-dica"></p>
+    </section>
+    <section class="tv-visao tv-geral" id="visao-geral">
+      <h2 id="geral-titulo">PAINEL GERAL</h2>
+      <div class="tv-geral-colunas" id="geral-colunas"></div>
+    </section>
+
     <!-- STATUS: quem está em dia hoje — ROTA de hoje (% concluída) e PIPELINE da
          semana (% da meta do prêmio, R$ 42.000, e quanto falta; o ritmo — meta
          diária × dias até hoje — decide o destaque "EM DIA" junto com a rota).

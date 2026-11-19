@@ -2196,3 +2196,31 @@ body:not(.mk-admin) .so-admin-mk { display: none; }
 .pat-lista-cons { max-height: none; }
 .campo-select.pat-falta { border-color: var(--amarelo); box-shadow: 0 0 0 2px rgba(255, 200, 87, 0.35); }
 .pat-campo[hidden] { display: none; }
+
+/* ============ TV — PAINEL GERAL (js/tv.js renderGeral) ============
+   Três colunas (COMERCIAL | MARKETING | PATRIMÔNIO), uma por área ligada.
+   Por coluna: área, rótulo, UM número grande e até duas linhas de apoio —
+   tudo dimensionado para ler da outra ponta da sala. */
+.tv-geral-colunas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6vw; flex: 1; min-height: 0; }
+.tv-geral-col {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  gap: 1vw; padding: 1.6vw 1.2vw; border-radius: 1.2vw;
+  background: rgba(108, 123, 255, 0.07); border: 2px solid rgba(108, 123, 255, 0.35); min-width: 0;
+}
+.tv-geral-area { font-size: 2.4vw; font-weight: 900; letter-spacing: 4px; color: var(--texto); }
+.tv-geral-rot { font-size: 1.5vw; font-weight: 800; letter-spacing: 2px; color: var(--texto-suave); text-transform: uppercase; }
+.tv-geral-num {
+  font-size: 6.4vw; line-height: 1.05; font-weight: 900; font-variant-numeric: tabular-nums; white-space: nowrap;
+  background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  margin: 0.4vw 0 0.8vw;
+}
+.tv-geral-linha { font-size: 2.2vw; font-weight: 700; color: var(--texto); white-space: nowrap; }
+.tv-geral-col.tv-geral-ok { background: rgba(61, 220, 132, 0.1); border-color: rgba(61, 220, 132, 0.6); }
+.tv-geral-col.tv-geral-ok .tv-geral-num { background: none; color: var(--verde); }
+.tv-geral-col.tv-geral-atraso { background: rgba(255, 92, 114, 0.08); border-color: rgba(255, 92, 114, 0.55); }
+.tv-geral-col.tv-geral-atraso .tv-geral-num { background: none; color: var(--vermelho); }
+/* ?fixo= de tela fora da rotação */
+.tv-fora-aviso { justify-content: center; align-items: center; text-align: center; gap: 2vw; }
+.tv-fora-aviso h2 { font-size: 3.6vw; color: var(--amarelo); }
+.tv-fora-motivo { font-size: 2.4vw; font-weight: 700; color: var(--texto); max-width: 80vw; }
+.tv-fora-dica { font-size: 1.6vw; color: var(--texto-suave); max-width: 70vw; }

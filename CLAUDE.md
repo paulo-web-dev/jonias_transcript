@@ -2014,6 +2014,38 @@ Decisões do usuário (2026-11-18), em `patrimonio.js` (`gerencial`,
   Ciclo com tudo ligado: 9 telas × 20 s + 5 cartões × 12 s = **240 s (4,0
   min)**; antes da mudança seriam 288 s (4,8 min).
 
+### ✅ TV — PAINEL GERAL (2026-11-19, sem migração)
+Decisões do usuário (2026-11-19). Uma tela com as três áreas lado a lado,
+COMERCIAL | MARKETING | PATRIMÔNIO (`renderGeral` em js/tv.js), **a primeira
+da rotação**; as telas detalhadas continuam iguais. Por coluna: nome da área,
+o que o número é, UM número grande (auto-ajustado à largura) e no máximo duas
+linhas de apoio. Não leva dado novo: usa o que o payload já traz.
+- **Comercial**: quanto falta para a meta da semana da equipe (batida =
+  "+R$ X" em verde; sem meta = vendido na semana); **"Maior venda da
+  semana"** = maior receita de matrículas da semana entre quem está no
+  painel, SEM olhar elegibilidade — **nunca "líder", "prêmio" ou "1º
+  lugar"**: a tela RANKING pode dizer "ainda não elegível" para a mesma
+  pessoa, e as duas não podem se contradizer no telão; empate mostra todos;
+  e "Rota 100% hoje: N de M".
+- **Marketing**: pendências da Kesley (posts atrasados) + do Gustavo
+  (`pendenciasGustavo`, o mesmo critério da tela MARKETING); "✓ EM DIA" em
+  verde com zero.
+- **Patrimônio**: % do inventário + itens sem responsável, **sem nome de
+  pessoa**; em 100% a coluna CONTINUA, em verde (a tela PATRIMÔNIO é que sai
+  da rotação).
+- Interruptor próprio `configuracoes.painel_geral_tv`, **nasce desligado**,
+  só o admin liga no cartão "📺 Painel geral na TV" da /central (`PUT
+  /api/config/tv {painelGeral}`, corpo parcial; emite SSE `config`). Área
+  desligada não aparece na coluna dela; **com marketing e patrimônio os dois
+  desligados o painel sai da rotação** (só sobraria o comercial, que já tem
+  as telas dele). Prévia `?fixo=geral&previa=1` só para admin logado.
+- **`?fixo=` de tela fora da rotação ou inexistente mostra um aviso**
+  ("TELA X FORA DA ROTAÇÃO" + o motivo, ou a lista de telas válidas) em vez
+  de cair em silêncio na rotação inteira — foi assim que um
+  `?fixo=marketing` esquecido na TV da sala pareceu, por uma semana, "o
+  marketing substituiu o comercial" (`aplicarVisoes` sempre foi aditivo:
+  ligar uma área acrescenta uma tela, conferido contando o ciclo).
+
 ### Etapa 4 — Ideias futuras (a priorizar)
 - Multiusuário completo (cadastro/gestão de usuários — a base já existe na Etapa 0)
 - Glossário automático de termos-chave

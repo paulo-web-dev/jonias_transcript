@@ -15,7 +15,7 @@ const GIRO_MS = Math.max(6, Number(params.get("giro")) || 20) * 1000;
 // Cartão de destaque (falta para a meta da semana): entra a cada DUAS telas da
 // rotação (desde 2026-11-18; antes, depois de cada tela), com duração própria — ?destaque=N segundos (padrão 12, mín. 4)
 const DESTAQUE_MS = Math.max(4, Number(params.get("destaque")) || 12) * 1000;
-const FIXO = params.get("fixo"); // status | ranking | semana | receita | mes | parados3 | parados10 | marketing | patrimonio | destaque
+const FIXO = params.get("fixo"); // geral | status | ranking | semana | receita | mes | parados3 | parados10 | marketing | patrimonio | destaque
 // ?previa=1: mostra a tela MARKETING desligada — o servidor só atende admin logado neste navegador
 const PREVIA = params.get("previa") === "1";
 // Som: o padrão vem da preferência global (configuracoes.tv_som, no payload);
@@ -307,13 +307,15 @@ function proximaCelebracao() {
 
 // ---------- Rotação entre visões ----------
 
-const VISOES = ["status", "ranking", "destaque", "semana", "receita", "mes", "parados3", "parados10", "marketing", "patrimonio"];
+const VISOES = ["fora", "geral", "status", "ranking", "destaque", "semana", "receita", "mes", "parados3", "parados10", "marketing", "patrimonio"];
 let receitaAvisada = false;
 let visoesAtivas = [];
 let visaoAtual = 0;
 let destaqueAvisado = false;
 const foraAvisadas = new Set(); // log no console uma vez por motivo de saída
+const motivosFora = {}; // último motivo de cada tela fora (mostrado com ?fixo=)
 function avisarFora(visao, motivo) {
+  motivosFora[visao] = motivo;
   if (foraAvisadas.has(visao)) return;
   foraAvisadas.add(visao);
   console.log(`[tv] tela ${visao} fora da rotação: ${motivo}`);
@@ -329,11 +331,16 @@ function aplicarVisoes(d) {
   // RECEITA DA SEMANA (% e falta por vendedor) só entra com meta de receita
   // semanal cadastrada para alguém do painel (receita_semana, painel /metas)
   const temReceita = d.semana.porPessoa.some((p) => p.receita?.meta != null);
+  if (!temReceita) motivosFora.receita = "nenhuma meta de receita semanal cadastrada em /metas";
   if (!temReceita && !receitaAvisada) {
     receitaAvisada = true;
     console.log("[tv] visão RECEITA DA SEMANA fora da rotação: nenhuma meta de receita semanal (receita_semana) cadastrada em /metas");
   }
   const telas = [];
+  // PAINEL GERAL (primeira tela): interruptor próprio; a coluna do comercial
+  // está sempre lá, então só faz sentido com marketing ou patrimônio ligados
+  if (d.painelGeral?.ativo && (d.marketing?.ativo || d.patrimonio?.ativo)) { telas.push("geral"); foraAvisadas.delete("geral"); }
+  else avisarFora("geral", !d.painelGeral?.ativo ? "painel geral desligado em /central" : "marketing e patrimônio desligados — só sobraria a coluna do comercial");
   // STATUS: sai sem rota hoje E sem meta de pipeline para ninguém
   if (d.status?.ativo) { telas.push("status"); foraAvisadas.delete("status"); }
   else avisarFora("status", "nenhuma rota hoje e nenhuma meta de pipeline vigente");
@@ -363,9 +370,23 @@ function aplicarVisoes(d) {
   const novas = temDestaque
     ? telas.flatMap((t, i) => (i % 2 === 1 || i === telas.length - 1 ? [t, "destaque"] : [t]))
     : telas;
-  const fixoValido = FIXO && novas.includes(FIXO) ? FIXO : null;
+  // ?fixo= de tela que está fora da rotação: mostra o aviso com o motivo, nunca
+  // cai em silêncio na rotação inteira (decisão do usuário, 2026-11-19 — foi
+  // assim que um ?fixo=marketing esquecido na TV da sala pareceu "o marketing
+  // substituiu o comercial" por uma semana)
   const telaAntes = visoesAtivas[visaoAtual];
-  visoesAtivas = fixoValido ? [fixoValido] : novas;
+  if (FIXO && !novas.includes(FIXO)) {
+    if (!temDestaque) motivosFora.destaque = "nenhuma meta da semana da equipe cadastrada em /metas";
+    const conhecida = FIXO !== "fora" && NOMES_VISAO[FIXO];
+    el("fora-titulo").textContent = conhecida ? `TELA ${conhecida} FORA DA ROTAÇÃO` : `TELA "${FIXO.toUpperCase()}" NÃO EXISTE`;
+    el("fora-motivo").textContent = conhecida
+      ? (motivosFora[FIXO] ? `Motivo: ${motivosFora[FIXO]}.` : "")
+      : `Telas válidas: ${Object.keys(NOMES_VISAO).filter((v) => v !== "fora").join(", ")}.`;
+    el("fora-dica").textContent = "Esta TV está presa nesta tela pelo ?fixo= no endereço. Para a rotação normal, abra o endereço sem o ?fixo=.";
+    visoesAtivas = ["fora"];
+  } else {
+    visoesAtivas = FIXO ? [FIXO] : novas;
+  }
   // Pausado por navegação manual: o refresh não pode trocar a tela que a
   // pessoa escolheu (se ela saiu da rotação, cai na primeira)
   if (pausadoAte && telaAntes) visaoAtual = Math.max(0, visoesAtivas.indexOf(telaAntes));
@@ -374,7 +395,7 @@ function aplicarVisoes(d) {
   mostrarVisao(visoesAtivas[visaoAtual]);
 }
 
-const NOMES_VISAO = { status: "STATUS", ranking: "RANKING DE VENDAS", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", marketing: "MARKETING", patrimonio: "PATRIMÔNIO", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
+const NOMES_VISAO = { fora: "FORA DA ROTAÇÃO", geral: "PAINEL GERAL", status: "STATUS", ranking: "RANKING DE VENDAS", semana: "SEMANA", receita: "RECEITA DA SEMANA", mes: "MÊS", marketing: "MARKETING", patrimonio: "PATRIMÔNIO", destaque: "META DA SEMANA", parados3: "PARADOS 3–9 DIAS", parados10: "URGENTE — PARADOS 10+ DIAS" };
 
 function mostrarVisao(nome) {
   if (nome === "parados3" || nome === "parados10") ajustarCards(nome);
@@ -834,6 +855,7 @@ function renderizar(d, origem) {
   renderParados(d.parados);
   renderMarketing(d.marketing);
   renderPatrimonio(d.patrimonio);
+  renderGeral(d);
 
   // ---- DESTAQUE: falta para a meta da SEMANA (equipe, R$) ----
   const eq = d.semana.equipe.receita;
@@ -970,6 +992,13 @@ function colunaKesley(k) {
     <div class="tv-mk-linha"><b class="${conv ? "tv-mk-verde" : ""}">💬 ${num(k.conversas)}</b> / ${num(k.metaConversas)} conversas${conv ? " ✓" : ""}</div>`;
 }
 
+// Pendências do Gustavo = atrasados (e-mail, posts do Status, WhatsApp da
+// semana) + slots de ADS não vivos. Mesmo número na tela MARKETING e no PAINEL GERAL.
+function pendenciasGustavo(g) {
+  if (g.emDia) return 0;
+  return g.email.atrasados + (g.posts.atrasados || 0) + (g.whatsapp?.situacao === "atrasado" ? 1 : 0) + (g.ads.total - g.ads.vivas);
+}
+
 function colunaGustavo(g) {
   const ads = g.ads;
   const chips = ads.problemas.map((p) => p.situacao === "vazio"
@@ -982,9 +1011,9 @@ function colunaGustavo(g) {
     : w.situacao === "atrasado" ? `<b class="tv-mk-vermelho">${diasTxt(w.atrasoDias)} de atraso</b>`
     : w.situacao === "hoje" ? `<b class="tv-mk-amarelo">é hoje</b>`
     : `<span class="tv-mk-cinza">vence ${dataBr(w.devido)}</span>`;
-  const atrasadosTotal = e.atrasados + (g.posts.atrasados || 0) + (w?.situacao === "atrasado" ? 1 : 0);
+  const pend = pendenciasGustavo(g);
   return `<div class="tv-mk-nome">${esc(g.nome)} <small>ADS · e-mail · WhatsApp</small></div>
-    ${g.emDia ? blocoEmDia(true) : `<div class="tv-mk-placar tv-mk-atraso"><b>${num(atrasadosTotal + (ads.total - ads.vivas))}</b><span>pendência${atrasadosTotal + ads.total - ads.vivas === 1 ? "" : "s"}<small>veja abaixo</small></span></div>`}
+    ${g.emDia ? blocoEmDia(true) : `<div class="tv-mk-placar tv-mk-atraso"><b>${num(pend)}</b><span>pendência${pend === 1 ? "" : "s"}<small>veja abaixo</small></span></div>`}
     <div class="tv-mk-linha"><span class="tv-mk-rot">ADS</span><b class="${ads.vivas === ads.total ? "tv-mk-verde" : "tv-mk-vermelho"}">${num(ads.vivas)} de ${num(ads.total)}</b> campanhas vivas</div>
     ${chips ? `<div class="tv-mk-chips">${chips}</div>` : ""}
     <div class="tv-mk-linha"><span class="tv-mk-rot">E-MAIL</span>${e.atrasados
@@ -1033,6 +1062,91 @@ function renderPatrimonio(p) {
   if (patrimonioAnterior != null && p.pct > patrimonioAnterior) brilhar(caixa, p.completo ? "tv-glow-meta" : "tv-glow");
   patrimonioAnterior = p.pct;
 }
+
+// ---------- PAINEL GERAL (primeira tela) ----------
+// Televisão vista de longe: por coluna, o nome da área, o que o número é, UM
+// número grande e no máximo duas linhas de apoio. Sem nome de pessoa na
+// coluna do patrimônio (o payload dela já não tem nenhum).
+const reaisCurto = (c) => {
+  const v = Math.round((c || 0) / 100);
+  return v >= 1000 ? `R$ ${(v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil` : `R$ ${num(v)}`;
+};
+function colunaGeral(area, rotulo, numero, classe, linhas) {
+  return `<div class="tv-geral-col ${classe}">
+    <div class="tv-geral-area">${area}</div>
+    <div class="tv-geral-rot">${rotulo}</div>
+    <div class="tv-geral-num">${numero}</div>
+    ${linhas.slice(0, 2).map((l) => `<div class="tv-geral-linha">${l}</div>`).join("")}
+  </div>`;
+}
+function colunaGeralComercial(d) {
+  const eq = d.semana.equipe.receita;
+  // Maior receita de matrículas da semana entre quem está no painel, sem olhar elegibilidade
+  const pessoas = d.status?.porPessoa || [];
+  const maior = Math.max(0, ...pessoas.map((p) => p.receitaCentavos || 0));
+  const lideres = maior > 0 ? pessoas.filter((p) => p.receitaCentavos === maior).map((p) => esc(p.nome)) : [];
+  // Rótulo de FATO (decisão do usuário, 2026-11-19): nunca "líder", "prêmio" ou
+  // "1º lugar" — a tela RANKING pode dizer "ainda não elegível" para a mesma
+  // pessoa, e as duas não podem se contradizer no telão. Empate mostra todos.
+  const lider = lideres.length ? `💰 Maior venda da semana<br><b>${lideres.join(" e ")}</b> · ${reaisCurto(maior)}` : "💰 Ninguém vendeu ainda na semana";
+  const comRota = pessoas.filter((p) => p.rota?.hoje?.itens > 0);
+  const rota100 = comRota.filter((p) => p.rota.hoje.pct >= 100).length;
+  const rota = comRota.length
+    ? `📞 Rota 100% hoje: <b class="${rota100 === comRota.length ? "tv-mk-verde" : ""}">${num(rota100)} de ${num(comRota.length)}</b>`
+    : "📞 Sem rota hoje";
+  if (eq?.metaCentavos == null) {
+    return colunaGeral("COMERCIAL", "VENDIDO NA SEMANA · sem meta cadastrada", reaisCurto(eq?.receitaCentavos), "", [lider, rota]);
+  }
+  const bateu = eq.receitaCentavos >= eq.metaCentavos;
+  return bateu
+    ? colunaGeral("COMERCIAL", "🏆 META DA SEMANA BATIDA", `+${reaisCurto(eq.receitaCentavos - eq.metaCentavos)}`, "tv-geral-ok", [lider, rota])
+    : colunaGeral("COMERCIAL", "FALTA PARA A META DA SEMANA", reaisCurto(eq.faltaCentavos), "", [lider, rota]);
+}
+function colunaGeralMarketing(m) {
+  const k = m.kesley.atrasados;
+  const g = pendenciasGustavo(m.gustavo);
+  const linha = (nome, n, um, varios) => n
+    ? `${esc(nome)}: <b class="tv-mk-vermelho">${num(n)}</b> ${n === 1 ? um : varios}`
+    : `${esc(nome)}: <b class="tv-mk-verde">em dia ✓</b>`;
+  const linhas = [linha(m.kesley.nome, k, "post atrasado", "posts atrasados"), linha(m.gustavo.nome, g, "pendência", "pendências")];
+  return k + g === 0
+    ? colunaGeral("MARKETING", "PENDÊNCIAS", "✓ EM DIA", "tv-geral-ok", linhas)
+    : colunaGeral("MARKETING", "PENDÊNCIAS", num(k + g), "tv-geral-atraso", linhas);
+}
+function colunaGeralPatrimonio(p) {
+  const sem = p.semResponsavel
+    ? `<b class="tv-mk-vermelho">${num(p.semResponsavel)}</b> ${p.semResponsavel === 1 ? "item" : "itens"} sem responsável`
+    : `<b class="tv-mk-verde">0</b> sem responsável ✓`;
+  return colunaGeral("PATRIMÔNIO", "INVENTÁRIO COMPLETO", `${p.pct}%`, p.completo ? "tv-geral-ok" : "",
+    [sem, `${num(p.completos)} de ${num(p.total)} itens completos`]);
+}
+function renderGeral(d) {
+  if (!d.painelGeral?.ativo) return;
+  el("geral-titulo").textContent = `PAINEL GERAL${d.painelGeral.previa ? " · PRÉVIA (desligado na TV)" : ""}`;
+  // Área desligada fica fora: a coluna some e as outras ocupam o espaço
+  const cols = [colunaGeralComercial(d)];
+  if (d.marketing?.ativo) cols.push(colunaGeralMarketing(d.marketing));
+  if (d.patrimonio?.ativo) cols.push(colunaGeralPatrimonio(d.patrimonio));
+  const alvo = el("geral-colunas");
+  const html = cols.join("");
+  alvo.style.gridTemplateColumns = `repeat(${cols.length}, 1fr)`;
+  if (alvo.dataset.h !== html) { alvo.innerHTML = html; alvo.dataset.h = html; }
+  ajustarNumerosGeral();
+}
+// Nada vaza nem quebra linha: o número grande e as linhas de apoio começam no
+// tamanho máximo e diminuem até caber ("+R$ 121,5 mil" em três colunas, nome
+// comprido no líder). Refeito no resize.
+function ajustarNumerosGeral() {
+  for (const [seletor, max, min] of [[".tv-geral-num", 9, 3], [".tv-geral-linha", 2.2, 1.4]]) {
+    for (const n of document.querySelectorAll(seletor)) {
+      let vw = max;
+      n.style.fontSize = vw + "vw";
+      const largura = n.parentElement.clientWidth * 0.92;
+      while (vw > min && n.scrollWidth > largura) { vw -= 0.1; n.style.fontSize = vw.toFixed(1) + "vw"; }
+    }
+  }
+}
+window.addEventListener("resize", ajustarNumerosGeral);
 
 // ---------- Relógio / status ----------
 

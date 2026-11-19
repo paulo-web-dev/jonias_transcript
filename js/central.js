@@ -20,6 +20,8 @@ const el = {
   btnSair: document.getElementById("btn-sair"),
   tvSomStatus: document.getElementById("tv-som-status"),
   btnTvSom: document.getElementById("btn-tv-som"),
+  tvGeralStatus: document.getElementById("tv-geral-status"),
+  btnTvGeral: document.getElementById("btn-tv-geral"),
 };
 
 let avisoTimerId = null;
@@ -421,14 +423,41 @@ function mostrarSomTv(ligado) {
   el.btnTvSom.disabled = false;
 }
 
+function mostrarPainelGeral(ligado) {
+  el.tvGeralStatus.textContent = ligado
+    ? "LIGADO — o painel geral é a primeira tela da rotação."
+    : "DESLIGADO — a TV não mostra o painel geral.";
+  el.btnTvGeral.textContent = ligado ? "Desligar painel geral" : "Ligar painel geral";
+  el.btnTvGeral.dataset.ligado = ligado ? "1" : "0";
+  el.btnTvGeral.disabled = false;
+}
+
 async function carregarSomTv() {
   try {
-    const { som } = await chamarApi("/api/config/tv");
+    const { som, painelGeral } = await chamarApi("/api/config/tv");
     mostrarSomTv(som);
+    mostrarPainelGeral(painelGeral);
   } catch (_) {
     el.tvSomStatus.textContent = "Não foi possível consultar a configuração de som.";
+    el.tvGeralStatus.textContent = "Não foi possível consultar a configuração do painel geral.";
   }
 }
+
+el.btnTvGeral.addEventListener("click", async () => {
+  const novo = el.btnTvGeral.dataset.ligado !== "1";
+  el.btnTvGeral.disabled = true;
+  try {
+    const { painelGeral } = await chamarApi("/api/config/tv", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ painelGeral: novo }),
+    });
+    mostrarPainelGeral(painelGeral);
+  } catch (erro) {
+    el.btnTvGeral.disabled = false;
+    mostrarAviso(`Não foi possível alterar o painel geral. (${erro.message})`);
+  }
+});
 
 el.btnTvSom.addEventListener("click", async () => {
   const novo = el.btnTvSom.dataset.ligado !== "1";

@@ -214,6 +214,12 @@ app.get("/tv", (req, res) => {
 // refetch (SSE ou polling). `?som=` na URL da TV é override por dispositivo.
 const configSomTv = () =>
   db.prepare("SELECT valor FROM configuracoes WHERE chave = 'tv_som'").get()?.valor === "1";
+// PAINEL GERAL (comercial | marketing | patrimônio numa tela, a primeira da
+// rotação): interruptor próprio `configuracoes.painel_geral_tv`, nasce
+// DESLIGADO (sem linha = desligado), só o admin liga na /central. Não leva
+// dado novo: as colunas usam o que o payload já traz de cada área.
+const configPainelGeralTv = () =>
+  db.prepare("SELECT valor FROM configuracoes WHERE chave = 'painel_geral_tv'").get()?.valor === "1";
 
 app.get("/api/tv/dados", (req, res) => {
   const ok = tokenTvValido(req);
@@ -229,7 +235,9 @@ app.get("/api/tv/dados", (req, res) => {
   let dadosPatrimonio = { ativo: false };
   try { dadosPatrimonio = patrimonio.painelTvPatrimonio({ previa: previaMarketing }); }
   catch (err) { console.error("[tv] patrimonio:", err.message || err); }
-  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador({ tv: true }), marketing: dadosMarketing, patrimonio: dadosPatrimonio });
+  const geralLigado = configPainelGeralTv();
+  const painelGeral = { ativo: geralLigado || previaMarketing, previa: !geralLigado && previaMarketing };
+  res.json({ ...dadosTvCompleto({ rotaSemana: rota.rotasDaSemanaTv() }), rota: rota.progressoTv(), som: configSomTv(), fimAno: fimDeAno.contador({ tv: true }), marketing: dadosMarketing, patrimonio: dadosPatrimonio, painelGeral });
 });
 
 // SSE: empurra "dados atualizados" para as TVs quando uma ingestão termina.
@@ -309,15 +317,22 @@ app.use("/api", (req, res, next) => {
 
 // ---------- Configurações globais (só telas autenticadas) ----------
 
-app.get("/api/config/tv", (req, res) => res.json({ som: configSomTv() }));
+app.get("/api/config/tv", (req, res) => res.json({ som: configSomTv(), painelGeral: configPainelGeralTv() }));
 
+// Corpo parcial: { som?, painelGeral? } — campo ausente não mexe
 app.put("/api/config/tv", (req, res) => {
-  const { som } = req.body || {};
-  if (typeof som !== "boolean") {
-    return res.status(400).json({ error: "Informe { som: true|false }." });
+  const { som, painelGeral } = req.body || {};
+  const valido = (v) => v === undefined || typeof v === "boolean";
+  if (!valido(som) || !valido(painelGeral) || (som === undefined && painelGeral === undefined)) {
+    return res.status(400).json({ error: "Informe { som: true|false } e/ou { painelGeral: true|false }." });
   }
-  db.prepare("UPDATE configuracoes SET valor = ? WHERE chave = 'tv_som'").run(som ? "1" : "0");
-  res.json({ som });
+  if (som !== undefined) db.prepare("UPDATE configuracoes SET valor = ? WHERE chave = 'tv_som'").run(som ? "1" : "0");
+  if (painelGeral !== undefined) {
+    db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('painel_geral_tv', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor")
+      .run(painelGeral ? "1" : "0");
+    emitirEventoTv("painel_geral", "config"); // entra ou sai da rotação na hora
+  }
+  res.json({ som: configSomTv(), painelGeral: configPainelGeralTv() });
 });
 
 // ---------- Metas (painel /metas) ----------
