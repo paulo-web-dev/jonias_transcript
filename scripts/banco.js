@@ -33,6 +33,9 @@ const TABELAS = [
   "marcacoes_prospeccao", "cores_prospeccao", "ligacoes", "oportunidades",
   "matriculas", "turmas", "metas", "periodos", "feedbacks", "aulas", "importacoes",
   "ramal_vigencias", "rota_tipos", "rota_campanhas", "rotas", "rota_itens",
+  // Patrimônio (migrações 43–45)
+  "locais", "patrimonio_itens", "patrimonio_movimentos", "patrimonio_termos",
+  "patrimonio_termo_itens",
 ];
 
 function tamanhos() {
@@ -62,6 +65,8 @@ function conferir() {
   console.log(`última edição de contato     ${ultimo("SELECT MAX(editado_em) FROM contatos_ativo")}`);
   console.log(`última marcação              ${ultimo("SELECT MAX(marcado_em) FROM marcacoes_prospeccao")}`);
   console.log(`última importação            ${ultimo("SELECT MAX(iniciado_em) FROM importacoes")}`);
+  console.log(`último movimento patrimônio  ${ultimo("SELECT MAX(data_hora) FROM patrimonio_movimentos")}`);
+  console.log(`último termo patrimônio      ${ultimo("SELECT MAX(data_hora) FROM patrimonio_termos")}`);
   // Por cor: a migração 27 recria a tabela e tem de preservar cada contagem.
   if (existe.has("marcacoes_prospeccao")) {
     const cores = db.prepare("SELECT cor, COUNT(*) n FROM marcacoes_prospeccao GROUP BY cor ORDER BY cor").all();
