@@ -517,6 +517,10 @@ Do seu computador, `ssh -L 8001:localhost:8001 servidor` e abra
 `http://localhost:8001`. Faça login e confira os números. Para encerrar:
 Ctrl+C, e depois `rm -rf data/ensaio`.
 
-O ensaio grava só na cópia: geração da Rota e o próprio backup automático,
-que vai para `data/ensaio/backups/`. Não rode "Sincronizar" nem importações
-nele. A cópia do MySQL só lê, mas é tempo de banco à toa.
+Com `NODE_ENV=development` os **agendadores ficam desligados** (desde
+2026-11-19): o ensaio não gera Rota a cada 5 min, não faz backup automático
+e, principalmente, não dispara o sync diário da Unyflex — instância de teste
+nunca fala sozinha com sistema de produção. O log do boot diz
+`⏸ Agendadores DESLIGADOS`. Não rode "Sincronizar" nem importações nele. Para
+ensaiar o próprio backup, use o botão "Fazer backup agora" em `/saude` (vai
+para `data/ensaio/backups/`).

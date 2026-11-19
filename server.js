@@ -1883,13 +1883,27 @@ app.use((err, req, res, next) => {
   }
   // Rota: gera a de hoje (se faltar) e, a partir das 17h, a do próximo dia útil
   rota.garantirRotas();
-  setInterval(() => rota.garantirRotas(), 5 * 60 * 1000).unref();
-  // Backup diário do banco (03:00 Brasília, com recuperação após reinício)
-  backup.iniciarAgendamento();
-  // Marketing (migração 39): envios das turmas futuras + sync diário da Unyflex
+  // Marketing (migração 39): envios das turmas futuras
   marketing.gerarEnvios();
-  setTimeout(tiqueMarketing, 60 * 1000).unref();
-  setInterval(tiqueMarketing, 10 * 60 * 1000).unref();
+  // AGENDADORES (decisão do usuário, 2026-11-19): só sobem em PRODUÇÃO
+  // (NODE_ENV=production). Instância de teste ou de desenvolvimento — inclusive
+  // a que sobe com DB_PATH numa cópia — nunca dispara sozinha nada que fale com
+  // sistema de produção (o sync diário bateu no MySQL da Unyflex a partir de
+  // um servidor de teste). AGENDADORES=1 liga de propósito fora de produção.
+  // Os botões (sincronizar, backup, gerar rotas) continuam funcionando.
+  if (process.env.NODE_ENV === "production" || process.env.AGENDADORES === "1") {
+    // Rota: a de hoje (se faltar) e, a partir das 17h, os próximos dias úteis
+    setInterval(() => rota.garantirRotas(), 5 * 60 * 1000).unref();
+    // Backup diário do banco (03:00 Brasília, com recuperação após reinício)
+    backup.iniciarAgendamento();
+    // Marketing: envios + sync diário da Unyflex (06:00 Brasília)
+    setTimeout(tiqueMarketing, 60 * 1000).unref();
+    setInterval(tiqueMarketing, 10 * 60 * 1000).unref();
+    console.log("⏱  Agendadores LIGADOS: rota (5 min), backup diário, marketing + sync diário da Unyflex (10 min).");
+  } else {
+    console.warn("⏸  Agendadores DESLIGADOS (NODE_ENV não é production): sem tique da rota, backup automático " +
+      "nem sync diário da Unyflex. AGENDADORES=1 liga de propósito.");
+  }
   app.listen(PORT, () => {
     console.log(`jonIAs — Assistente de Aulas rodando em http://localhost:${PORT}`);
   });

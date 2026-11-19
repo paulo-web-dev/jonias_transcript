@@ -155,6 +155,19 @@ reproduzir a produção, usar um backup dela (`scripts/banco.js backup`).
 Checagem de sintaxe é com `node --check`, nunca com `require`. Teste que
 abre o banco usa `DB_PATH` apontando para uma cópia.
 
+⚠ **Agendadores só em produção (2026-11-19, decisão do usuário).** Em
+19/11/2026, um servidor de teste subido com `DB_PATH` numa cópia disparou
+sozinho o sync diário da Unyflex contra o MySQL de produção (só leitura, mas
+instância de teste não pode falar sozinha com sistema de produção). Desde
+então os timers do boot (`server.js`: tique da Rota de 5 min, backup diário,
+tique do marketing com o sync diário da Unyflex) só sobem com
+`NODE_ENV=production`; fora dela o boot loga `⏸ Agendadores DESLIGADOS`.
+`AGENDADORES=1` liga de propósito. Os botões continuam (sincronizar, backup
+agora, gerar rotas), e o boot ainda faz uma vez a geração da Rota e dos
+envios do marketing — só na cópia, sem falar com nada externo. **Timer novo
+que fale com sistema externo entra dentro desse `if`.** Servidor de teste
+também não deve ter `MYSQL_*` se não for testar o sync.
+
 Abrir `http://localhost:8000` no Chrome → redireciona para /login.
 **Modo de teste:** `?bloco=30` na URL da sessão ao vivo reduz o bloco de 400
 para 30 palavras.
@@ -1697,7 +1710,8 @@ aprovada antes da seguinte:
     (o sync marca a turma local que não veio no filtro `status = 'able'`;
     volta a NULL se ela reaparecer). Antes, uma turma cancelada na origem era
     indistinguível de uma ativa na cópia local.
-  - **Sync diário automático da Unyflex** (decisão do usuário): depois das
+  - **Sync diário automático da Unyflex** (decisão do usuário; só com
+    `NODE_ENV=production` desde 2026-11-19 — ver "Agendadores só em produção"): depois das
     06:00 de Brasília, se não houver sync concluído hoje depois desse horário
     (tique de 10 min + boot +1 min). Usa o mesmo caminho do botão e grava a
     auditoria com o 1º admin ativo, porque `importacoes.usuario_id` é NOT
