@@ -1658,6 +1658,20 @@ Decisões do usuário de 2026-11-10, sobre o plano "Resumo_Rota Final_Unyflex.pd
   para 100k e 80k, por dia útil), a TV vê todas lado a lado numa linha própria
   abaixo do topo. Conferido na cópia local com matrículas simuladas nos valores
   do plano: soma e falta por pessoa batem; cancelada e canal ficam fora.
+  **Saída de vendedor do plano (decisão do usuário, 2026-11-19, saída do
+  Danilo — último dia 12/11/2026):** o coletivo NÃO muda (R$ 500/400 mil), as
+  cotas de quem fica NÃO sobem, e a cota de quem saiu vira **lacuna coletiva
+  sem dono**. Motivo do usuário: cota que ninguém alcança deixa de ser cota
+  (a Agnes precisaria de R$ 6.424/dia contra ~R$ 1.316 que vem fazendo), e
+  baixar o coletivo no meio do caminho ensina que a meta cede quando aperta.
+  `cotas()` lista só quem tem faixa VIGENTE hoje (quem saiu vai para `fora`:
+  o que vender conta para o coletivo, sem cota) e devolve `soma` (cotas da
+  lista × coletivo, `lacunaCentavos`), mostrada no header do admin, na tabela
+  de /fim-de-ano e na linha de cotas da TV — a diferença fica visível, nunca
+  escondida. Diagnóstico antes da migração de saída:
+  `scripts/diagnostico-saida-vendedor.js` (só leitura; faixa dividida em
+  quatro blocos alfabéticos × inteira, órgãos novos, rotas já geradas, baixas
+  depois da saída, cotas).
 - **Migração 37 — Danilo e troca de ramais COM vigência** (2026-11-10): Danilo
   de Souza Santana = "Danilo Santana" no wallet e no Omie. A partir de
   **11/11/2026** o Frederico vai do 2005 para o 2004 e o Danilo assume o 2005,

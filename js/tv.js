@@ -639,7 +639,8 @@ function metaFimDeAno(c) {
       ? `<span class="tv-ma-cotas">${c.cotas.lista.map((x) => {
           const k = (v) => (v >= 100000 ? (v / 100000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k" : r(v));
           return `<span class="tv-ma-c"><strong>${x.nome}</strong> ${k(x.vendidoCentavos)}${x.supermeta ? ` / ${k(x.supermeta.metaCentavos)} · falta ${k(x.supermeta.faltaCentavos)}` : ""}</span>`;
-        }).join("")}</span>` : "");
+        }).join("")}${c.cotas.soma?.supermeta.lacunaCentavos > 0
+          ? `<span class="tv-ma-c tv-ma-lacuna">cotas somam ${r(c.cotas.soma.supermeta.cotasCentavos)} de ${r(c.cotas.soma.supermeta.coletivoCentavos)} · <strong>sem dono ${r(c.cotas.soma.supermeta.lacunaCentavos)}</strong></span>` : ""}</span>` : "");
 }
 
 function renderizar(d, origem) {

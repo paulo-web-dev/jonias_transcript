@@ -77,7 +77,12 @@ function renderAdmin() {
         <td>${x.base ? `${reais(x.base.faltaCentavos)} <small class="texto-suave">de ${reais(x.base.metaCentavos)}</small>` : "sem cota"}</td>
         <td>${x.supermeta ? reais(x.supermeta.porDiaCentavos || 0) : "—"}</td></tr>`).join("") +
       (ct.fora || []).map((f) => `<tr class="sem-clique texto-suave"><td>${escapeHtml(f.nome)} <small>(sem cota, coletivo)</small></td><td>${reais(f.vendidoCentavos)}</td><td></td>
-        <td>${PDF[f.nome] !== undefined ? reais(PDF[f.nome]) : "—"}</td><td>${difPdf(f.nome, f.vendidoCentavos)}</td><td colspan="3"></td></tr>`).join("") + "</tbody>" +
+        <td>${PDF[f.nome] !== undefined ? reais(PDF[f.nome]) : "—"}</td><td>${difPdf(f.nome, f.vendidoCentavos)}</td><td colspan="3"></td></tr>`).join("") +
+      // soma das cotas × coletivo: cota de quem saiu não é repassada, a diferença fica visível como lacuna sem dono
+      (ct.soma ? `<tr class="sem-clique fa-soma-cotas"><td><strong>Soma das cotas</strong> <small class="texto-suave">(${inteiro(ct.soma.vendedores)} vendedores)</small></td><td colspan="4"></td>
+        <td>${reais(ct.soma.supermeta.cotasCentavos)} <small class="texto-suave">de ${reais(ct.soma.supermeta.coletivoCentavos)} do coletivo</small>${ct.soma.supermeta.lacunaCentavos > 0 ? `<br><span class="pct-baixo">lacuna sem dono: ${reais(ct.soma.supermeta.lacunaCentavos)}</span>` : ""}</td>
+        <td>${reais(ct.soma.base.cotasCentavos)} <small class="texto-suave">de ${reais(ct.soma.base.coletivoCentavos)} do coletivo</small>${ct.soma.base.lacunaCentavos > 0 ? `<br><span class="pct-baixo">lacuna sem dono: ${reais(ct.soma.base.lacunaCentavos)}</span>` : ""}</td><td></td></tr>` : "") +
+      "</tbody>" +
       `<tfoot><tr><td colspan="8" class="texto-suave" style="text-align:left">Mesma fonte do contador (matrículas por data de criação, nov/dez, sem canceladas), por vendedor da matrícula (wallet). Diferença ≠ 0 = atribuição torta ou venda nova/cancelada depois de 10/11: confira antes de ligar.</td></tr></tfoot>`
     : "";
   document.getElementById("fa-cotas-ligar").textContent = c?.cotasAtivas ? "Desligar cotas individuais" : "Ligar cotas individuais (conferi por pessoa)";

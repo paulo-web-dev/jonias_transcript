@@ -121,7 +121,9 @@ async function contadorFimDeAno(sessao) {
           `<strong>${x.nome}</strong> ${kmil(x.vendidoCentavos)}${x.supermeta ? ` / ${kmil(x.supermeta.metaCentavos)}` : ""}` +
           `<span class="cfa-mini"><span style="width:${Math.min(100, x.supermeta?.pct || 0)}%"></span></span>` +
           `<small>falta ${x.supermeta ? kmil(x.supermeta.faltaCentavos) : "—"} · base ${x.base ? (x.base.faltaCentavos ? kmil(x.base.faltaCentavos) : "✓") : "—"}</small></span>`).join("") +
-        (ct.fora?.length ? `<span class="cfa-fora">sem cota (coletivo): ${ct.fora.map((f) => `${f.nome} ${kmil(f.vendidoCentavos)}`).join(" · ")}</span>` : "");
+        (ct.fora?.length ? `<span class="cfa-fora">sem cota (coletivo): ${ct.fora.map((f) => `${f.nome} ${kmil(f.vendidoCentavos)}`).join(" · ")}</span>` : "") +
+        (ct.soma ? `<span class="cfa-soma" title="cota de quem saiu não é repassada: a diferença fica como lacuna coletiva, sem dono">cotas dos ${ct.soma.vendedores} somam <strong>${kmil(ct.soma.supermeta.cotasCentavos)}</strong> · coletivo ${kmil(ct.soma.supermeta.coletivoCentavos)}` +
+          `${ct.soma.supermeta.lacunaCentavos > 0 ? ` · <strong>lacuna sem dono ${kmil(ct.soma.supermeta.lacunaCentavos)}</strong>` : ""}</span>` : "");
     }
     faixa.append(box);
   }

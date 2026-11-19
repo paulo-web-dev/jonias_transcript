@@ -388,7 +388,12 @@ function cotas({ hoje, restantes, de, ate, pessoaId = null, todos = true }) {
     `SELECT m.pessoa_id p, COALESCE(SUM(m.valor_centavos), 0) v, COUNT(*) n FROM matriculas m JOIN pessoas x ON x.id = m.pessoa_id
      WHERE x.tipo = 'consultor' AND m.criada_em BETWEEN ? AND ? AND (m.status IS NULL OR m.status != 'canceled') GROUP BY m.pessoa_id`
   ).all(`${de}T00:00:00`, `${ate}T23:59:59`).map((r) => [r.p, r]));
-  const doPlano = vendedores();
+  // Só quem tem faixa VIGENTE hoje tem cota (decisão do usuário, 2026-11-19,
+  // saída do Danilo): quem saiu do plano vai para `fora` — o que vender conta
+  // para o coletivo, sem cota. Fora do período, vale o dia mais próximo dele.
+  const diaFaixa = hoje < INICIO ? INICIO : hoje > FIM ? FIM : hoje;
+  const comFaixa = new Set(faixasVigentes(diaFaixa).map((f) => f.pessoaId));
+  const doPlano = vendedores().filter((p) => comFaixa.has(p.id));
   const parte = (meta, v) => (meta == null ? null : { metaCentavos: meta, faltaCentavos: Math.max(0, meta - v),
     porDiaCentavos: restantes ? Math.ceil(Math.max(0, meta - v) / restantes) : null, pct: meta ? Math.round((v / meta) * 1000) / 10 : null });
   const lista = doPlano.filter((p) => todos || p.id === pessoaId).map((p) => {
@@ -399,7 +404,18 @@ function cotas({ hoje, restantes, de, ate, pessoaId = null, todos = true }) {
   const ids = new Set(doPlano.map((p) => p.id));
   const fora = todos ? db.prepare(`SELECT id, nome FROM pessoas WHERE tipo = 'consultor'`).all()
     .filter((p) => !ids.has(p.id) && vendido.get(p.id)?.v).map((p) => ({ nome: p.nome, vendidoCentavos: vendido.get(p.id).v })) : [];
-  return { lista, fora };
+  // SOMA das cotas × coletivo (decisão do usuário, 2026-11-19): cota de quem
+  // saiu NÃO é repassada — o coletivo fica em R$ 500/400 mil e a diferença
+  // aparece como lacuna sem dono, visível ao lado, nunca escondida.
+  let soma = null;
+  if (todos) {
+    const somar = (ind) => doPlano.reduce((s, p) => s + (metaDe(p.id, ind) || 0), 0);
+    const sSuper = somar("cota_fim_ano_super"), sBase = somar("cota_fim_ano_base");
+    soma = { vendedores: doPlano.length,
+      supermeta: { cotasCentavos: sSuper, coletivoCentavos: SUPERMETA, lacunaCentavos: SUPERMETA - sSuper },
+      base: { cotasCentavos: sBase, coletivoCentavos: META_BASE, lacunaCentavos: META_BASE - sBase } };
+  }
+  return { lista, fora, soma };
 }
 
 function contador({ admin = false, pessoaId = null, tv = false } = {}) {
