@@ -86,6 +86,7 @@ aula-ai/
 ├── scripts/diagnostico-emails-marketing.js # SÓ LEITURA: turmas futuras e envios de e-mail nas regras 30/15/7 e 60/30/15
 ├── scripts/diagnostico-fim-de-ano.js # SÓ LEITURA: faixas × IBGE, aptos por vendedor/setor, faturamento nov/dez × PDF, dias úteis
 ├── scripts/diagnostico-saida-vendedor.js # SÓ LEITURA: ANTES da saída de vendedor do fim de ano — rastro, faixa em 4 blocos × inteira, órgãos, rotas, cotas
+├── scripts/diagnostico-cobertura.js # SÓ LEITURA: Fase 0 da tela de cobertura — telefone tocado × contato abordado (estrito e opção b) × município alcançado, por UF/regional/aba/curso/vendedor, projeção até o fim da captação
 ├── scripts/conferir-saida-vendedor.js # SÓ LEITURA: DEPOIS — contador, cotas × lacuna, o que sobrou no nome dele, itens do bloco novo nas rotas, telefone repetido
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
 ├── patrimonio.js    # PATRIMÔNIO (migrações 43–45): importação, entrega/devolução/transferência com termo assinado, cancelamento, via impressa, meus itens
