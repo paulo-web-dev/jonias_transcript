@@ -85,6 +85,8 @@ aula-ai/
 ├── dados/planner_status_migrados.json # os 12 status de novembro tirados do artifact antigo (aplicados na importação, sem carimbo)
 ├── scripts/diagnostico-emails-marketing.js # SÓ LEITURA: turmas futuras e envios de e-mail nas regras 30/15/7 e 60/30/15
 ├── scripts/diagnostico-fim-de-ano.js # SÓ LEITURA: faixas × IBGE, aptos por vendedor/setor, faturamento nov/dez × PDF, dias úteis
+├── scripts/diagnostico-saida-vendedor.js # SÓ LEITURA: ANTES da saída de vendedor do fim de ano — rastro, faixa em 4 blocos × inteira, órgãos, rotas, cotas
+├── scripts/conferir-saida-vendedor.js # SÓ LEITURA: DEPOIS — contador, cotas × lacuna, o que sobrou no nome dele, itens do bloco novo nas rotas, telefone repetido
 ├── prospeccao.html  # prospecção: Trabalho / Gerencial / Cores e status / Cobertura (rota /prospeccao)
 ├── patrimonio.js    # PATRIMÔNIO (migrações 43–45): importação, entrega/devolução/transferência com termo assinado, cancelamento, via impressa, meus itens
 ├── patrimonio.html  # Itens / Termos / Locais / Gerencial (rota /patrimonio; papel patrimonio e admin; funciona no celular) — js/patrimonio.js
@@ -248,7 +250,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **45**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **46**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20 e na 43) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -1672,6 +1674,27 @@ Decisões do usuário de 2026-11-10, sobre o plano "Resumo_Rota Final_Unyflex.pd
   `scripts/diagnostico-saida-vendedor.js` (só leitura; faixa dividida em
   quatro blocos alfabéticos × inteira, órgãos novos, rotas já geradas, baixas
   depois da saída, cotas).
+  **Migração 46 (2026-11-23) — saída do Danilo**, com o diagnóstico de
+  produção (0 ligação no 2005 depois de 12/11, 0 baixa nas 22 rotas dele,
+  sem matrícula, oportunidade, carteira nem usuário). Precedente da 30: nada
+  do histórico é apagado e ele continua `ativo = 1`; flags 0 +
+  `OCULTOS_TEMPORARIOS_TV`; fora de `CONSULTORES_ATUAIS` e
+  `VENDEDORES_ORGAOS_NOVOS`; vigência do 2005 fecha em 12/11. A faixa dele
+  fecha em 12/11 e vira QUATRO blocos alfabéticos contíguos por UF (limites do
+  diagnóstico de produção, gravados na migração e conferidos contra o IBGE —
+  bloco fora do lugar aborta), um para cada vendedor, de 24/11 a 15/12 (ou
+  de amanhã, se a migração rodar no dia 24 ou depois): cada um passa a ter
+  DUAS faixas por UF. Órgãos novos dele em rodízio entre os quatro; células do
+  plano depois de 12/11 apagadas; campanha encerrada em 13/11; rotas dele
+  sem baixa descartadas; rotas dos quatro sem baixa de 24/11 a 15/12
+  descartadas e geradas de novo pelo boot. Junto: `/fim-de-ano` lê as faixas
+  de HOJE no estoque e nos municípios (antes, as de 11/11) e lista todas as
+  faixas com a vigência; o rascunho e o ajuste de célula recusam dia sem faixa
+  vigente. Conferido numa cópia (plano publicado e rotas geradas antes):
+  blocos ✓, nenhuma rota curta, 0 item fora da faixa, 0 telefone repetido no
+  dia, 8–13 itens do bloco novo por vendedor em 24/11, rota com baixa mantida.
+  Depois do deploy: `scripts/conferir-saida-vendedor.js --pessoa=Danilo
+  --data=2026-11-24`.
 - **Migração 37 — Danilo e troca de ramais COM vigência** (2026-11-10): Danilo
   de Souza Santana = "Danilo Santana" no wallet e no Omie. A partir de
   **11/11/2026** o Frederico vai do 2005 para o 2004 e o Danilo assume o 2005,

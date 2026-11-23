@@ -88,19 +88,25 @@ function renderAdmin() {
   document.getElementById("fa-cotas-ligar").textContent = c?.cotasAtivas ? "Desligar cotas individuais" : "Ligar cotas individuais (conferi por pessoa)";
   // faixas
   const faixas = d.faixas;
-  const porPessoa = (pid, uf) => faixas.find((f) => f.pessoaId === pid && f.uf === uf);
+  // várias faixas por UF (migração 46: blocos da faixa do Danilo para os
+  // quatro a partir de 24/11); a vigência aparece quando difere do período
+  const vigencia = (f) => f.desde > d.inicio ? ` <span class="texto-suave">(desde ${dataBr(f.desde)})</span>`
+    : f.ate && f.ate < d.fim ? ` <span class="texto-suave">(até ${dataBr(f.ate)})</span>` : "";
+  const celulaFaixas = (pid, uf) => {
+    const lista = faixas.filter((f) => f.pessoaId === pid && f.uf === uf);
+    return lista.length ? lista.map((f) => `${escapeHtml(f.inicio)} → ${escapeHtml(f.fim)}${vigencia(f)}`).join("<br>") : "—";
+  };
   document.getElementById("fa-faixas").innerHTML =
     `<thead><tr><th>Vendedor</th><th style="text-align:left">PR</th><th style="text-align:left">SC</th><th>Municípios</th><th>Órgãos novos</th><th>com telefone</th><th>confirmar</th><th>Ramal</th></tr></thead><tbody>` +
     d.vendedores.map((v) => {
-      const pr = porPessoa(v.id, "PR"), sc = porPessoa(v.id, "SC");
       return `<tr class="sem-clique"><td>${escapeHtml(v.nome)}</td>
-        <td style="text-align:left">${pr ? `${escapeHtml(pr.inicio)} → ${escapeHtml(pr.fim)}` : "—"}</td>
-        <td style="text-align:left">${sc ? `${escapeHtml(sc.inicio)} → ${escapeHtml(sc.fim)}` : "—"}</td>
+        <td style="text-align:left">${celulaFaixas(v.id, "PR")}</td>
+        <td style="text-align:left">${celulaFaixas(v.id, "SC")}</td>
         <td>${inteiro(v.municipios)}</td><td>${v.orgaos ? inteiro(v.orgaos.orgaos) : "—"}</td><td>${v.orgaos ? inteiro(v.orgaos.comTelefone) : "—"}</td>
         <td>${v.orgaos ? inteiro(v.orgaos.confirmar) : "—"}</td>
         <td>${v.ramal ? escapeHtml(v.ramal) : '<span class="pct-baixo" title="sem ramal, o CDR não atribui as ligações: a baixa só sai manual">sem ramal</span>'}</td></tr>`;
     }).join("") + "</tbody>" +
-    `<tfoot><tr><td colspan="8" class="texto-suave" style="text-align:left">Vigência temporária de ${dataBr(faixas[0]?.desde)} a ${dataBr(faixas[0]?.ate)}; em janeiro voltam as carteiras regionais.` +
+    `<tfoot><tr><td colspan="8" class="texto-suave" style="text-align:left">Vigência temporária de ${dataBr(d.inicio)} a ${dataBr(d.fim)}; em janeiro voltam as carteiras regionais. Municípios = os das faixas vigentes hoje.` +
     `${d.problemasFaixas.length ? ` ⚠ ${escapeHtml(d.problemasFaixas.join("; "))}` : ""}</td></tr></tfoot>`;
   // cursos × estoque
   const est = d.estoque || {};

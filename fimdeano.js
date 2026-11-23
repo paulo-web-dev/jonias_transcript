@@ -84,6 +84,14 @@ function municipiosPorPessoa(data) {
   return mapa;
 }
 const municipiosDaFaixa = (pessoaId, data) => municipiosPorPessoa(data).get(pessoaId) || new Set();
+// Dia de referência das faixas para estoque e tela: HOJE, preso ao período
+// (desde a saída do Danilo, migração 46, a faixa de cada um muda no meio do
+// plano — ler as de 11/11 escondia os blocos novos)
+const diaDaFaixa = () => { const h = hojeBrasilia(); return h < INICIO ? INICIO : h > FIM ? FIM : h; };
+// O vendedor tem faixa vigente na data? Sem faixa = sem plano naquele dia
+// (quem saiu do plano não ganha célula nem rota depois da saída)
+const temFaixa = (pessoaId, data) => !!db.prepare(
+  "SELECT 1 FROM faixas_vendedor WHERE pessoa_id = ? AND vigente_desde <= ? AND (vigente_ate IS NULL OR vigente_ate >= ?)").get(pessoaId, data, data);
 
 // Vendedores do plano, na ordem das faixas (Frederico, Agnes, Eduardo, Bianca, Danilo)
 function vendedores() {
@@ -142,7 +150,7 @@ function estoques(pessoas, lista = cursos()) {
          AND telefone_valido = 1 AND telefone IS NOT NULL AND COALESCE(contato_inexistente, 0) = 0 AND COALESCE(linha_oculta, 0) = 0`
     ).all(...setores.flatMap((s) => [s.uf, s.setor]));
     for (const p of pessoas) {
-      const mun = municipiosDaFaixa(p.id, INICIO);
+      const mun = municipiosDaFaixa(p.id, diaDaFaixa());
       const tel = new Set();
       for (const l of linhas) if (mun.has(l.codigo)) { const k = chaveTelefone(l.telefone); if (k) tel.add(k); }
       est.set(`${p.id}|${c.tipoId}`, tel.size);
@@ -185,6 +193,7 @@ function gerarRascunho(usuarioId = null) {
       const dias = new Map(); // tipoId → dias planejados
       for (const data of datas) {
         const k = `${p.id}|${data}`;
+        if (!temFaixa(p.id, data)) continue; // fora da vigência da faixa (saiu do plano): sem célula
         const atual = existentes.get(k);
         if (atual && (atual.manual || (publicado && comRota.has(k)))) { dias.set(atual.tipoId, (dias.get(atual.tipoId) || 0) + 1); continue; }
         let escolhido = fixoDaData(data, lista);
@@ -211,6 +220,7 @@ function ajustarCelula({ pessoaId, data, tipoId }, usuarioId) {
   pessoaId = Number(pessoaId);
   if (!vendedores().some((p) => p.id === pessoaId)) throw erro("Vendedor fora do plano.", 404);
   if (!RE_DATA.test(String(data || "")) || data < INICIO || data > FIM || !diaUtil(data)) throw erro("Data fora do plano (dias úteis de 11/11 a 15/12).");
+  if (!temFaixa(pessoaId, data)) throw erro("O vendedor não tem faixa vigente nesta data (fora do plano).");
   const c = cursoDoTipo(tipoId);
   if (!c || c.papel === "novos") throw erro("Curso inválido.");
   const hoje = hojeBrasilia();
@@ -353,8 +363,14 @@ function planoCompleto(admin, pessoaId = null) {
     if (admin || r.p === pessoaId) rotas[`${r.p}|${r.data}`] = { base: r.base || 0, feitas: r.feitas || 0, atendidas: r.atendidas || 0,
       extra: r.extra || 0, extraFeitas: r.extraFeitas || 0, novos: r.novos || 0, novosFeitos: r.novosFeitos || 0 };
   }
-  const faixas = faixasVigentes(INICIO).filter((f) => admin || f.pessoaId === pessoaId);
-  const mun = municipiosPorPessoa(INICIO);
+  // todas as faixas do período (com a vigência de cada uma: a do Danilo até
+  // 12/11, os blocos novos dos quatro desde a migração 46); municípios = hoje
+  const faixas = db.prepare(
+    `SELECT f.id, f.pessoa_id pessoaId, p.nome, f.uf, f.inicio, f.fim, f.vigente_desde desde, f.vigente_ate ate
+     FROM faixas_vendedor f JOIN pessoas p ON p.id = f.pessoa_id
+     WHERE f.vigente_desde <= ? AND (f.vigente_ate IS NULL OR f.vigente_ate >= ?) ORDER BY f.uf, f.vigente_desde, f.id`
+  ).all(FIM, INICIO).filter((f) => admin || f.pessoaId === pessoaId);
+  const mun = municipiosPorPessoa(diaDaFaixa());
   const orgaos = {};
   for (const r of db.prepare(
     `SELECT pessoa_id p, COUNT(*) n, SUM(telefone_valido = 1) tel, SUM(confirmar_antes) conf FROM contatos_ativo WHERE origem = 'orgaos_novos' GROUP BY pessoa_id`).all()) {

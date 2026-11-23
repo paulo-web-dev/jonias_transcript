@@ -482,7 +482,7 @@ const COLUNAS_CONTATO = [
 // saiu em 2026-10-02 (migração 30: carteira removida, fora da lista).
 // Para a lista não voltar a divergir da operação, a equipe atual também inclui
 // todo consultor ativo com carteira ou com usuário vendedor ativo.
-const CONSULTORES_ATUAIS = ["Frederico", "Renato", "Eduardo", "Agnes", "Bianca", "Danilo"]; // Danilo: 2026-11-10 (migração 36)
+const CONSULTORES_ATUAIS = ["Frederico", "Renato", "Eduardo", "Agnes", "Bianca"]; // Danilo entrou em 2026-11-10 (migração 36) e saiu em 2026-11-12 (migração 46)
 function equipeAtual() {
   const marcadores = CONSULTORES_ATUAIS.map(() => "?").join(",");
   return db.prepare(
@@ -1535,14 +1535,15 @@ function gerencial() {
 //   vendedor acha o número na hora e preenche na tela; preenchido, vale para
 //   o CDR e a baixa (atualizarContato atualiza os itens de rota abertos).
 // - Vendedor: a coluna "Consultor" da planilha é IGNORADA (deixava 109 com a
-//   Agnes); divisão igual entre os cinco da rota de fim de ano, em rodízio
-//   sobre a lista ordenada por UF e tipo — cada um recebe ~1/5 de cada grupo.
+//   Agnes); divisão igual entre os vendedores da rota de fim de ano (cinco até
+//   a saída do Danilo, quatro desde a migração 46), em rodízio
+//   sobre a lista ordenada por UF e tipo — cada um recebe a mesma parte de cada grupo.
 //   Reimportar não redistribui (pessoa_id de linha existente fica).
 // - "Confirmar antes de ligar" (coluna Verificação) → confirmar_antes = 1.
 // - "Cursos aderentes" → curso (a oferta do dia sai daqui, não do setor).
 // - setor = coluna Setor; origem = 'orgaos_novos'; orgao = 'Autarquia'.
 // ======================================================================
-const VENDEDORES_ORGAOS_NOVOS = ["Frederico", "Agnes", "Eduardo", "Bianca", "Danilo"];
+const VENDEDORES_ORGAOS_NOVOS = ["Frederico", "Agnes", "Eduardo", "Bianca"]; // Danilo saiu em 12/11 (migração 46)
 async function importarOrgaosNovos(buffer, arquivoNome, usuarioId) {
   const erro = (m) => Object.assign(new Error(m), { status: 422, validacao: true });
   const wb = new ExcelJS.Workbook();

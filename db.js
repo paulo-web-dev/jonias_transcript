@@ -2193,6 +2193,167 @@ const MIGRACOES = [
     const n = db.prepare("SELECT COUNT(*) n FROM patrimonio_termo_itens").get().n;
     console.log(`migração 45: patrimônio — conservação gravada no termo (no ato da assinatura); ${n} linha(s) de termo já existente(s) ficam sem conservação registrada.`);
   },
+
+  // 46 — Danilo saiu da equipe; último dia 2026-11-12 (informado em 19/11;
+  // decisões do usuário de 19/11 e 23/11/2026, sobre o diagnóstico de produção
+  // de scripts/diagnostico-saida-vendedor.js: 0 ligação no 2005 depois de
+  // 12/11, 0 baixa nas 22 rotas dele, sem matrícula, oportunidade, carteira
+  // nem usuário). Mesmo precedente do Jhonnata (migração 30): NADA do
+  // histórico é apagado e ele continua `ativo = 1`.
+  // - Flags de painel/TV/feedback em 0 (e OCULTOS_TEMPORARIOS_TV); fora de
+  //   CONSULTORES_ATUAIS e VENDEDORES_ORGAOS_NOVOS (prospeccao.js).
+  // - Ramal 2005: vigência dele fecha em 12/11; pessoas.ramal NULL; ligação do
+  //   2005 de 13/11 em diante perde o dono (o diagnóstico mediu 0).
+  // - Faixa dele (PR SALTO DO LONTRA → XAMBRE, SC Santo Amaro da Imperatriz →
+  //   Zortéa) fecha em 12/11 e é dividida em QUATRO blocos alfabéticos
+  //   contíguos por UF (opção A; limites do diagnóstico de produção,
+  //   equilibrados por itens possíveis), um para cada vendedor, valendo de
+  //   REFAZ a 15/12. As faixas antigas dos quatro não mudam — cada um passa a
+  //   ter duas faixas por UF (municipiosPorPessoa junta as vigentes na data).
+  //   Blocos conferidos contra o IBGE: contíguos e cobrindo exatamente a faixa
+  //   dele, senão a migração aborta sem mudar nada.
+  // - Órgãos novos dele: divididos entre os quatro em rodízio sobre UF → tipo
+  //   → município → entidade (o rodízio da importação), histórico pessoa_id
+  //   por contato, sem editado_em. Outros contatos com ele como consultor:
+  //   ficam sem consultor (como na 30).
+  // - Plano: células dele depois de 12/11 apagadas; campanha própria encerrada
+  //   em 13/11; rotas dele depois de 12/11 sem baixa descartadas.
+  // - Cotas: nada a gravar — sem faixa vigente ele sai da lista de cotas e a
+  //   cota dele vira lacuna coletiva sem dono (fimdeano.cotas, 19/11).
+  // - Rotas dos quatro de REFAZ a 15/12 sem baixa descartadas; o boot
+  //   (garantirRotas) gera de novo o período inteiro, em ordem, já com os
+  //   blocos novos e os telefones das rotas dele liberados. REFAZ = 24/11 ou,
+  //   se a migração rodar no próprio dia 24 ou depois, amanhã — a rota do dia
+  //   nunca é refeita (alguém pode ter começado).
+  () => {
+    const SAIDA = "2026-11-12", APOS = "2026-11-13", FIM_PLANO = "2026-12-15";
+    const somar = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const hoje = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const amanha = somar(hoje, 1);
+    const REFAZ = amanha > "2026-11-24" ? amanha : "2026-11-24";
+    const QUATRO = ["Frederico", "Agnes", "Eduardo", "Bianca"];
+    const BLOCOS = [
+      ["Frederico", "PR", "Salto do Lontra", "Santo Antônio do Paraíso", 19],
+      ["Agnes", "PR", "Santo Antônio do Sudoeste", "São Pedro do Paraná", 20],
+      ["Eduardo", "PR", "São Sebastião da Amoreira", "Tibagi", 21],
+      ["Bianca", "PR", "Tijucas do Sul", "Xambrê", 20],
+      ["Frederico", "SC", "Santo Amaro da Imperatriz", "São José do Cedro", 15],
+      ["Agnes", "SC", "São José do Cerrito", "Taió", 15],
+      ["Eduardo", "SC", "Tangará", "Turvo", 14],
+      ["Bianca", "SC", "União do Oeste", "Zortéa", 15],
+    ];
+    const pid = (n) => db.prepare("SELECT id FROM pessoas WHERE nome = ? AND tipo = 'consultor'").get(n)?.id;
+    const dan = pid("Danilo");
+    if (!dan) throw new Error("migração 46: consultor Danilo não encontrado — abortada");
+    const ids = Object.fromEntries(QUATRO.map((n) => [n, pid(n)]));
+    const faltam = QUATRO.filter((n) => !ids[n]);
+    if (faltam.length) throw new Error(`migração 46: consultor(es) ${faltam.join(", ")} não encontrado(s) — abortada`);
+    const admin = db.prepare("SELECT MIN(id) id FROM usuarios WHERE papel = 'admin'").get()?.id;
+    if (!admin) throw new Error("migração 46: nenhum admin para registrar o histórico — abortada");
+    const agora = new Date().toISOString();
+    console.log(`migração 46: saída do Danilo (último dia ${SAIDA}) — hoje ${hoje} (Brasília), refazer rotas de ${REFAZ} a ${FIM_PLANO}.`);
+
+    // ---- faixa: conferir os blocos contra o IBGE ANTES de gravar qualquer coisa
+    const norm = (s) => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase()
+      .replace(/[^A-Z0-9]+/g, " ").trim().replace(/(^| )D (?=[AEIOU])/g, "$1DO ");
+    const faixasDele = db.prepare(
+      `SELECT id, uf, inicio, fim FROM faixas_vendedor WHERE pessoa_id = ? AND vigente_desde <= ? AND (vigente_ate IS NULL OR vigente_ate >= ?) ORDER BY uf`
+    ).all(dan, SAIDA, SAIDA);
+    if (faixasDele.length !== 2) throw new Error(`migração 46: esperava 2 faixas do Danilo vigentes em ${SAIDA}, achei ${faixasDele.length} — abortada`);
+    for (const f of faixasDele) {
+      const ms = db.prepare("SELECT nome FROM municipios WHERE uf = ?").all(f.uf).map((m) => norm(m.nome)).sort();
+      const pos = (nome, rot) => {
+        const i = ms.indexOf(norm(nome));
+        if (i < 0) throw new Error(`migração 46: ${rot} "${nome}" (${f.uf}) não existe no IBGE — abortada`);
+        return i;
+      };
+      const ini = pos(f.inicio, "início da faixa"), fim = pos(f.fim, "fim da faixa");
+      const blocos = BLOCOS.filter((b) => b[1] === f.uf);
+      let esperado = ini;
+      for (const [nome, , a, b, n] of blocos) {
+        const i = pos(a, `bloco de ${nome}`), j = pos(b, `bloco de ${nome}`);
+        if (i !== esperado) throw new Error(`migração 46: bloco de ${nome} ${f.uf} começa em "${a}", mas o município seguinte ao bloco anterior é "${ms[esperado]}" — abortada`);
+        if (j - i + 1 !== n) throw new Error(`migração 46: bloco de ${nome} ${f.uf} tem ${j - i + 1} municípios no IBGE, o diagnóstico disse ${n} — abortada`);
+        esperado = j + 1;
+      }
+      if (esperado !== fim + 1) throw new Error(`migração 46: os blocos de ${f.uf} terminam em "${ms[esperado - 1]}", a faixa do Danilo termina em "${f.fim}" — abortada`);
+      console.log(`migração 46: faixa ${f.uf} ${f.inicio} → ${f.fim} (${fim - ini + 1} municípios) = ${blocos.map((b) => `${b[0]} ${b[4]}`).join(" + ")} ✓`);
+    }
+
+    // ---- pessoa e ramal
+    db.prepare("UPDATE pessoas SET entra_painel = 0, entra_tv = 0, entra_feedback = 0, ramal = NULL WHERE id = ?").run(dan);
+    const vig = db.prepare(
+      "UPDATE ramal_vigencias SET vigente_ate = ? WHERE ramal = '2005' AND pessoa_id = ? AND (vigente_ate IS NULL OR vigente_ate > ?)"
+    ).run(SAIDA, dan, SAIDA).changes;
+    const semDono = db.prepare("UPDATE ligacoes SET pessoa_id = NULL WHERE ramal = '2005' AND pessoa_id = ? AND data_hora >= ?")
+      .run(dan, `${APOS}T00:00:00`).changes;
+    const ficam = db.prepare("SELECT COUNT(*) n FROM ligacoes WHERE pessoa_id = ?").get(dan).n;
+    console.log(`migração 46: ramal 2005 — vigência do Danilo fechada em 12/11 (${vig}); ${semDono} ligação(ões) de 13/11 em diante ficaram sem dono; ${ficam} ligação(ões) seguem dele. Painel, TV e feedback desligados (continua ativo).`);
+    const usuarios = db.prepare("SELECT id, ativo FROM usuarios WHERE pessoa_id = ?").all(dan);
+    if (usuarios.length) {
+      const n = db.prepare("UPDATE usuarios SET ativo = 0 WHERE pessoa_id = ? AND ativo = 1").run(dan).changes;
+      console.log(`migração 46: ${n} usuário(s) do Danilo desativado(s).`);
+    } else {
+      console.log("migração 46: Danilo não tem usuário (entrou em 11/11 e nunca teve login) — nada a desativar.");
+    }
+
+    // ---- faixas: fecha a dele, abre os blocos
+    db.prepare("UPDATE faixas_vendedor SET vigente_ate = ? WHERE pessoa_id = ? AND (vigente_ate IS NULL OR vigente_ate > ?)").run(SAIDA, dan, SAIDA);
+    const insFaixa = db.prepare("INSERT INTO faixas_vendedor (pessoa_id, uf, inicio, fim, vigente_desde, vigente_ate) VALUES (?, ?, ?, ?, ?, ?)");
+    for (const [nome, uf, a, b] of BLOCOS) insFaixa.run(ids[nome], uf, a, b, REFAZ, FIM_PLANO);
+    console.log(`migração 46: faixa do Danilo fechada em 12/11; ${BLOCOS.length} bloco(s) novos de ${REFAZ} a 15/12 — ${BLOCOS.map((b) => `${b[0]} ${b[1]} ${b[2]} → ${b[3]}`).join("; ")}.`);
+
+    // ---- contatos: órgãos novos divididos entre os quatro; o resto liberado
+    const hist = db.prepare(
+      `INSERT INTO contatos_ativo_historico (contato_id, tipo, canal, campo, valor_anterior, valor_novo, observacao, usuario_id, registrado_em)
+       VALUES (?, 'edicao', NULL, 'pessoa_id', ?, ?, ?, ?, ?)`);
+    const mudar = db.prepare("UPDATE contatos_ativo SET pessoa_id = ?, atualizado_em = ? WHERE id = ?");
+    const orgaos = db.prepare(
+      `SELECT id FROM contatos_ativo WHERE pessoa_id = ? AND origem = 'orgaos_novos'
+       ORDER BY uf, COALESCE(json_extract(extras_json, '$.Tipo'), ''), COALESCE(municipio_texto, ''), COALESCE(entidade, ''), id`).all(dan);
+    const porVendedor = Object.fromEntries(QUATRO.map((n) => [n, 0]));
+    orgaos.forEach(({ id }, i) => {
+      const nome = QUATRO[i % QUATRO.length];
+      mudar.run(ids[nome], agora, id);
+      hist.run(id, String(dan), String(ids[nome]), `órgão novo redistribuído: Danilo saiu da equipe (último dia 12/11/2026, migração 46) — para ${nome}`, admin, agora);
+      porVendedor[nome]++;
+    });
+    const outros = db.prepare("SELECT id FROM contatos_ativo WHERE pessoa_id = ?").all(dan);
+    for (const { id } of outros) {
+      mudar.run(null, agora, id);
+      hist.run(id, String(dan), null, "liberado: Danilo saiu da equipe (último dia 12/11/2026, migração 46)", admin, agora);
+    }
+    console.log(`migração 46: ${orgaos.length} órgão(s) novo(s) do Danilo redistribuído(s) — ${QUATRO.map((n) => `${n} ${porVendedor[n]}`).join(", ")}; ` +
+      `${outros.length} outro(s) contato(s) liberado(s) (sem consultor).`);
+
+    // ---- plano, rotas e campanha dele
+    const celulas = db.prepare("DELETE FROM fim_ano_plano WHERE pessoa_id = ? AND data > ?").run(dan, SAIDA).changes;
+    const comBaixa = db.prepare(
+      `SELECT r.data FROM rotas r WHERE r.pessoa_id = ? AND r.data > ? AND EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = r.id AND i.baixa_metodo IS NOT NULL)`
+    ).all(dan, SAIDA);
+    const rotasDele = db.prepare(
+      `DELETE FROM rotas WHERE pessoa_id = ? AND data > ? AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`
+    ).run(dan, SAIDA).changes;
+    db.prepare(
+      `DELETE FROM rota_campanhas WHERE pessoa_id = ? AND vale_desde >= ? AND NOT EXISTS (SELECT 1 FROM rotas r WHERE r.campanha_id = rota_campanhas.id)`
+    ).run(dan, APOS);
+    db.prepare("INSERT INTO rota_campanhas (tipo_id, fila_json, vale_desde, criada_em, usuario_id, pessoa_id, modo) VALUES (NULL, '[]', ?, ?, ?, ?, 'prioridade')")
+      .run(APOS, agora, admin, dan);
+    console.log(`migração 46: ${celulas} célula(s) do plano do Danilo depois de 12/11 apagada(s); ${rotasDele} rota(s) dele sem baixa descartada(s)` +
+      (comBaixa.length ? `; ⚠ mantidas por terem baixa: ${comBaixa.map((r) => r.data).join(", ")}` : "") + "; campanha própria encerrada em 13/11.");
+
+    // ---- rotas dos quatro: refazer de REFAZ a 15/12 (o boot gera de novo)
+    const marc = QUATRO.map(() => "?").join(",");
+    const valores = QUATRO.map((n) => ids[n]);
+    const mantidas = db.prepare(
+      `SELECT p.nome, r.data FROM rotas r JOIN pessoas p ON p.id = r.pessoa_id WHERE r.data BETWEEN ? AND ? AND r.pessoa_id IN (${marc})
+         AND EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = r.id AND i.baixa_metodo IS NOT NULL) ORDER BY r.data`).all(REFAZ, FIM_PLANO, ...valores);
+    const refeitas = db.prepare(
+      `DELETE FROM rotas WHERE data BETWEEN ? AND ? AND pessoa_id IN (${marc})
+         AND NOT EXISTS (SELECT 1 FROM rota_itens i WHERE i.rota_id = rotas.id AND i.baixa_metodo IS NOT NULL)`).run(REFAZ, FIM_PLANO, ...valores).changes;
+    console.log(`migração 46: ${refeitas} rota(s) dos quatro de ${REFAZ} a 15/12 sem baixa descartada(s) — o boot gera de novo com os blocos novos` +
+      (mantidas.length ? `; ⚠ mantidas por terem baixa: ${mantidas.map((m) => `${m.nome} ${m.data}`).join(", ")}` : "") + ".");
+  },
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:
@@ -2229,8 +2390,8 @@ for (; versao < MIGRACOES.length; versao++) {
 // Renato não passa por aqui (voltou ao painel na migração 14) e não é tocado.
 //
 // Decisão de 2026-08-19: Hirlan e Douglas fora da TV temporariamente.
-// Jhonnata saiu da equipe em 2026-10-02 (migração 30).
-const OCULTOS_TEMPORARIOS_TV = ["Hirlan", "Douglas", "Jhonnata"];
+// Jhonnata saiu da equipe em 2026-10-02 (migração 30); Danilo em 2026-11-12 (migração 46).
+const OCULTOS_TEMPORARIOS_TV = ["Hirlan", "Douglas", "Jhonnata", "Danilo"];
 
 {
   const CHAVE = "tv_ocultos_aplicados";
