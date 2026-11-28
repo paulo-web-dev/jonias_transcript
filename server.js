@@ -1914,6 +1914,7 @@ app.post("/api/patrimonio/itens", (req, res) => {
 app.patch("/api/patrimonio/itens/:id", rotaPat("itens", (req) => ({ item: patrimonio.atualizarItem(req.params.id, req.body || {}, req.usuario) })));
 app.post("/api/patrimonio/itens/:id/status", rotaPat("itens/status", (req) => ({ item: patrimonio.mudarStatus(req.params.id, req.body || {}, req.usuario) })));
 app.get("/api/patrimonio/itens/:id/historico", rotaPat("itens/historico", (req) => patrimonio.historicoDoItem(req.params.id)));
+app.post("/api/patrimonio/uso-comum", rotaPat("uso-comum", (req) => patrimonio.marcarUsoComum(req.body || {}, req.usuario)));
 app.post("/api/patrimonio/entregas", rotaPat("entregas", (req) => patrimonio.entregar(req.body || {}, req.usuario), 201));
 app.post("/api/patrimonio/devolucoes", rotaPat("devolucoes", (req) => patrimonio.devolver(req.body || {}, req.usuario), 201));
 app.post("/api/patrimonio/termos/:id/cancelar", rotaPat("termos/cancelar", (req) => patrimonio.cancelarTermo(req.params.id, req.body?.motivo, req.usuario)));

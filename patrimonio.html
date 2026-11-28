@@ -35,7 +35,7 @@
         <select id="f-local" class="campo-select"><option value="">todos os locais</option></select>
         <select id="f-pessoa" class="campo-select"><option value="">todos os responsáveis</option></select>
         <select id="f-status" class="campo-select">
-          <option value="">todos os status</option><option value="em_uso">em uso</option><option value="em_estoque">em estoque</option>
+          <option value="">todos os status</option><option value="em_uso">em uso</option><option value="uso_comum">uso comum</option><option value="em_estoque">em estoque</option>
           <option value="em_reparo">em reparo</option><option value="baixado">baixado</option><option value="ativos">todos menos baixados</option>
         </select>
         <select id="f-conservacao" class="campo-select">
@@ -50,6 +50,7 @@
         <span id="pat-sel-texto"></span>
         <button type="button" class="btn btn-mini btn-primario" id="btn-entregar">✍ Entregar</button>
         <button type="button" class="btn btn-mini" id="btn-devolver">↩ Devolver</button>
+        <button type="button" class="btn btn-mini" id="btn-uso-comum" title="item da sala, de todos: sem responsável nem termo">🏠 Uso comum</button>
         <button type="button" class="btn btn-mini" id="btn-limpar-sel">limpar seleção</button>
       </div>
 
@@ -120,6 +121,7 @@
       <div class="pat-selecao" id="ger-selecao" hidden>
         <span id="ger-sel-texto"></span>
         <button type="button" class="btn btn-mini btn-primario" id="ger-entregar">✍ Entregar</button>
+        <button type="button" class="btn btn-mini" id="ger-uso-comum" title="item da sala, de todos: sem responsável nem termo">🏠 Uso comum</button>
         <button type="button" class="btn btn-mini" id="ger-limpar-sel">limpar seleção</button>
       </div>
       <div id="ger-roteiro"></div>

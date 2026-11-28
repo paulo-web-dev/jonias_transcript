@@ -2086,6 +2086,7 @@ body:not(.mk-admin) .so-admin-mk { display: none; }
 .pat-chip-cancelado { border: 1px solid rgba(255, 92, 114, 0.6); color: var(--vermelho); }
 .pat-status { cursor: pointer; background: none; font-size: 0.8rem; white-space: nowrap; }
 .pat-st-em_uso { border: 1px solid rgba(61, 220, 132, 0.5); color: var(--verde); }
+.pat-st-uso_comum { border: 1px solid rgba(180, 140, 255, 0.55); color: #c4a8ff; }
 .pat-st-em_estoque { border: 1px solid rgba(56, 214, 224, 0.5); color: var(--acento-2); }
 .pat-st-em_reparo { border: 1px solid rgba(255, 200, 87, 0.55); color: var(--amarelo); }
 .pat-st-baixado { border: 1px solid var(--borda-painel); color: var(--texto-suave); }

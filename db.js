@@ -2354,6 +2354,68 @@ const MIGRACOES = [
     console.log(`migração 46: ${refeitas} rota(s) dos quatro de ${REFAZ} a 15/12 sem baixa descartada(s) — o boot gera de novo com os blocos novos` +
       (mantidas.length ? `; ⚠ mantidas por terem baixa: ${mantidas.map((m) => `${m.nome} ${m.data}`).join(", ")}` : "") + ".");
   },
+
+  // 47 — PATRIMÔNIO: status 'uso_comum' (2026-11-28, decisão do usuário).
+  // Item da sala, de todos (geladeira, fogão, ar-condicionado, TV, projetor):
+  // completo com local + conservação, sem responsável nem termo. O SQLite não
+  // altera CHECK: patrimonio_itens é recriada com as MESMAS colunas e copiada
+  // inteira (ids preservados — movimentos e termos apontam para eles), com
+  // foreign_keys OFF (`desligarFk`: termo_itens e movimentos a referenciam). A
+  // migração aborta, sem mudar nada, se o total, a contagem por status ou o
+  // contador AUTOINCREMENT diferirem. Nenhum item muda de status aqui: os da
+  // planilha seguem como estão e são corrigidos pela tela.
+  Object.assign(() => {
+    const cont = () => db.prepare("SELECT status, COUNT(*) n FROM patrimonio_itens GROUP BY status ORDER BY status").all();
+    const antes = cont();
+    const total = db.prepare("SELECT COUNT(*) n FROM patrimonio_itens").get().n;
+    const seq = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'patrimonio_itens'").get()?.seq ?? 0;
+    const cols = db.prepare("PRAGMA table_info(patrimonio_itens)").all().map((c) => c.name);
+    const ESPERADAS = ["id", "codigo", "nome", "marca_modelo", "numero_serie", "categoria", "estado_conservacao", "status", "local_id",
+      "pessoa_id", "conjunto", "valor_centavos", "data_aquisicao", "nota_fiscal", "observacao", "codigo_antigo", "origem",
+      "extras_json", "importacao_id", "criado_em", "atualizado_em", "baixado_em", "motivo_baixa"];
+    if (cols.join() !== ESPERADAS.join()) throw new Error(`migração 47: colunas de patrimonio_itens inesperadas (${cols.join(", ")}) — abortada`);
+    db.exec(`
+      CREATE TABLE patrimonio_itens_nova (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        codigo             TEXT    NOT NULL UNIQUE CHECK (length(codigo) = 4 AND codigo GLOB '[0-9][0-9][0-9][0-9]'),
+        nome               TEXT    NOT NULL,
+        marca_modelo       TEXT,
+        numero_serie       TEXT,
+        categoria          TEXT,
+        estado_conservacao TEXT    CHECK (estado_conservacao IN ('bom','regular','ruim')),
+        status             TEXT    NOT NULL DEFAULT 'em_estoque' CHECK (status IN ('em_uso','em_estoque','em_reparo','baixado','uso_comum')),
+        local_id           INTEGER REFERENCES locais(id),
+        pessoa_id          INTEGER REFERENCES pessoas(id),
+        conjunto           TEXT,
+        valor_centavos     INTEGER,
+        data_aquisicao     TEXT,
+        nota_fiscal        TEXT,
+        observacao         TEXT,
+        codigo_antigo      TEXT,
+        origem             TEXT,
+        extras_json        TEXT,
+        importacao_id      INTEGER REFERENCES importacoes(id),
+        criado_em          TEXT    NOT NULL,
+        atualizado_em      TEXT,
+        baixado_em         TEXT,
+        motivo_baixa       TEXT,
+        CHECK (status <> 'uso_comum' OR pessoa_id IS NULL)
+      );
+      INSERT INTO patrimonio_itens_nova (${ESPERADAS.join(", ")}) SELECT ${ESPERADAS.join(", ")} FROM patrimonio_itens;
+      DROP TABLE patrimonio_itens;
+      ALTER TABLE patrimonio_itens_nova RENAME TO patrimonio_itens;
+      CREATE INDEX idx_patrimonio_itens_pessoa ON patrimonio_itens(pessoa_id);
+      CREATE INDEX idx_patrimonio_itens_local ON patrimonio_itens(local_id);
+    `);
+    db.prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'patrimonio_itens'").run(seq);
+    const depois = cont();
+    const totalDepois = db.prepare("SELECT COUNT(*) n FROM patrimonio_itens").get().n;
+    const seqDepois = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'patrimonio_itens'").get()?.seq ?? 0;
+    if (totalDepois !== total || JSON.stringify(depois) !== JSON.stringify(antes) || (total && seqDepois !== seq)) {
+      throw new Error(`migração 47: patrimonio_itens não bateu (antes ${total} ${JSON.stringify(antes)} seq ${seq}; depois ${totalDepois} ${JSON.stringify(depois)} seq ${seqDepois}) — abortada`);
+    }
+    console.log(`migração 47: patrimônio — status 'uso_comum' aceito; patrimonio_itens recriada, ${total} item(ns) preservado(s) (${antes.map((x) => `${x.status} ${x.n}`).join(", ") || "vazia"}), contador AUTOINCREMENT ${seq}.`);
+  }, { desligarFk: true }),
 ];
 
 // Migração marcada com `desligarFk` recria uma tabela referenciada por outras:

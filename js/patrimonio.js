@@ -26,7 +26,7 @@ async function api(url, { metodo = "GET", corpo, bruto, tipo } = {}) {
 const dataHoraBr = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)} ${s.slice(11, 16)}` : "");
 const dataBr = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "");
 const norm = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-const ROTULO_STATUS = { em_uso: "em uso", em_estoque: "em estoque", em_reparo: "em reparo", baixado: "baixado" };
+const ROTULO_STATUS = { em_uso: "em uso", uso_comum: "uso comum", em_estoque: "em estoque", em_reparo: "em reparo", baixado: "baixado" };
 
 let D = { itens: [], locais: [], responsaveis: [], termos: [], importacoes: [], admin: false };
 const sel = new Set();
@@ -79,7 +79,7 @@ function filtrados() {
     if (fs === "ativos" ? i.status === "baixado" : fs && i.status !== fs) return false;
     if (fc === "-" ? i.conservacao : fc && i.conservacao !== fc) return false;
     if (alertaAtivo === "semPessoa" && (i.pessoaId || i.status !== "em_uso")) return false;
-    if (alertaAtivo === "semLocal" && (i.localId || !["em_uso", "em_estoque"].includes(i.status))) return false;
+    if (alertaAtivo === "semLocal" && (i.localId || !["em_uso", "em_estoque", "uso_comum"].includes(i.status))) return false;
     if (alertaAtivo === "semTermo" && !i.semTermo) return false;
     if (alertaAtivo === "semConservacao" && (i.conservacao || i.status === "baixado")) return false;
     if (alertaAtivo === "semAssinatura" && (i.termo || i.status !== "em_uso")) return false;
@@ -93,7 +93,7 @@ function filtrados() {
 // ---------- render: itens ----------
 function render() {
   const ativos = D.itens.filter((i) => i.status !== "baixado");
-  const semLocal = ativos.filter((i) => !i.localId && ["em_uso", "em_estoque"].includes(i.status)).length;
+  const semLocal = ativos.filter((i) => !i.localId && ["em_uso", "em_estoque", "uso_comum"].includes(i.status)).length;
   const semPessoa = ativos.filter((i) => i.status === "em_uso" && !i.pessoaId).length;
   const semTermo = D.itens.filter((i) => i.semTermo).length;
   const chip = (k, n, txt) => `<button type="button" class="pat-alerta ${n ? "pat-alerta-on" : "pat-alerta-ok"} ${alertaAtivo === k ? "ativo" : ""}" data-alerta="${k}" ${n ? "" : "disabled"}>${n ? "⚠" : "✓"} ${n} ${txt}</button>`;
@@ -199,6 +199,8 @@ async function menuStatus(item) {
   const acoes = [];
   if (item.status === "em_reparo") acoes.push(["reparo_retorno", "🔧 Voltou do reparo"]);
   else if (item.status !== "baixado") acoes.push(["reparo_saida", "🔧 Enviar para reparo"]);
+  if (["em_uso", "em_estoque"].includes(item.status) && !item.pessoaId && !item.termo) acoes.push(["uso_comum", "🏠 Marcar como uso comum (da sala)"]);
+  if (item.status === "uso_comum") acoes.push(["sair_uso_comum", "📦 Tirar de uso comum (vai para estoque)"]);
   if (item.status !== "baixado") acoes.push(["baixa", "🗑 Dar baixa"]);
   if (item.status === "baixado" && D.admin) acoes.push(["desfazer_baixa", "↺ Desfazer baixa (admin)"]);
   $("#simples-titulo").textContent = `Item ${item.codigo} — ${ROTULO_STATUS[item.status]}`;
@@ -210,6 +212,7 @@ async function menuStatus(item) {
   $$("#simples-corpo [data-acao]").forEach((b) => b.addEventListener("click", async () => {
     const acao = b.dataset.acao;
     fechar("#modal-simples");
+    if (acao === "uso_comum") return iniciarUsoComum([item]);
     let motivo = null;
     if (acao === "baixa") motivo = await pedirTexto(`Baixa do item ${item.codigo}`, "Motivo da baixa (obrigatório)", "Dar baixa");
     if (acao === "desfazer_baixa") motivo = await pedirTexto(`Desfazer a baixa do ${item.codigo}`, "Motivo (obrigatório)", "Desfazer");
@@ -518,7 +521,7 @@ function renderGerencial() {
   const buraco = (k, n, txt) => `<button type="button" class="pat-ger-buraco ${n ? "" : "pat-ger-buraco-ok"}" data-ir-alerta="${k}" ${n ? "" : "disabled"}><b>${n || "0 ✓"}</b><span>${txt}</span></button>`;
   $("#ger-topo").innerHTML = `
     <div class="pat-ger-status">
-      <span><b>${st.em_uso}</b> em uso</span><span><b>${st.em_estoque}</b> em estoque</span>
+      <span><b>${st.em_uso}</b> em uso</span><span><b>${st.uso_comum ?? 0}</b> uso comum</span><span><b>${st.em_estoque}</b> em estoque</span>
       <span><b>${st.em_reparo}</b> em reparo</span><span><b>${st.baixado}</b> baixados</span>
     </div>
     <div class="pat-ger-buracos">
@@ -531,7 +534,7 @@ function renderGerencial() {
       <div class="pat-ger-inv-linha"><strong>${inv.completo ? "✓ Inventário completo" : "Inventário completo"}</strong><b>${inv.pct}%</b></div>
       <div class="pat-ger-trilha"><div style="width:${inv.pct}%"></div></div>
       <p class="texto-suave">${inv.completos} de ${inv.total} itens com tudo o que o status exige — em uso: responsável, local, conservação e termo assinado;
-        em estoque: local e conservação; em reparo: conservação. Baixados ficam fora.</p>
+        uso comum (da sala, de todos) e em estoque: local e conservação; em reparo: conservação. Baixados ficam fora.</p>
     </div>`;
 
   // roteiro de coleta
@@ -558,10 +561,10 @@ function renderGerencial() {
   // locais
   const zerados = G.porLocal.filter((l) => l.zerado).length;
   $("#ger-locais").innerHTML = (zerados ? `<p class="pat-aviso">⚠ ${zerados} sala(s) sem nenhum item — conferir na conferência física.</p>` : "") +
-    `<div class="tabela-scroll"><table class="tabela-metricas pat-tabela"><thead><tr><th>Andar</th><th style="text-align:left">Sala</th><th>Itens</th><th>Em uso</th><th>Estoque</th></tr></thead><tbody>` +
+    `<div class="tabela-scroll"><table class="tabela-metricas pat-tabela"><thead><tr><th>Andar</th><th style="text-align:left">Sala</th><th>Itens</th><th>Em uso</th><th>Uso comum</th><th>Estoque</th></tr></thead><tbody>` +
     G.porLocal.map((l) => `<tr class="sem-clique ${l.zerado ? "pat-ger-zerado" : ""}"><td data-rotulo="Andar">${l.andar}º</td><td data-rotulo="Sala" style="text-align:left">${escapeHtml(l.nome)}${l.ativo ? "" : ' <span class="pat-vazio">(inativo)</span>'}${l.zerado ? ' <span class="chip pat-chip-aviso">sem item</span>' : ""}</td>
-      <td data-rotulo="Itens">${l.itens}</td><td data-rotulo="Em uso">${l.emUso}</td><td data-rotulo="Estoque">${l.emEstoque}</td></tr>`).join("") +
-    (G.semLocal ? `<tr class="sem-clique pat-ger-zerado"><td data-rotulo="Andar">—</td><td data-rotulo="Sala" style="text-align:left"><button type="button" class="btn-mini" data-ir-alerta="semLocal">⚠ sem local</button></td><td data-rotulo="Itens">${G.semLocal}</td><td></td><td></td></tr>` : "") +
+      <td data-rotulo="Itens">${l.itens}</td><td data-rotulo="Em uso">${l.emUso}</td><td data-rotulo="Uso comum">${l.usoComum ?? 0}</td><td data-rotulo="Estoque">${l.emEstoque}</td></tr>`).join("") +
+    (G.semLocal ? `<tr class="sem-clique pat-ger-zerado"><td data-rotulo="Andar">—</td><td data-rotulo="Sala" style="text-align:left"><button type="button" class="btn-mini" data-ir-alerta="semLocal">⚠ sem local</button></td><td data-rotulo="Itens">${G.semLocal}</td><td></td><td></td><td></td></tr>` : "") +
     "</tbody></table></div>";
 
   // responsáveis
@@ -643,6 +646,7 @@ gerSecao.addEventListener("click", async (ev) => {
   }
 });
 $("#ger-entregar").addEventListener("click", iniciarEntrega);
+$("#ger-uso-comum").addEventListener("click", () => iniciarUsoComum(D.itens.filter((i) => sel.has(i.id))));
 $("#ger-limpar-sel").addEventListener("click", () => { sel.clear(); renderGerencial(); renderSelecao(); });
 
 // ---------- eventos ----------
@@ -690,7 +694,7 @@ tbody.addEventListener("keydown", (ev) => {
 // e status. O código mostrado é PRÉVIA: o definitivo sai na gravação e, se
 // diferir (outra pessoa cadastrou ao mesmo tempo), o aviso em vermelho manda
 // escrever o gravado. Sem responsável: item novo só ganha dono por termo.
-const ROT_STATUS_CAD = [["em_uso", "em uso"], ["em_estoque", "em estoque"], ["em_reparo", "em reparo"]];
+const ROT_STATUS_CAD = [["em_uso", "em uso"], ["uso_comum", "uso comum (da sala, sem responsável)"], ["em_estoque", "em estoque"], ["em_reparo", "em reparo"]];
 function cartaoSalvo(r) {
   const i = r.item;
   return `<div class="pat-salvo${r.codigoMudou ? " pat-salvo-mudou" : ""}">
@@ -767,6 +771,43 @@ $("#btn-novo-item").addEventListener("click", () => novoItem().then(() => $("#no
 
 $("#btn-entregar").addEventListener("click", iniciarEntrega);
 $("#btn-devolver").addEventListener("click", iniciarDevolucao);
+
+// ---------- Uso comum (migração 47) ----------
+// Item da sala, de todos: completo com local + conservação, sem responsável nem
+// termo. Vários de uma vez (ela está na sala): andar/sala para todos e a
+// conservação de cada um, avaliada agora.
+function iniciarUsoComum(itens) {
+  if (!itens.length) return;
+  const comPessoa = itens.filter((i) => i.pessoaId || i.termo);
+  if (comPessoa.length) { avisar(`Com responsável — devolva antes: ${comPessoa.map((i) => i.codigo).join(", ")}.`, true); return; }
+  const outros = itens.filter((i) => !["em_uso", "em_estoque", "uso_comum"].includes(i.status));
+  if (outros.length) { avisar(`Só item em uso ou em estoque vira uso comum: ${outros.map((i) => i.codigo).join(", ")}.`, true); return; }
+  const locais = [...new Set(itens.map((i) => i.localId).filter(Boolean))];
+  const localPadrao = locais.length === 1 ? locais[0] : itens.find((i) => i.localId)?.localId ?? null;
+  const escolha = Object.fromEntries(itens.filter((i) => i.conservacao).map((i) => [i.id, i.conservacao]));
+  $("#termo-titulo").textContent = `Uso comum — ${itens.length} item(ns)`;
+  $("#termo-corpo").innerHTML = `<p class="texto-suave">Item da sala, de todos (geladeira, ar-condicionado, TV…): fica completo com local e conservação, sem responsável nem termo.</p>` +
+    (locais.length > 1 ? `<p class="pat-aviso">⚠ Os itens estão em ${locais.length} salas diferentes: todos vão para a sala escolhida abaixo.</p>` : "") +
+    seletorLocal("uc", localPadrao) + blocoConservacao(itens, escolha, "confira ou avalie agora");
+  ligarSeletorLocal("uc", localPadrao);
+  ligarConservacao(escolha);
+  $("#termo-rodape").innerHTML = `<button type="button" class="btn btn-mini" id="uc-cancelar">Cancelar</button><button type="button" class="btn btn-mini btn-primario" id="uc-ok">🏠 Marcar como uso comum</button>`;
+  $("#uc-cancelar").onclick = () => fechar("#modal-termo");
+  $("#uc-ok").onclick = async () => {
+    if (faltaConservacao(itens, escolha)) return;
+    const localId = Number($("#uc-sala").value) || null;
+    if (!localId) { avisar("Escolha o andar e a sala.", true); return; }
+    $("#uc-ok").disabled = true;
+    try {
+      const r = await api("/api/patrimonio/uso-comum", { metodo: "POST", corpo: { itemIds: itens.map((i) => i.id), localId, conservacoes: escolha } });
+      fechar("#modal-termo"); sel.clear();
+      avisar(`${r.itens.length} item(ns) em uso comum.`);
+      await carregar();
+    } catch (e) { avisar(e.message, true); $("#uc-ok").disabled = false; }
+  };
+  abrir("#modal-termo");
+}
+$("#btn-uso-comum").addEventListener("click", () => iniciarUsoComum(D.itens.filter((i) => sel.has(i.id))));
 $("#btn-limpar-sel").addEventListener("click", () => { sel.clear(); render(); });
 
 $("#pat-termos").addEventListener("click", async (ev) => {

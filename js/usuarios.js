@@ -112,7 +112,7 @@ async function chamarApiCompleta(url, corpo, metodo) {
   if (!r.ok) throw Object.assign(new Error(j.error || `erro ${r.status}`), { corpo: j });
   return j;
 }
-const ROTULO_STATUS_ITEM = { em_uso: "em uso", em_estoque: "em estoque", em_reparo: "em reparo", baixado: "baixado" };
+const ROTULO_STATUS_ITEM = { em_uso: "em uso", uso_comum: "uso comum", em_estoque: "em estoque", em_reparo: "em reparo", baixado: "baixado" };
 
 function renderizarAdm() {
   document.getElementById("chip-adm").textContent = adm.filter((p) => p.ativo).length;

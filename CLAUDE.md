@@ -251,7 +251,7 @@ igual ao do container que já roda. O `.dockerignore` barra também
 
 Esquema versionado por `PRAGMA user_version` (migrações em `db.js`, uma transação
 por versão; a migração 1 é o baseline idempotente — bancos novos e antigos passam
-pelo mesmo caminho). Versão atual: **46**. Migração que recria tabela referenciada
+pelo mesmo caminho). Versão atual: **47**. Migração que recria tabela referenciada
 por outras (`importacoes`, na 20 e na 43) é marcada com `desligarFk`: o runner desliga
 `foreign_keys` fora da transação, confere `foreign_key_check` ao fim e religa.
 
@@ -795,7 +795,8 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `PUT /api/marketing/config` | só admin: `{virada: AAAA-MM-DD}` (hoje em diante) — data da troca 30/15/7 → 60/30/15 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 | `GET /patrimonio`, `GET /api/patrimonio` | PATRIMÔNIO (admin e patrimonio; resto 403): tela e payload único (itens com termo aberto e alerta "sem termo", locais com contagem, responsáveis = pessoas ativas consultor/administrativo, termos, últimas importações) |
-| `GET /api/patrimonio/itens/proximo-codigo`, `POST /api/patrimonio/itens` | cadastro avulso (admin e patrimonio, 2026-11-28): prévia do próximo código (maior + 1, nunca abaixo de 0219, baixados contam); POST `{nome, marcaModelo?, numeroSerie?, localId, conservacao, status?, observacao?, codigoPrevia?, confirmarSerie?}` → 201 `{item, codigoMudou, previa, proximo}`; código gerado na transação, sem responsável (pessoaId ignorado), status em_uso (padrão) \| em_estoque \| em_reparo; nome, local ativo e conservação obrigatórios (400); série já existente → 409 com `serieRepetida` até `confirmarSerie: true` |
+| `GET /api/patrimonio/itens/proximo-codigo`, `POST /api/patrimonio/itens` | cadastro avulso (admin e patrimonio, 2026-11-28): prévia do próximo código (maior + 1, nunca abaixo de 0219, baixados contam); POST `{nome, marcaModelo?, numeroSerie?, localId, conservacao, status?, observacao?, codigoPrevia?, confirmarSerie?}` → 201 `{item, codigoMudou, previa, proximo}`; código gerado na transação, sem responsável (pessoaId ignorado), status em_uso (padrão) | uso_comum | em_estoque | em_reparo; nome, local ativo\| em_estoque \| em_reparo; nome, local ativo e conservação obrigatórios (400); série já existente → 409 com `serieRepetida` até `confirmarSerie: true` |
+| `POST /api/patrimonio/uso-comum` | admin e patrimonio (migração 47): `{itemIds, localId, conservacoes: {itemId: bom\|regular\|ruim}}` → status `uso_comum`, todos na sala informada; item com pessoa ou termo aberto → 409 (devolver antes), em reparo/baixado → 409, conservação faltando → 400. Sair: `POST …/itens/:id/status {acao: "sair_uso_comum"}` → em estoque |
 | `PATCH /api/patrimonio/itens/:id`, `POST …/itens/:id/status`, `GET …/itens/:id/historico` | edição do descritivo, conservação e local (local grava movimento `ajuste`; `pessoaId`/`status` no PATCH → 400); status pelo menu `{acao: reparo_saida\|reparo_retorno\|baixa\|desfazer_baixa, motivo}` (baixa exige motivo e item sem pessoa → 409; desfazer só admin → 403); histórico de movimentos |
 | `POST /api/patrimonio/entregas`, `POST /api/patrimonio/devolucoes` | entrega `{itemIds, pessoaId, localId, conservacoes: {itemId: bom|regular|ruim}, assinatura, assinanteNome?, observacao?}` (conservação de TODOS os itens, avaliada no ato — inclusive na devolução; faltando → 400) → 1 termo + 1 movimento por item (201); item em termo aberto, baixado, em reparo ou com OUTRA pessoa → 409; devolução `{itemIds, assinatura, localId?, transferir?: {pessoaId, localId, assinatura}}` (itens de UMA pessoa; sem transferir → em estoque, padrão 7º Estoque); assinatura PNG em branco/ausente/não-PNG → 400 |
 | `POST /api/patrimonio/termos/:id/cancelar` | só admin `{motivo}`: itens voltam ao estado anterior (movimento `ajuste`); transferência cancela o par; 409 se algo mudou depois |
@@ -2027,10 +2028,31 @@ construídas**. Decisões do usuário (2026-11-18):
   item de cadastro manual**: linha da planilha com o código dele vai para
   `ignoradas` ("código já usado por cadastro manual"). Planilha com código
   acima dos manuais (ex.: 0300) empurra a série (o próximo vira 0301) e deixa
-  buraco: é o preço de nunca reaproveitar. ⚠ Pendente de decisão: item de USO
-  COMUM (geladeira, ar) em uso nunca terá dono, então nunca fica "completo" e
-  a barra não chega a 100%. Opção recomendada: status "uso comum" (local +
-  conservação), com migração — plano próprio.
+  buraco: é o preço de nunca reaproveitar.
+- **Status "uso comum" (migração 47, 2026-11-28, decisão do usuário)**: item
+  da sala, de todos (geladeira, fogão, ar-condicionado, TV, projetor), que
+  nunca terá dono. **Completo com local + conservação**, sem responsável nem
+  termo; "sem local" vale para em uso, uso comum e em estoque. A migração
+  recria `patrimonio_itens` (SQLite não altera CHECK; `desligarFk`, ids e
+  contador preservados, aborta se total/contagem por status/contador
+  mudarem) com `uso_comum` no CHECK e mais um CHECK: uso comum nunca tem
+  pessoa. **Nenhum item muda de status na migração**: os da planilha seguem
+  como estão e a equipe corrige pela tela. Entradas: cadastro avulso (status
+  "uso comum"), menu do item "🏠 Marcar como uso comum" e o botão "🏠 Uso
+  comum" na seleção (aba Itens e roteiro da Gerencial — "selecionar a sala"
+  no "descobrir quem usa" + uso comum marca a sala inteira). `POST
+  /api/patrimonio/uso-comum {itemIds, localId, conservacoes}`: só item SEM
+  pessoa e sem termo aberto, em uso ou em estoque (com pessoa → 409, devolver
+  antes; reparo/baixado → 409); todos vão para a sala informada, conservação
+  de cada um avaliada no ato (obrigatória); movimento `ajuste`. Sair: menu
+  "📦 Tirar de uso comum" → em estoque, na mesma sala (`acao:
+  sair_uso_comum`). Reparo de item de uso comum volta como uso comum (o
+  retorno lê o `status_de` do último `reparo_saida`). Entregar item de uso
+  comum a alguém o torna em uso, com termo. Gerencial: contagem "uso comum" e
+  coluna por sala; TV e PAINEL GERAL usam a mesma conta (`contarInventario`),
+  só números. Conferido numa cópia com a carga real migrada da 46 (212 itens
+  idênticos byte a byte, contador, movimentos e termos abertos iguais,
+  `foreign_key_check` vazio).
 - Deploy: a produção está na 42, então sobem 43, 44 e 45 juntas. Backup e
   `conferir` antes (DEPLOY.md); o log tem de mostrar as três linhas de
   migração e a 43 com "antes N, depois N" de `importacoes` iguais.

@@ -29,9 +29,9 @@ const zlib = require("zlib");
 const JSZip = require("jszip");
 const db = require("./db.js");
 
-const STATUS = ["em_uso", "em_estoque", "em_reparo", "baixado"];
+const STATUS = ["em_uso", "uso_comum", "em_estoque", "em_reparo", "baixado"]; // uso_comum: migração 47
 const ESTADOS = ["bom", "regular", "ruim"];
-const ROTULO_STATUS = { em_uso: "em uso", em_estoque: "em estoque", em_reparo: "em reparo", baixado: "baixado" };
+const ROTULO_STATUS = { em_uso: "em uso", uso_comum: "uso comum", em_estoque: "em estoque", em_reparo: "em reparo", baixado: "baixado" };
 const ASSINATURA_MAX_BYTES = 400 * 1024;
 
 function erro(msg, status = 400) {
@@ -210,7 +210,7 @@ function atualizarItem(id, corpo, usuario) {
 // olhando o item). Movimento 'ajuste' "cadastro manual".
 const ORIGEM_MANUAL = "cadastro manual";
 const PRIMEIRO_AVULSO = 219;
-const STATUS_CADASTRO = ["em_uso", "em_estoque", "em_reparo"];
+const STATUS_CADASTRO = ["em_uso", "uso_comum", "em_estoque", "em_reparo"];
 function proximoCodigo() {
   const max = db.prepare("SELECT MAX(CAST(codigo AS INTEGER)) m FROM patrimonio_itens").get().m || 0;
   const n = Math.max(max + 1, PRIMEIRO_AVULSO);
@@ -224,7 +224,7 @@ function criarItem(corpo, usuario) {
   if (!nome) throw erro("O item precisa de um nome.");
   if (nome.length > 120) throw erro("Nome: até 120 caracteres.");
   const status = limpo(corpo.status) || "em_uso";
-  if (!STATUS_CADASTRO.includes(status)) throw erro("Status do cadastro: em uso, em estoque ou em reparo.");
+  if (!STATUS_CADASTRO.includes(status)) throw erro("Status do cadastro: em uso, uso comum, em estoque ou em reparo.");
   const conservacao = limpo(corpo.conservacao);
   if (!conservacao) throw erro("Avalie a conservação do item (bom, regular ou ruim).");
   if (!ESTADOS.includes(conservacao)) throw erro("Conservação: bom, regular ou ruim.");
@@ -258,6 +258,37 @@ function criarItem(corpo, usuario) {
   return { item, codigoMudou: Boolean(previa && previa !== item.codigo), previa, proximo: proximoCodigo() };
 }
 
+// Marcar como USO COMUM (migração 47): itens SEM responsável e sem termo aberto,
+// em uso ou em estoque, passam para a sala informada (todos de uma vez — ela
+// está na sala) com a conservação avaliada agora (obrigatória para cada um).
+// Item com pessoa: devolver antes (o termo é a prova da guarda).
+function marcarUsoComum(corpo, usuario) {
+  const ids = idsDeItens(corpo.itemIds);
+  const local = localValido(corpo.localId);
+  const quando = agora();
+  return db.transaction(() => {
+    const itens = ids.map((id) => buscarItem(id));
+    const comPessoa = itens.filter((i) => i.pessoa_id || i.termo_id);
+    if (comPessoa.length) {
+      throw erro(`Com responsável — devolva antes: ${comPessoa.map((i) => `${i.codigo} (${i.pessoa_nome || "termo aberto"})`).join(", ")}.`, 409);
+    }
+    const outros = itens.filter((i) => !["em_uso", "em_estoque", "uso_comum"].includes(i.status));
+    if (outros.length) throw erro(`Só item em uso ou em estoque vira uso comum: ${outros.map((i) => `${i.codigo} (${ROTULO_STATUS[i.status]})`).join(", ")}.`, 409);
+    const cons = conservacoesDoAto(corpo.conservacoes, ids, (id) => itens.find((i) => i.id === id).codigo);
+    const upd = db.prepare("UPDATE patrimonio_itens SET status = 'uso_comum', local_id = ?, estado_conservacao = ?, atualizado_em = ? WHERE id = ?");
+    const mov = insMov();
+    for (const it of itens) {
+      upd.run(local.id, cons[it.id], quando, it.id);
+      mov.run({
+        item: it.id, tipo: "ajuste", pessoaDe: null, pessoaPara: null, localDe: it.local_id, localPara: local.id,
+        statusDe: it.status, statusPara: "uso_comum", termo: null, importacao: null, usuario: usuario.id, quando,
+        obs: `uso comum (conservação ${cons[it.id]})`,
+      });
+    }
+    return { itens: itens.map((i) => formatarItem(buscarItem(i.id))) };
+  })();
+}
+
 // Menu do item: reparo (saída/retorno), baixa e desfazer baixa (só admin)
 function mudarStatus(id, { acao, motivo }, usuario) {
   const atual = buscarItem(id);
@@ -270,12 +301,19 @@ function mudarStatus(id, { acao, motivo }, usuario) {
     tipo = "reparo_saida"; para = "em_reparo";
   } else if (acao === "reparo_retorno") {
     if (atual.status !== "em_reparo") throw erro("O item não está em reparo.");
-    tipo = "reparo_retorno"; para = atual.pessoa_id ? "em_uso" : "em_estoque";
+    // volta ao status de antes do reparo (uso comum continua uso comum); com
+    // pessoa é sempre em uso
+    const antes = db.prepare("SELECT status_de FROM patrimonio_movimentos WHERE item_id = ? AND tipo = 'reparo_saida' ORDER BY id DESC LIMIT 1").get(atual.id)?.status_de;
+    tipo = "reparo_retorno";
+    para = atual.pessoa_id ? "em_uso" : antes === "uso_comum" ? "uso_comum" : "em_estoque";
   } else if (acao === "baixa") {
     if (atual.status === "baixado") throw erro("O item já está baixado.");
     if (!m) throw erro("Informe o motivo da baixa.");
     if (atual.termo_id || atual.pessoa_id) throw erro("O item está com uma pessoa: faça a devolução antes da baixa.", 409);
     tipo = "baixa"; para = "baixado"; extra = { baixado_em: quando, motivo_baixa: m };
+  } else if (acao === "sair_uso_comum") {
+    if (atual.status !== "uso_comum") throw erro("O item não está em uso comum.");
+    tipo = "ajuste"; para = "em_estoque";
   } else if (acao === "desfazer_baixa") {
     if (usuario.papel !== "admin") throw erro("Só o administrador desfaz uma baixa.", 403);
     if (atual.status !== "baixado") throw erro("O item não está baixado.");
@@ -291,7 +329,7 @@ function mudarStatus(id, { acao, motivo }, usuario) {
     insMov().run({
       item: atual.id, tipo, pessoaDe: atual.pessoa_id, pessoaPara: atual.pessoa_id, localDe: atual.local_id,
       localPara: atual.local_id, statusDe: atual.status, statusPara: para, termo: null, importacao: null,
-      usuario: usuario.id, quando, obs: acao === "desfazer_baixa" ? `baixa desfeita: ${m}` : m,
+      usuario: usuario.id, quando, obs: acao === "desfazer_baixa" ? `baixa desfeita: ${m}` : acao === "sair_uso_comum" ? (m || "saiu de uso comum") : m,
     });
   })();
   return formatarItem(buscarItem(atual.id));
@@ -926,7 +964,8 @@ function faltasDoItem(r) {
   const f = { pessoa: false, local: false, conservacao: false, termo: false };
   if (r.status === "baixado") return null;
   if (!r.estado_conservacao) f.conservacao = true;
-  if ((r.status === "em_uso" || r.status === "em_estoque") && !r.local_id) f.local = true;
+  // uso comum (migração 47) = item da sala: completo com local + conservação
+  if (["em_uso", "em_estoque", "uso_comum"].includes(r.status) && !r.local_id) f.local = true;
   if (r.status === "em_uso") {
     if (!r.pessoa_id) f.pessoa = true;
     if (!r.termo_id) f.termo = true;
@@ -1024,7 +1063,7 @@ function gerencial({ mes } = {}) {
     .map((l) => {
       const doLocal = ativos.filter((r) => r.local_id === l.id);
       return { id: l.id, andar: l.andar, nome: l.nome, ativo: l.ativo, itens: doLocal.length,
-        emUso: doLocal.filter((r) => r.status === "em_uso").length, emEstoque: doLocal.filter((r) => r.status === "em_estoque").length,
+        emUso: doLocal.filter((r) => r.status === "em_uso").length, usoComum: doLocal.filter((r) => r.status === "uso_comum").length, emEstoque: doLocal.filter((r) => r.status === "em_estoque").length,
         zerado: Boolean(l.ativo && !doLocal.length) };
     });
   const pessoas = new Map();
@@ -1118,7 +1157,7 @@ function payload(usuario) {
 }
 
 module.exports = {
-  STATUS, ESTADOS, payload, proximoCodigo, criarItem, listarItens, listarLocais, criarLocal, editarLocal, responsaveis,
+  STATUS, ESTADOS, payload, proximoCodigo, criarItem, marcarUsoComum, listarItens, listarLocais, criarLocal, editarLocal, responsaveis,
   atualizarItem, mudarStatus, historicoDoItem, entregar, devolver, cancelarTermo, listarTermos,
   htmlVia, meusItens, importar, ultimasImportacoes, detalheImportacao, validarAssinatura,
   gerencial, htmlRoteiro, contarInventario, tvLigada, definirTv, painelTvPatrimonio,
