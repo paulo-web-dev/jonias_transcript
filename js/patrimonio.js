@@ -684,6 +684,87 @@ tbody.addEventListener("keydown", (ev) => {
   const td = ev.target.closest("td.pat-editavel");
   if (td && ev.key === "Enter" && !td.querySelector("input")) { ev.preventDefault(); editarCelula(td); }
 });
+// ---------- + Novo item (cadastro avulso, 2026-11-28) ----------
+// Feito para o celular, andando pelas salas: janela em tela cheia, código em
+// destaque (vai para a etiqueta), "salvar e cadastrar outro" mantém andar, sala
+// e status. O código mostrado é PRÉVIA: o definitivo sai na gravação e, se
+// diferir (outra pessoa cadastrou ao mesmo tempo), o aviso em vermelho manda
+// escrever o gravado. Sem responsável: item novo só ganha dono por termo.
+const ROT_STATUS_CAD = [["em_uso", "em uso"], ["em_estoque", "em estoque"], ["em_reparo", "em reparo"]];
+function cartaoSalvo(r) {
+  const i = r.item;
+  return `<div class="pat-salvo${r.codigoMudou ? " pat-salvo-mudou" : ""}">
+    <div class="pat-salvo-codigo">${i.codigo}</div>
+    <div><strong>✓ Salvo:</strong> ${escapeHtml(i.nome)} <small>· ${escapeHtml(i.local || "")}</small>
+      ${r.codigoMudou ? `<p class="pat-salvo-alerta">⚠ O código gravado é <b>${i.codigo}</b>, não ${escapeHtml(r.previa)} (alguém cadastrou outro item ao mesmo tempo). Escreva <b>${i.codigo}</b> na etiqueta.</p>` : `<p class="texto-suave">Escreva <b>${i.codigo}</b> na etiqueta.</p>`}
+    </div></div>`;
+}
+async function novoItem({ localId = null, status = "em_uso", salvo = null } = {}) {
+  let codigo;
+  try { codigo = (await api("/api/patrimonio/itens/proximo-codigo")).codigo; } catch (e) { avisar(e.message, true); return; }
+  const escolha = {};
+  let confirmarSerie = false;
+  $("#termo-titulo").textContent = "Novo item";
+  $("#termo-corpo").innerHTML = (salvo ? cartaoSalvo(salvo) : "") +
+    `<div class="pat-etiqueta"><span>Etiqueta</span><strong id="novo-codigo">${codigo}</strong></div>
+    <label class="pat-campo">Nome do item *<input type="text" class="campo-select" id="novo-nome" maxlength="120" autocomplete="off" placeholder="ex.: Geladeira, Projetor, Ar-condicionado" /></label>
+    <div class="pat-linha2">
+      <label class="pat-campo">Marca / modelo<input type="text" class="campo-select" id="novo-marca" maxlength="120" autocomplete="off" /></label>
+      <label class="pat-campo">Nº de série<input type="text" class="campo-select" id="novo-serie" maxlength="120" autocomplete="off" /></label></div>
+    <div id="novo-serie-aviso"></div>` +
+    seletorLocal("novo", localId) +
+    `<div class="pat-campo">Conservação * <span class="texto-suave">— avalie olhando o item</span>
+      <div class="pat-cons-botoes" id="novo-cons">${ESTADOS_BOT.map(([v, t]) => `<button type="button" class="btn btn-mini" data-cons="${v}">${t}</button>`).join("")}</div></div>
+    <label class="pat-campo">Status<select class="campo-select" id="novo-status">${ROT_STATUS_CAD.map(([v, t]) => `<option value="${v}" ${v === status ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+    <label class="pat-campo">Observação (opcional)<input type="text" class="campo-select" id="novo-obs" maxlength="300" autocomplete="off" /></label>
+    <p class="texto-suave pat-nota">Sem responsável: o item ganha dono só pelo termo assinado (Entregar).</p>`;
+  ligarSeletorLocal("novo", localId);
+  $("#novo-cons").addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-cons]"); if (!b) return;
+    escolha.cons = b.dataset.cons;
+    $$("#novo-cons [data-cons]").forEach((x) => x.classList.toggle("btn-primario", x === b));
+  });
+  $("#novo-serie").addEventListener("input", () => { confirmarSerie = false; $("#novo-serie-aviso").innerHTML = ""; });
+  $("#termo-rodape").innerHTML = `<button type="button" class="btn btn-mini" id="novo-cancelar">Fechar</button>
+    <button type="button" class="btn btn-mini" id="novo-outro">Salvar e cadastrar outro</button>
+    <button type="button" class="btn btn-mini btn-primario" id="novo-salvar">✓ Salvar</button>`;
+  $("#novo-cancelar").onclick = () => fechar("#modal-termo");
+  const salvar = async (outro) => {
+    const corpo = {
+      nome: $("#novo-nome").value, marcaModelo: $("#novo-marca").value, numeroSerie: $("#novo-serie").value,
+      localId: Number($("#novo-sala").value) || null, conservacao: escolha.cons || null, status: $("#novo-status").value,
+      observacao: $("#novo-obs").value, codigoPrevia: codigo, confirmarSerie,
+    };
+    if (!corpo.nome.trim()) { avisar("Informe o nome do item.", true); $("#novo-nome").focus(); return; }
+    if (!corpo.localId) { avisar("Escolha o andar e a sala.", true); return; }
+    if (!corpo.conservacao) { avisar("Avalie a conservação (bom, regular ou ruim).", true); return; }
+    $$("#termo-rodape button").forEach((b) => (b.disabled = true));
+    try {
+      const r = await api("/api/patrimonio/itens", { metodo: "POST", corpo });
+      await carregar();
+      if (outro) { await novoItem({ localId: corpo.localId, status: corpo.status, salvo: r }); $("#novo-nome").focus(); }
+      else {
+        $("#termo-corpo").innerHTML = cartaoSalvo(r);
+        $("#termo-rodape").innerHTML = `<button type="button" class="btn btn-mini" id="novo-fim">Fechar</button>
+          <button type="button" class="btn btn-mini btn-primario" id="novo-mais">+ Outro nesta sala</button>`;
+        $("#novo-fim").onclick = () => fechar("#modal-termo");
+        $("#novo-mais").onclick = async () => { await novoItem({ localId: corpo.localId, status: corpo.status }); $("#novo-nome").focus(); };
+      }
+      avisar(`Item ${r.item.codigo} cadastrado.`, r.codigoMudou);
+    } catch (e) {
+      if (e.corpo?.serieRepetida) {
+        confirmarSerie = true;
+        $("#novo-serie-aviso").innerHTML = `<p class="pat-salvo-alerta">⚠ ${escapeHtml(e.message)} Se for outro item mesmo, toque em salvar de novo.</p>`;
+      } else avisar(e.message, true);
+    } finally { $$("#termo-rodape button").forEach((b) => (b.disabled = false)); }
+  };
+  $("#novo-salvar").onclick = () => salvar(false);
+  $("#novo-outro").onclick = () => salvar(true);
+  abrir("#modal-termo");
+}
+const ESTADOS_BOT = [["bom", "bom"], ["regular", "regular"], ["ruim", "ruim"]];
+$("#btn-novo-item").addEventListener("click", () => novoItem().then(() => $("#novo-nome")?.focus()));
+
 $("#btn-entregar").addEventListener("click", iniciarEntrega);
 $("#btn-devolver").addEventListener("click", iniciarDevolucao);
 $("#btn-limpar-sel").addEventListener("click", () => { sel.clear(); render(); });

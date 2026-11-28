@@ -1901,6 +1901,16 @@ app.put("/api/patrimonio/tv", (req, res) => {
   res.json(r);
 });
 app.get("/api/patrimonio", rotaPat("payload", (req) => patrimonio.payload(req.usuario)));
+app.get("/api/patrimonio/itens/proximo-codigo", rotaPat("itens/proximo-codigo", () => ({ codigo: patrimonio.proximoCodigo() })));
+app.post("/api/patrimonio/itens", (req, res) => {
+  try {
+    res.status(201).json(patrimonio.criarItem(req.body || {}, req.usuario));
+  } catch (err) {
+    if (err.serieRepetida) return res.status(409).json({ error: err.message, serieRepetida: err.serieRepetida });
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("patrimonio/itens", err, res);
+  }
+});
 app.patch("/api/patrimonio/itens/:id", rotaPat("itens", (req) => ({ item: patrimonio.atualizarItem(req.params.id, req.body || {}, req.usuario) })));
 app.post("/api/patrimonio/itens/:id/status", rotaPat("itens/status", (req) => ({ item: patrimonio.mudarStatus(req.params.id, req.body || {}, req.usuario) })));
 app.get("/api/patrimonio/itens/:id/historico", rotaPat("itens/historico", (req) => patrimonio.historicoDoItem(req.params.id)));

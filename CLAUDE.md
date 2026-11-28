@@ -795,6 +795,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `PUT /api/marketing/config` | só admin: `{virada: AAAA-MM-DD}` (hoje em diante) — data da troca 30/15/7 → 60/30/15 |
 | `GET /usuarios`, `GET /trocar-senha`, `GET /meu-painel` | páginas: usuários + carteiras (admin); troca de senha (todos); painel do vendedor (métricas próprias × metas) |
 | `GET /patrimonio`, `GET /api/patrimonio` | PATRIMÔNIO (admin e patrimonio; resto 403): tela e payload único (itens com termo aberto e alerta "sem termo", locais com contagem, responsáveis = pessoas ativas consultor/administrativo, termos, últimas importações) |
+| `GET /api/patrimonio/itens/proximo-codigo`, `POST /api/patrimonio/itens` | cadastro avulso (admin e patrimonio, 2026-11-28): prévia do próximo código (maior + 1, nunca abaixo de 0219, baixados contam); POST `{nome, marcaModelo?, numeroSerie?, localId, conservacao, status?, observacao?, codigoPrevia?, confirmarSerie?}` → 201 `{item, codigoMudou, previa, proximo}`; código gerado na transação, sem responsável (pessoaId ignorado), status em_uso (padrão) \| em_estoque \| em_reparo; nome, local ativo e conservação obrigatórios (400); série já existente → 409 com `serieRepetida` até `confirmarSerie: true` |
 | `PATCH /api/patrimonio/itens/:id`, `POST …/itens/:id/status`, `GET …/itens/:id/historico` | edição do descritivo, conservação e local (local grava movimento `ajuste`; `pessoaId`/`status` no PATCH → 400); status pelo menu `{acao: reparo_saida\|reparo_retorno\|baixa\|desfazer_baixa, motivo}` (baixa exige motivo e item sem pessoa → 409; desfazer só admin → 403); histórico de movimentos |
 | `POST /api/patrimonio/entregas`, `POST /api/patrimonio/devolucoes` | entrega `{itemIds, pessoaId, localId, conservacoes: {itemId: bom|regular|ruim}, assinatura, assinanteNome?, observacao?}` (conservação de TODOS os itens, avaliada no ato — inclusive na devolução; faltando → 400) → 1 termo + 1 movimento por item (201); item em termo aberto, baixado, em reparo ou com OUTRA pessoa → 409; devolução `{itemIds, assinatura, localId?, transferir?: {pessoaId, localId, assinatura}}` (itens de UMA pessoa; sem transferir → em estoque, padrão 7º Estoque); assinatura PNG em branco/ausente/não-PNG → 400 |
 | `POST /api/patrimonio/termos/:id/cancelar` | só admin `{motivo}`: itens voltam ao estado anterior (movimento `ajuste`); transferência cancela o par; 409 se algo mudou depois |
@@ -2010,6 +2011,26 @@ construídas**. Decisões do usuário (2026-11-18):
   numa cópia: retrato do comercial (14 blocos) idêntico antes × depois de quatro
   cadastros, com controle positivo (a mesma pessoa como consultor muda métricas,
   metas, painel da Rota, TV e feedback).
+- **Cadastro avulso de item (2026-11-28, sem migração)**: botão "+ Novo item"
+  na aba Itens (admin e patrimonio), para o que a conferência física acha fora
+  da planilha (geladeira, fogão, projetor, ar-condicionado; nove locais
+  zerados). Código = maior existente + 1, a partir de **0219**, 4 dígitos,
+  nunca reaproveitado. A tela mostra a PRÉVIA em destaque, mas o definitivo
+  sai na transação do INSERT; se diferir (duas pessoas cadastrando juntas, já
+  são três com papel patrimonio), o cartão de confirmação fica vermelho com
+  "escreva 0220, não 0219". Nasce sem responsável (dono só por termo),
+  `origem = 'cadastro manual'`, movimento `ajuste` "cadastro manual". Nome,
+  local e conservação obrigatórios; status em uso (padrão), em estoque ou em
+  reparo; série já cadastrada pede confirmação. "Salvar e cadastrar outro"
+  mantém andar, sala e status e limpa o resto (a conservação também: cada item
+  é avaliado). Janela em tela cheia no celular. **Importação nunca reescreve
+  item de cadastro manual**: linha da planilha com o código dele vai para
+  `ignoradas` ("código já usado por cadastro manual"). Planilha com código
+  acima dos manuais (ex.: 0300) empurra a série (o próximo vira 0301) e deixa
+  buraco: é o preço de nunca reaproveitar. ⚠ Pendente de decisão: item de USO
+  COMUM (geladeira, ar) em uso nunca terá dono, então nunca fica "completo" e
+  a barra não chega a 100%. Opção recomendada: status "uso comum" (local +
+  conservação), com migração — plano próprio.
 - Deploy: a produção está na 42, então sobem 43, 44 e 45 juntas. Backup e
   `conferir` antes (DEPLOY.md); o log tem de mostrar as três linhas de
   migração e a 43 com "antes N, depois N" de `importacoes` iguais.

@@ -200,6 +200,64 @@ function atualizarItem(id, corpo, usuario) {
   return formatarItem(buscarItem(atual.id));
 }
 
+// ---------- cadastro avulso (2026-11-28, decisões do usuário) ----------
+// Item que a conferência física acha fora da planilha. Código = maior existente
+// + 1, nunca abaixo de 0219 (a série 0001–0218 é a da carga), baixados contam:
+// código nunca é reaproveitado. A tela mostra uma PRÉVIA; o definitivo sai na
+// transação do INSERT (duas pessoas cadastrando juntas recebem códigos
+// diferentes, e a tela avisa quando o gravado difere da prévia). Nasce SEM dono:
+// responsável só por termo. Local e conservação obrigatórios (ela está na sala,
+// olhando o item). Movimento 'ajuste' "cadastro manual".
+const ORIGEM_MANUAL = "cadastro manual";
+const PRIMEIRO_AVULSO = 219;
+const STATUS_CADASTRO = ["em_uso", "em_estoque", "em_reparo"];
+function proximoCodigo() {
+  const max = db.prepare("SELECT MAX(CAST(codigo AS INTEGER)) m FROM patrimonio_itens").get().m || 0;
+  const n = Math.max(max + 1, PRIMEIRO_AVULSO);
+  if (n > 9999) throw erro("Os códigos de 4 dígitos acabaram (9999).", 409);
+  return String(n).padStart(4, "0");
+}
+const ehCadastroManual = (r) => r && r.origem === ORIGEM_MANUAL && r.importacao_id == null;
+
+function criarItem(corpo, usuario) {
+  const nome = limpo(corpo.nome);
+  if (!nome) throw erro("O item precisa de um nome.");
+  if (nome.length > 120) throw erro("Nome: até 120 caracteres.");
+  const status = limpo(corpo.status) || "em_uso";
+  if (!STATUS_CADASTRO.includes(status)) throw erro("Status do cadastro: em uso, em estoque ou em reparo.");
+  const conservacao = limpo(corpo.conservacao);
+  if (!conservacao) throw erro("Avalie a conservação do item (bom, regular ou ruim).");
+  if (!ESTADOS.includes(conservacao)) throw erro("Conservação: bom, regular ou ruim.");
+  if (corpo.localId === undefined || corpo.localId === null || corpo.localId === "") throw erro("Escolha o andar e a sala onde o item está.");
+  const local = localValido(corpo.localId);
+  const observacao = limpo(corpo.observacao);
+  if (observacao && /senha/i.test(observacao)) throw erro("Senha não se guarda no patrimônio. Tire a senha da observação.");
+  const marca = limpo(corpo.marcaModelo), serie = limpo(corpo.numeroSerie);
+  if (serie && !corpo.confirmarSerie) {
+    const mesmo = db.prepare("SELECT codigo, nome FROM patrimonio_itens WHERE lower(trim(numero_serie)) = lower(?)").all(serie);
+    if (mesmo.length) {
+      throw Object.assign(erro(`Nº de série "${serie}" já está em ${mesmo.map((m) => `${m.codigo} (${m.nome})`).join(", ")}.`, 409),
+        { serieRepetida: mesmo });
+    }
+  }
+  const quando = agora();
+  const item = db.transaction(() => {
+    const codigo = proximoCodigo();
+    const info = db.prepare(
+      `INSERT INTO patrimonio_itens (codigo, nome, marca_modelo, numero_serie, estado_conservacao, status, local_id, pessoa_id,
+         observacao, origem, importacao_id, criado_em, atualizado_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)`
+    ).run(codigo, nome, marca, serie, conservacao, status, local.id, observacao, ORIGEM_MANUAL, quando, quando);
+    insMov().run({
+      item: Number(info.lastInsertRowid), tipo: "ajuste", pessoaDe: null, pessoaPara: null, localDe: null, localPara: local.id,
+      statusDe: null, statusPara: status, termo: null, importacao: null, usuario: usuario.id, quando, obs: ORIGEM_MANUAL,
+    });
+    return formatarItem(buscarItem(info.lastInsertRowid));
+  })();
+  const previa = limpo(corpo.codigoPrevia);
+  return { item, codigoMudou: Boolean(previa && previa !== item.codigo), previa, proximo: proximoCodigo() };
+}
+
 // Menu do item: reparo (saída/retorno), baixa e desfazer baixa (só admin)
 function mudarStatus(id, { acao, motivo }, usuario) {
   const atual = buscarItem(id);
@@ -728,6 +786,10 @@ async function importar(buffer, arquivo, usuarioId) {
     if (!nome) { ignoradas.push({ linha: l.num, codigo, item: "", motivo: "ITEM vazio" }); continue; }
     if (vistos.has(codigo)) { ignoradas.push({ linha: l.num, codigo, item: nome, motivo: `código repetido no arquivo (já na linha ${vistos.get(codigo)})` }); continue; }
     vistos.set(codigo, l.num);
+    // código de item cadastrado à mão: a planilha nunca reescreve (seria OUTRO item)
+    if (ehCadastroManual(db.prepare("SELECT origem, importacao_id FROM patrimonio_itens WHERE codigo = ?").get(codigo))) {
+      ignoradas.push({ linha: l.num, codigo, item: nome, motivo: "código já usado por cadastro manual no jonIAs — item não alterado" }); continue;
+    }
 
     let status = STATUS_PLANILHA[statusTxt];
     const respTxt = valor(l, "responsavel");
@@ -1056,7 +1118,7 @@ function payload(usuario) {
 }
 
 module.exports = {
-  STATUS, ESTADOS, payload, listarItens, listarLocais, criarLocal, editarLocal, responsaveis,
+  STATUS, ESTADOS, payload, proximoCodigo, criarItem, listarItens, listarLocais, criarLocal, editarLocal, responsaveis,
   atualizarItem, mudarStatus, historicoDoItem, entregar, devolver, cancelarTermo, listarTermos,
   htmlVia, meusItens, importar, ultimasImportacoes, detalheImportacao, validarAssinatura,
   gerencial, htmlRoteiro, contarInventario, tvLigada, definirTv, painelTvPatrimonio,

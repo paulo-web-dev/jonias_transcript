@@ -2202,6 +2202,26 @@ body:not(.mk-admin) .so-admin-mk { display: none; }
 .pat-lista-cons { max-height: none; }
 .campo-select.pat-falta { border-color: var(--amarelo); box-shadow: 0 0 0 2px rgba(255, 200, 87, 0.35); }
 .pat-campo[hidden] { display: none; }
+/* + Novo item (cadastro avulso, 2026-11-28): código grande para a etiqueta */
+.pat-novo-item { margin-left: auto; }
+.pat-etiqueta { display: flex; align-items: baseline; gap: 0.8rem; margin: 0.2rem 0 0.4rem; }
+.pat-etiqueta span { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--texto-suave); }
+.pat-etiqueta strong { font-size: 2.4rem; font-variant-numeric: tabular-nums; color: var(--acento-2); letter-spacing: 0.06em; }
+.pat-cons-botoes { display: flex; gap: 0.5rem; }
+.pat-cons-botoes .btn { flex: 1; font-size: 1rem; padding: 0.6rem 0; }
+.pat-salvo { display: flex; gap: 0.9rem; align-items: center; border: 1px solid rgba(74, 222, 128, 0.45); background: rgba(74, 222, 128, 0.08);
+  border-radius: 10px; padding: 0.6rem 0.8rem; margin-bottom: 0.6rem; }
+.pat-salvo p { margin: 0.3rem 0 0; }
+.pat-salvo-codigo { font-size: 2.2rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: 0.05em; color: var(--verde); }
+.pat-salvo-mudou { border-color: var(--vermelho); background: rgba(255, 99, 99, 0.1); }
+.pat-salvo-mudou .pat-salvo-codigo { color: var(--vermelho); }
+.pat-salvo-alerta { color: var(--vermelho); font-weight: 600; margin: 0.3rem 0; }
+.pat-nota { font-size: 0.8rem; margin: 0.4rem 0 0; }
+@media (max-width: 700px) {
+  .pat-novo-item { flex: 1 1 100%; margin-left: 0; font-size: 1rem; padding: 0.65rem; }
+  #termo-rodape { flex-wrap: wrap; }
+  #termo-rodape #novo-salvar, #termo-rodape #novo-outro, #termo-rodape #novo-mais { flex: 1 1 45%; font-size: 1rem; padding: 0.7rem 0.4rem; }
+}
 
 /* ============ TV — PAINEL GERAL (js/tv.js renderGeral) ============
    Três colunas (COMERCIAL | MARKETING | PATRIMÔNIO), uma por área ligada.
