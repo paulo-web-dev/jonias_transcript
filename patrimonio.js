@@ -106,7 +106,7 @@ function editarLocal(id, { nome, ativo }) {
 // ---------- itens ----------
 
 const SQL_ITEM = `
-  SELECT i.*, l.andar, l.nome local_nome, p.nome pessoa_nome,
+  SELECT i.*, l.andar, l.nome local_nome, p.nome pessoa_nome, p.ativo pessoa_ativa,
          t.id termo_id, t.ano termo_ano, t.seq termo_seq, t.data_hora termo_data
   FROM patrimonio_itens i
   LEFT JOIN locais l ON l.id = i.local_id
@@ -121,7 +121,9 @@ function formatarItem(r) {
     id: r.id, codigo: r.codigo, nome: r.nome, marcaModelo: r.marca_modelo, numeroSerie: r.numero_serie,
     categoria: r.categoria, conservacao: r.estado_conservacao, status: r.status, localId: r.local_id,
     local: r.local_id ? `${r.andar}º · ${r.local_nome}` : null, andar: r.andar ?? null,
-    pessoaId: r.pessoa_id, pessoa: r.pessoa_nome ?? null, conjunto: r.conjunto, valorCentavos: r.valor_centavos,
+    pessoaId: r.pessoa_id, pessoa: r.pessoa_nome ?? null,
+    pessoaAtiva: r.pessoa_id ? Boolean(r.pessoa_ativa) : null, // inativa continua achável nos filtros (2026-11-28)
+    conjunto: r.conjunto, valorCentavos: r.valor_centavos,
     dataAquisicao: r.data_aquisicao, notaFiscal: r.nota_fiscal, observacao: r.observacao,
     codigoAntigo: r.codigo_antigo, origem: r.origem, baixadoEm: r.baixado_em, motivoBaixa: r.motivo_baixa,
     termo: r.termo_id ? { id: r.termo_id, numero: numeroTermo(r.termo_ano, r.termo_seq), data: r.termo_data } : null,

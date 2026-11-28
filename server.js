@@ -297,7 +297,7 @@ app.use("/api", (req, res, next) => {
 });
 const PREFIXOS_SO_ADMIN = [
   "/api/importacoes", "/api/sincronizacoes", "/api/config", "/api/periodos", "/api/saude",
-  "/api/usuarios", "/api/carteiras", "/api/prospeccao/cobertura", "/api/prospeccao/gerencial", "/api/prospeccao/marcacoes",
+  "/api/usuarios", "/api/pessoas-administrativas", "/api/carteiras","/api/prospeccao/cobertura", "/api/prospeccao/gerencial", "/api/prospeccao/marcacoes",
   "/api/prospeccao/status", "/api/territorio/cobertura", "/api/territorio/pendencias",
   "/api/territorio/apelidos", "/api/resumo",
   "/api/rota/painel", "/api/rota/campanha", "/api/rota/gerar", "/api/rota/config", "/api/rota/tipos", "/api/feriados",
@@ -1532,6 +1532,96 @@ app.post("/api/usuarios/:id/senha-inicial", async (req, res) => {
   db.prepare("UPDATE usuarios SET senha_hash = ?, senha_temporaria = 1 WHERE id = ?").run(await hashSenha(senhaInicial), alvo.id);
   db.prepare("DELETE FROM sessions WHERE sess LIKE ?").run(`%"usuarioId":${alvo.id}%`);
   res.json({ login: alvo.login, senhaInicial });
+});
+
+// ---------- Pessoas administrativas (2026-11-28, decisões do usuário) ----------
+// Cadastro pela /usuarios, só admin (prefixo em PREFIXOS_SO_ADMIN): entradas e
+// saídas do administrativo deixam de virar migração/deploy. NUNCA cria nem
+// altera consultor ou canal: o INSERT fixa tipo = 'administrativo', flags em 0,
+// sem ramal/wallet/crm, e não lê nenhum outro campo do corpo; o PATCH só acha
+// pessoa administrativa (consultor/canal = o mesmo 404 de inexistente) e não
+// muda o tipo. Vendedor continua entrando por migração (ramal, carteira, cota,
+// faixa). Nome repetido é recusado contra a tabela INTEIRA, sem acento/caixa.
+const normNomePessoa = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+function validarNomePessoa(valor, excetoId) {
+  const nome = String(valor ?? "").replace(/\s+/g, " ").trim();
+  if (nome.length < 2 || nome.length > 80) throw Object.assign(new Error("Nome: de 2 a 80 caracteres."), { status: 400 });
+  const chave = normNomePessoa(nome);
+  const igual = db.prepare("SELECT id, nome, tipo FROM pessoas WHERE id != COALESCE(?, -1)").all(excetoId ?? null)
+    .find((p) => normNomePessoa(p.nome) === chave);
+  if (igual) {
+    throw Object.assign(new Error(`Já existe "${igual.nome}" (${igual.tipo}) em pessoas. Use o sobrenome para diferenciar.`), { status: 400 });
+  }
+  return nome;
+}
+function listarPessoasAdministrativas() {
+  return db.prepare(
+    `SELECT p.id, p.nome, p.ativo,
+            (SELECT u.login FROM usuarios u WHERE u.pessoa_id = p.id) usuario,
+            (SELECT u.ativo FROM usuarios u WHERE u.pessoa_id = p.id) usuarioAtivo,
+            (SELECT COUNT(*) FROM patrimonio_itens i WHERE i.pessoa_id = p.id) itens
+     FROM pessoas p WHERE p.tipo = 'administrativo' ORDER BY p.ativo DESC, p.nome`
+  ).all();
+}
+const pessoaAdministrativa = (id) =>
+  db.prepare("SELECT * FROM pessoas WHERE id = ? AND tipo = 'administrativo'").get(Number(id));
+
+app.get("/api/pessoas-administrativas", (req, res) => res.json({ pessoas: listarPessoasAdministrativas() }));
+
+app.post("/api/pessoas-administrativas", (req, res) => {
+  try {
+    const nome = validarNomePessoa(req.body?.nome, null);
+    const info = db.prepare(
+      `INSERT INTO pessoas (nome, ativo, entra_feedback, tipo, entra_painel, entra_tv, nomes_alternativos)
+       VALUES (?, 1, 0, 'administrativo', 0, 0, '[]')`
+    ).run(nome);
+    console.log(`👤 Pessoa administrativa cadastrada: "${nome}" (#${info.lastInsertRowid}) por ${req.usuario.login}`);
+    res.status(201).json({ pessoa: listarPessoasAdministrativas().find((p) => p.id === info.lastInsertRowid) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("pessoas-administrativas", err, res);
+  }
+});
+
+app.patch("/api/pessoas-administrativas/:id", (req, res) => {
+  try {
+    const alvo = pessoaAdministrativa(req.params.id);
+    if (!alvo) return res.status(404).json({ error: "Pessoa administrativa não encontrada." });
+    const { nome, ativo } = req.body || {};
+    const novoNome = nome === undefined ? alvo.nome : validarNomePessoa(nome, alvo.id);
+    const novoAtivo = ativo === undefined ? alvo.ativo : (ativo ? 1 : 0);
+    if (alvo.ativo && !novoAtivo) {
+      // Desativar: bloqueado com item em mãos (lista de trabalho → devolução) ou usuário ativo
+      const itens = db.prepare(
+        `SELECT i.id, i.codigo, i.nome, i.status, l.andar, l.nome local_nome,
+                EXISTS (SELECT 1 FROM patrimonio_termo_itens ti WHERE ti.item_id = i.id AND ti.aberto = 1) comTermo
+         FROM patrimonio_itens i LEFT JOIN locais l ON l.id = i.local_id
+         WHERE i.pessoa_id = ? ORDER BY i.codigo`
+      ).all(alvo.id).map((i) => ({
+        id: i.id, codigo: i.codigo, nome: i.nome, status: i.status, comTermo: Boolean(i.comTermo),
+        local: i.local_nome ? `${i.andar}º · ${i.local_nome}` : null,
+      }));
+      const usuario = db.prepare("SELECT id, login FROM usuarios WHERE pessoa_id = ? AND ativo = 1").get(alvo.id);
+      if (itens.length || usuario) {
+        const motivos = [];
+        if (itens.length) motivos.push(`${itens.length} item(ns) de patrimônio ainda nesse nome — faça a devolução antes`);
+        if (usuario) motivos.push(`o usuário "${usuario.login}" está ativo — desative-o antes`);
+        return res.status(409).json({
+          error: `Não dá para desativar ${alvo.nome}: ${motivos.join("; ")}.`,
+          itens, usuario: usuario || null,
+          devolucao: itens.length ? `/patrimonio#devolver=${alvo.id}` : null,
+        });
+      }
+    }
+    db.prepare("UPDATE pessoas SET nome = ?, ativo = ? WHERE id = ? AND tipo = 'administrativo'").run(novoNome, novoAtivo, alvo.id);
+    if (novoNome !== alvo.nome || novoAtivo !== alvo.ativo) {
+      console.log(`👤 Pessoa administrativa #${alvo.id}: ${novoNome !== alvo.nome ? `nome "${alvo.nome}" → "${novoNome}" ` : ""}${novoAtivo !== alvo.ativo ? (novoAtivo ? "reativada " : "desativada ") : ""}por ${req.usuario.login}`);
+    }
+    res.json({ pessoa: listarPessoasAdministrativas().find((p) => p.id === alvo.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    tratarErro("pessoas-administrativas/:id", err, res);
+  }
 });
 
 app.get("/api/carteiras", (req, res) => res.json(prospeccao.listarCarteiras()));

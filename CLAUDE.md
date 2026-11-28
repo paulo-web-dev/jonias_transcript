@@ -764,6 +764,7 @@ abandonado). Fase 1 = carga com fidelidade total:
 | `GET /api/sessao` | Fase 3: `{id, login, nome, papel, pessoa, trocarSenha, escopo: {regionais, ufs, municipios, vazio} \| null}` — base do menu por papel |
 | `POST /api/senha` | `{senhaAtual, senhaNova}` → 401 senha atual errada (conta no rate limit), 400 fraca; grava argon2id, zera `senha_temporaria`, regenera a sessão |
 | `GET/POST /api/usuarios`, `PATCH /api/usuarios/:id`, `POST /api/usuarios/:id/senha-inicial` | admin: lista + consultores; cria (`login` minúsculo, `papel`, `pessoaId` obrigatório para vendedor) com **senha inicial gerada, devolvida uma vez**; PATCH nome/ativo/pessoa/papel (não desativa nem rebaixa a si mesmo; desativar apaga sessões); nova senha inicial |
+| `GET/POST /api/pessoas-administrativas`, `PATCH /api/pessoas-administrativas/:id` | admin (2026-11-28): pessoas `tipo = 'administrativo'` sem migração. POST `{nome}` — o INSERT fixa tipo, flags 0, sem ramal/wallet/crm e **não lê nenhum outro campo** (consultor nunca nasce aqui); nome de 2–80 caracteres, repetido contra a tabela INTEIRA (consultor e canal incluídos, sem acento/caixa) → 400. PATCH `{nome?, ativo?}` só acha administrativo (consultor/canal = 404) e nunca muda o tipo; desativar com item de patrimônio no nome ou usuário ativo → 409 com `itens` (código, nome, status, local, termo), `usuario` e `devolucao` (`/patrimonio#devolver=<id>`) — nada é gravado |
 | `GET /api/carteiras`, `PUT /api/carteiras/:regionalId` | admin: regionais com titular/apoios, contatos e sem consultor; PUT `{titularPessoaId, apoios}` → grava e atribui os sem-consultor ao titular, devolve `{atribuidos}` |
 | `GET /api/prospeccao/gerencial` | admin: por regional — titular, apoios, contatos, telefone válido, sem consultor, trabalhados, nunca tocados, inexistentes, último contato, editados; totais por UF e "sem regional" |
 | `GET /api/prospeccao/cdr?de&ate` | Fase 4: `total`, `classes` (ligações/atendidas/municípios por classe), `regionais` (ligações, atendidas, municípios ligados × com contatos, nunca ligados, fora da carteira, `porConsultor`); admin ainda `ambiguas` (número, ligações, última, UF, municípios com linhas e ids), `desconhecidasPorDdd`, `semRegional`, `porConsultor`; vendedor ainda `nuncaLigados` (municípios da carteira sem ligação no período). Período inválido → 400 |
@@ -1990,6 +1991,25 @@ construídas**. Decisões do usuário (2026-11-18):
   nos 211 do teste 4). Modelo e número da linha vão em campo
   próprio/observação; **senha nunca** — a aba Celulares da planilha antiga
   continua fora.
+- **Pessoa administrativa pela /usuarios (2026-11-28, sem migração; decisões do
+  usuário)**: entradas e saídas do administrativo viravam migração e deploy
+  (quatro entradas e três saídas depois da 44). Seção "Pessoas administrativas"
+  na /usuarios, só admin: cadastrar (nome), corrigir o nome (salva ao sair do
+  campo) e desativar/reativar. **Consultor continua entrando só por migração**
+  (ramal, carteira, cota, faixa): a rota fixa o tipo e não lê outro campo, e o
+  PATCH não acha consultor nem canal. Nome repetido em `pessoas` é recusado
+  (homônimo real se resolve com sobrenome). Desativar é recusado com item de
+  patrimônio no nome ou com usuário ativo, e o bloqueio vira lista de trabalho:
+  itens com código e nome e o botão que abre `/patrimonio#devolver=<id>` (aba
+  Itens filtrada, itens selecionados, devolução aberta; `#pessoa=<id>` só
+  filtra). Inativa some dos seletores de NOVO responsável (`responsaveis()`),
+  mas o filtro de consulta da aba Itens é montado pelos donos dos itens, ativos
+  ou não ("Nome (inativa)"), e a devolução de item de pessoa inativa funciona.
+  Corrigir o nome muda o nome da pessoa nas vias antigas (a via faz JOIN com
+  `pessoas`); o nome de quem assinou (`assinante_nome`) fica como foi. Conferido
+  numa cópia: retrato do comercial (14 blocos) idêntico antes × depois de quatro
+  cadastros, com controle positivo (a mesma pessoa como consultor muda métricas,
+  metas, painel da Rota, TV e feedback).
 - Deploy: a produção está na 42, então sobem 43, 44 e 45 juntas. Backup e
   `conferir` antes (DEPLOY.md); o log tem de mostrar as três linhas de
   migração e a 43 com "antes N, depois N" de `importacoes` iguais.

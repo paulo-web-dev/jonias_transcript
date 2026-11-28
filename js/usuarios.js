@@ -85,7 +85,7 @@ document.getElementById("tabela-usuarios").addEventListener("change", async (ev)
   try {
     await postJson(`/api/usuarios/${tr.dataset.id}`, corpo, "PATCH");
     avisar("Usuário atualizado.");
-    await Promise.all([carregarUsuarios(), carregarCarteiras()]);
+    await Promise.all([carregarUsuarios(), carregarAdm(), carregarCarteiras()]);
   } catch (e) { avisar("⚠ " + e.message, true); await carregarUsuarios(); }
 });
 document.getElementById("tabela-usuarios").addEventListener("click", async (ev) => {
@@ -97,6 +97,81 @@ document.getElementById("tabela-usuarios").addEventListener("click", async (ev) 
     mostrarSenhaInicial(r.login, r.senhaInicial);
     await carregarUsuarios();
   } catch (e) { avisar("⚠ " + e.message, true); }
+});
+
+// ---------- Pessoas administrativas (2026-11-28) ----------
+// Cadastro, correção de nome e desativação sem migração. Consultor não entra
+// por aqui (o servidor fixa o tipo). Desativar bloqueado vira lista de trabalho:
+// os itens no nome da pessoa (código e nome) com o atalho para a devolução.
+
+let adm = [];
+async function chamarApiCompleta(url, corpo, metodo) {
+  const r = await fetch(url, { method: metodo, headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
+  if (r.status === 401) { location.href = "/login"; throw new Error("sessão expirada"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || `erro ${r.status}`), { corpo: j });
+  return j;
+}
+const ROTULO_STATUS_ITEM = { em_uso: "em uso", em_estoque: "em estoque", em_reparo: "em reparo", baixado: "baixado" };
+
+function renderizarAdm() {
+  document.getElementById("chip-adm").textContent = adm.filter((p) => p.ativo).length;
+  document.querySelector("#tabela-adm tbody").innerHTML = adm.map((p) => `<tr class="sem-clique${p.ativo ? "" : " linha-inativa"}" data-id="${p.id}">
+    <td style="text-align:left"><input type="text" class="campo-select adm-nome" value="${escapeHtml(p.nome)}" maxlength="80" title="corrigir o nome: salva ao sair do campo" /></td>
+    <td>${p.ativo ? '<span class="saude-ok">ativa</span>' : '<span class="texto-suave">inativa</span>'}</td>
+    <td style="text-align:left">${p.usuario ? `${escapeHtml(p.usuario)}${p.usuarioAtivo ? "" : ' <span class="texto-suave">(inativo)</span>'}` : '<span class="texto-suave">—</span>'}</td>
+    <td>${p.itens ? `<a href="/patrimonio#pessoa=${p.id}">${inteiro(p.itens)}</a>` : "0"}</td>
+    <td style="text-align:left"><button type="button" class="btn-mini" data-adm-ativo="${p.ativo ? 0 : 1}">${p.ativo ? "desativar" : "reativar"}</button></td>
+  </tr>`).join("") || `<tr class="sem-clique"><td colspan="5" class="texto-suave">Nenhuma pessoa administrativa.</td></tr>`;
+}
+async function carregarAdm() {
+  adm = (await chamarApi("/api/pessoas-administrativas")).pessoas;
+  renderizarAdm();
+}
+function mostrarBloqueio(p, corpo) {
+  const box = document.getElementById("adm-bloqueio");
+  const itens = corpo.itens || [];
+  box.innerHTML = `<strong>${escapeHtml(corpo.error || "Não foi possível desativar.")}</strong>` +
+    (corpo.usuario ? `<p>Usuário <strong>${escapeHtml(corpo.usuario.login)}</strong>: desmarque “Ativo” na tabela de usuários acima.</p>` : "") +
+    (itens.length ? `<p>Itens no nome de ${escapeHtml(p.nome)}:</p><ul class="adm-itens">${itens.map((i) =>
+      `<li><code>${escapeHtml(i.codigo)}</code> ${escapeHtml(i.nome)} <span class="texto-suave">· ${ROTULO_STATUS_ITEM[i.status] || i.status}${i.local ? ` · ${escapeHtml(i.local)}` : ""}${i.comTermo ? " · termo assinado" : " · sem termo"}</span></li>`).join("")}</ul>
+      <p><a class="btn-mini btn-primario" href="${escapeHtml(corpo.devolucao)}">↩ Abrir a devolução desses itens no patrimônio</a>
+      <span class="texto-suave">— depois volte aqui e desative.</span></p>` : "");
+  box.classList.remove("oculto");
+  box.scrollIntoView({ block: "nearest" });
+}
+
+document.getElementById("btn-criar-adm").addEventListener("click", async () => {
+  const campo = document.getElementById("adm-nome");
+  try {
+    const r = await postJson("/api/pessoas-administrativas", { nome: campo.value });
+    campo.value = "";
+    await Promise.all([carregarAdm(), carregarUsuarios()]);
+    avisar(`"${r.pessoa.nome}" cadastrada — já pode ser ligada a um usuário e receber patrimônio.`);
+  } catch (e) { avisar("⚠ " + e.message, true); }
+});
+document.getElementById("adm-nome").addEventListener("keydown", (ev) => { if (ev.key === "Enter") document.getElementById("btn-criar-adm").click(); });
+document.getElementById("tabela-adm").addEventListener("change", async (ev) => {
+  const tr = ev.target.closest("tr[data-id]"); if (!tr || !ev.target.classList.contains("adm-nome")) return;
+  try {
+    const r = await postJson(`/api/pessoas-administrativas/${tr.dataset.id}`, { nome: ev.target.value }, "PATCH");
+    avisar(`Nome salvo: ${r.pessoa.nome}.`);
+    await Promise.all([carregarAdm(), carregarUsuarios()]);
+  } catch (e) { avisar("⚠ " + e.message, true); await carregarAdm(); }
+});
+document.getElementById("tabela-adm").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-adm-ativo]"); if (!b) return;
+  const tr = b.closest("tr[data-id]");
+  const p = adm.find((x) => x.id === Number(tr.dataset.id));
+  document.getElementById("adm-bloqueio").classList.add("oculto");
+  try {
+    await chamarApiCompleta(`/api/pessoas-administrativas/${p.id}`, { ativo: b.dataset.admAtivo === "1" }, "PATCH");
+    avisar(b.dataset.admAtivo === "1" ? `${p.nome} reativada.` : `${p.nome} desativada — sai dos seletores de novo responsável; o histórico fica.`);
+    await Promise.all([carregarAdm(), carregarUsuarios()]);
+  } catch (e) {
+    if (e.corpo && (e.corpo.itens || e.corpo.usuario)) mostrarBloqueio(p, e.corpo);
+    else avisar("⚠ " + e.message, true);
+  }
 });
 
 // ---------- Carteiras ----------
@@ -138,6 +213,6 @@ document.getElementById("btn-sair").addEventListener("click", async () => {
 });
 
 (async () => {
-  try { await Promise.all([carregarUsuarios(), carregarCarteiras()]); }
+  try { await Promise.all([carregarUsuarios(), carregarAdm(), carregarCarteiras()]); }
   catch (e) { avisar("⚠ Não foi possível carregar. (" + e.message + ")", true); }
 })();

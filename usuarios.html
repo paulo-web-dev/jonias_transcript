@@ -45,6 +45,24 @@
       </table>
     </div>
 
+    <h2 class="secao-titulo">Pessoas administrativas <span class="chip" id="chip-adm">—</span></h2>
+    <p class="texto-suave">Quem não é da venda (financeiro, recepção, coordenação…): pode ser responsável por patrimônio e
+      ter usuário <em>patrimonio</em> ou <em>colaborador</em>. Entra sem ramal, sem wallet e fora de ranking, metas, TV e
+      feedback. <strong>Vendedor não entra por aqui</strong> — consultor continua sendo cadastrado por migração (ramal,
+      carteira, cota e faixa). Desativar exige devolver antes os itens que estão no nome da pessoa e desativar o usuário
+      dela; nada do histórico é apagado.</p>
+    <div class="lista-controles usuarios-novo">
+      <input type="text" id="adm-nome" class="campo-select" placeholder="nome (como deve aparecer)" maxlength="80" autocomplete="off" />
+      <button type="button" class="btn-mini btn-primario" id="btn-criar-adm">+ Cadastrar pessoa administrativa</button>
+    </div>
+    <div id="adm-bloqueio" class="conflito-aviso oculto"></div>
+    <div class="tabela-scroll">
+      <table class="tabela-metricas" id="tabela-adm">
+        <thead><tr><th style="text-align:left">Nome</th><th>Ativa</th><th style="text-align:left">Usuário</th><th>Itens de patrimônio</th><th style="text-align:left">Ações</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
     <h2 class="secao-titulo">Carteiras por regional</h2>
     <p class="texto-suave">Cada regional tem no máximo um <strong>titular</strong> e quantos <strong>apoios</strong> quiser; todos veem e
       editam a regional inteira. Ao definir o titular, os contatos <em>sem consultor</em> da regional passam para ele

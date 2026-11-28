@@ -949,6 +949,12 @@ body {
   margin-bottom: 0.8rem;
 }
 .conflito-aviso a { color: var(--acento-2); }
+/* /usuarios: desativar pessoa bloqueado vira lista de trabalho */
+#adm-bloqueio p { margin: 0.4rem 0; }
+#adm-bloqueio .adm-itens { margin: 0.3rem 0 0.6rem 1.2rem; line-height: 1.6; }
+#adm-bloqueio .adm-itens code { font-weight: 700; }
+#adm-bloqueio a.btn-mini { display: inline-block; text-decoration: none; }
+#tabela-adm .adm-nome { width: 100%; max-width: 22rem; }
 
 /* ============ Saúde dos dados ============ */
 

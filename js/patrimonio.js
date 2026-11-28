@@ -37,6 +37,20 @@ async function carregar() {
   preencherFiltros();
   render();
   if (!$("#aba-gerencial").hidden) await carregarGerencial();
+  atalhoDoHash();
+}
+// Atalhos vindos da /usuarios (desativar pessoa bloqueado por itens no nome dela):
+// #pessoa=ID abre a aba Itens filtrada; #devolver=ID também seleciona os itens e
+// abre a devolução. Consumido uma vez (o hash é limpo).
+function atalhoDoHash() {
+  const m = /^#(pessoa|devolver)=(\d+)$/.exec(location.hash);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  const pessoaId = Number(m[2]);
+  const itens = D.itens.filter((i) => i.pessoaId === pessoaId && i.status !== "baixado");
+  irParaItens(null, pessoaId);
+  if (!itens.length) { avisar("Nenhum item no nome dessa pessoa."); return; }
+  if (m[1] === "devolver") { sel.clear(); itens.forEach((i) => sel.add(i.id)); render(); iniciarDevolucao(); }
 }
 
 // ---------- filtros ----------
@@ -45,9 +59,13 @@ function preencherFiltros() {
   const vl = fl.value, vp = fp.value;
   fl.innerHTML = `<option value="">todos os locais</option><option value="-">⚠ sem local</option>` +
     D.locais.map((l) => `<option value="${l.id}">${l.andar}º · ${escapeHtml(l.nome)}${l.ativo ? "" : " (inativo)"}</option>`).join("");
-  const comItens = new Set(D.itens.map((i) => i.pessoaId).filter(Boolean));
+  // Filtro de CONSULTA: quem tem item no nome, ativo ou não (2026-11-28). Os
+  // seletores de NOVO responsável (entrega, transferência) seguem só com ativos.
+  const donos = new Map();
+  for (const i of D.itens) if (i.pessoaId && !donos.has(i.pessoaId)) donos.set(i.pessoaId, { id: i.pessoaId, nome: i.pessoa, ativa: i.pessoaAtiva });
   fp.innerHTML = `<option value="">todos os responsáveis</option><option value="-">⚠ sem responsável</option>` +
-    D.responsaveis.filter((p) => comItens.has(p.id)).map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join("");
+    [...donos.values()].sort((a, b) => b.ativa - a.ativa || a.nome.localeCompare(b.nome, "pt-BR"))
+      .map((p) => `<option value="${p.id}">${escapeHtml(p.nome)}${p.ativa ? "" : " (inativa)"}</option>`).join("");
   fl.value = vl; fp.value = vp;
 }
 let alertaAtivo = null; // "semPessoa" | "semLocal" | "semTermo" | "semConservacao" | "semAssinatura" (os dois últimos vêm da aba Gerencial)
